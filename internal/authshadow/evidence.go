@@ -10,16 +10,17 @@ import (
 // already-resolved identifiers and a simulated decision; it cannot grant or
 // materialize authority.
 type EvidenceEnvelope struct {
-	RequestID      string
-	DecisionID     string
-	OutcomeID      string
-	PolicyRevision PolicyRevision
-	DomainContext  DomainContext
-	Decision       string
-	ReasonCode     string
-	RequestedAt    time.Time
-	DecidedAt      time.Time
-	ObservedAt     time.Time
+	RequestID         string
+	DecisionRequestID string
+	DecisionID        string
+	OutcomeID         string
+	PolicyRevision    PolicyRevision
+	DomainContext     DomainContext
+	Decision          string
+	ReasonCode        string
+	RequestedAt       time.Time
+	DecidedAt         time.Time
+	ObservedAt        time.Time
 }
 
 // RecordSimulatedEnvelope durably writes request, decision, and simulated outcome
@@ -28,6 +29,9 @@ type EvidenceEnvelope struct {
 func RecordSimulatedEnvelope(ctx context.Context, writer *Writer, envelope EvidenceEnvelope) ([]AuditRecord, error) {
 	if writer == nil {
 		return nil, errors.New("shadow audit writer is required")
+	}
+	if envelope.RequestID == "" || envelope.DecisionRequestID != envelope.RequestID {
+		return nil, errors.New("shadow evidence decision request does not match request")
 	}
 	steps := []EventInput{
 		{Kind: EventRequest, EventID: "request:" + envelope.RequestID, RequestID: envelope.RequestID,

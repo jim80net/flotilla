@@ -25,6 +25,9 @@ const (
 	ProbeRegistrySHA256     = "4fb6aff74ed88a47a4829f4299af5939338d1696d9713b0273be44eed16eba0e"
 	SyntheticObjectID       = "fixture://authorization-domains/protected/exact-read-object"
 	ActionRead              = "read"
+	DecisionPermitUnblocked = "permit_unblocked"
+	DecisionPermitException = "permit_exception"
+	DecisionDenyBlocked     = "deny_blocked"
 )
 
 var stableIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$`)
@@ -214,12 +217,18 @@ func (r AuditRecord) validate() error {
 		if r.OutcomeID != "" {
 			return errors.New("decision record carries outcome ID")
 		}
+		if !validDecision(r.Decision) {
+			return errors.New("decision record has unknown simulated outcome")
+		}
 	case EventSimulatedOutcome:
 		if err := validateStableID("decision_id", r.DecisionID); err != nil {
 			return err
 		}
 		if err := validateStableID("outcome_id", r.OutcomeID); err != nil {
 			return err
+		}
+		if !validDecision(r.Decision) {
+			return errors.New("outcome record has unknown simulated decision")
 		}
 	default:
 		return fmt.Errorf("unknown audit event kind %q", r.Kind)
@@ -248,6 +257,15 @@ func (r AuditRecord) validate() error {
 		return errors.New("shadow audit may record simulated non-enforcing evidence only")
 	}
 	return nil
+}
+
+func validDecision(decision string) bool {
+	switch decision {
+	case DecisionPermitUnblocked, DecisionPermitException, DecisionDenyBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r AuditRecord) computedHash() (string, error) {

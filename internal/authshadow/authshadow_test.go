@@ -31,9 +31,24 @@ func fixturePolicy(generation uint64) PolicyRevision {
 
 func fixtureEnvelope(domain string) EvidenceEnvelope {
 	return EvidenceEnvelope{
-		RequestID: "request-fixture-1", DecisionID: "decision-fixture-1", OutcomeID: "outcome-fixture-1",
+		RequestID: "request-fixture-1", DecisionRequestID: "request-fixture-1", DecisionID: "decision-fixture-1", OutcomeID: "outcome-fixture-1",
 		PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext(domain), Decision: "deny_blocked",
 		ReasonCode: "fixture_protected_block", RequestedAt: fixtureTime, DecidedAt: fixtureTime.Add(time.Millisecond), ObservedAt: fixtureTime.Add(2 * time.Millisecond),
+	}
+}
+
+func TestEvidenceEnvelopeRejectsRequestDecisionMismatchBeforeAppend(t *testing.T) {
+	w, err := NewWriter(t.TempDir(), "domain-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := fixtureEnvelope("domain-alpha")
+	envelope.DecisionRequestID = "request-substituted"
+	if _, err := RecordSimulatedEnvelope(context.Background(), w, envelope); err == nil {
+		t.Fatal("request/decision substitution accepted")
+	}
+	if health := w.Verify(context.Background()); health.State != HealthMissing {
+		t.Fatalf("mismatched envelope wrote evidence: %+v", health)
 	}
 }
 
