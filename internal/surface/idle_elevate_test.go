@@ -73,6 +73,18 @@ type elevateStub struct {
 	disp   ComposerDisposition
 }
 
+type rateLimitedElevateStub struct{ elevateStub }
+
+func (rateLimitedElevateStub) RateLimitInstant(string) (bool, RateLimitScope, string) {
+	return true, RateLimitAccountSide, "provider limit"
+}
+
+type executionBlockedElevateStub struct{ elevateStub }
+
+func (executionBlockedElevateStub) ExecutionBlocked(string) (bool, string) {
+	return true, "usage limit"
+}
+
 func (elevateStub) Name() string                               { return "elevate-stub" }
 func (s elevateStub) Submit(string, string) error              { return nil }
 func (s elevateStub) Assess(string) State                      { return s.assess }
@@ -91,6 +103,23 @@ func TestAssessForFleet_ElevatesPromptBlockedComposer557(t *testing.T) {
 	d2 := elevateStub{assess: StateIdle, disp: ComposerCleared}
 	if got := AssessForFleet(d2, "0:0.0"); got != StateIdle {
 		t.Errorf("AssessForFleet(Idle+Cleared) = %v, want idle", got)
+	}
+}
+
+func TestAssessForFleet_ProviderLimitedIsNotIdle986(t *testing.T) {
+	d := rateLimitedElevateStub{elevateStub{assess: StateIdle, disp: ComposerCleared}}
+	if got := AssessForFleet(d, "0:0.0"); got != StateProviderLimited {
+		t.Fatalf("AssessForFleet(provider-limited idle) = %v, want provider-limited", got)
+	}
+	if got := StateProviderLimited.String(); got != "provider-limited" {
+		t.Fatalf("StateProviderLimited.String() = %q", got)
+	}
+}
+
+func TestAssessForFleet_UncooperativeIdleIsProviderLimited986(t *testing.T) {
+	d := executionBlockedElevateStub{elevateStub{assess: StateIdle, disp: ComposerCleared}}
+	if got := AssessForFleet(d, "0:0.0"); got != StateProviderLimited {
+		t.Fatalf("AssessForFleet(uncooperative idle) = %v, want provider-limited", got)
 	}
 }
 

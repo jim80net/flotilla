@@ -227,6 +227,17 @@ func (c codex) ComposerBlockReason(pane string) string {
 	return codexOverlayName(captured)
 }
 
+// ExecutionBlocked reports persistent provider-limit/credit chrome without
+// invoking an interactive usage command. The shared classifier is tail-bounded
+// and rejects ordinary conversational mentions of rate limits.
+func (c codex) ExecutionBlocked(pane string) (bool, string) {
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		return false, ""
+	}
+	return deliver.SessionUncooperative(captured)
+}
+
 func codexIsLoginScreen(tail string) bool {
 	return strings.Contains(tail, codexWelcome) &&
 		(strings.Contains(tail, codexSignInChatGPT) ||

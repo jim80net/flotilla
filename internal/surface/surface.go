@@ -19,6 +19,7 @@ const (
 	StateAwaitingInput          // blocked on a prompt for input (reserved; per-surface)
 	StateAwaitingApproval       // blocked on a tool/permission approval (reserved; per-surface)
 	StateErrored                // surfaced an error state (reserved; per-surface)
+	StateProviderLimited        // idle composer is present, but provider chrome says no turn can execute
 )
 
 // String renders a State as a short lowercase label for logs and the
@@ -37,6 +38,8 @@ func (s State) String() string {
 		return "awaiting-approval"
 	case StateErrored:
 		return "errored"
+	case StateProviderLimited:
+		return "provider-limited"
 	default:
 		return "unknown"
 	}
@@ -163,6 +166,13 @@ type ComposerStateProbe interface {
 // fail-closed gate; callers must never use the reason to weaken the gate.
 type ComposerBlockReasonProbe interface {
 	ComposerBlockReason(pane string) string
+}
+
+// ExecutionBlockProbe is an optional, read-only status capability. It detects
+// persistent provider chrome that leaves an idle composer visible even though a
+// submitted turn cannot execute. It must inspect existing pane state only.
+type ExecutionBlockProbe interface {
+	ExecutionBlocked(pane string) (blocked bool, reason string)
 }
 
 // RateLimitProbe is declared in ratelimit.go (OPTIONAL #204).

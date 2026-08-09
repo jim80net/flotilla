@@ -1,6 +1,7 @@
 package dash
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,13 @@ import (
 
 	"github.com/dop251/goja"
 )
+
+type providerLimitFixture struct {
+	Agents []struct {
+		State       string `json:"state"`
+		LoopPosture string `json:"loop_posture"`
+	} `json:"agents"`
+}
 
 func TestOperatorVisualState744(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("assets", "dash.js"))
@@ -40,5 +48,25 @@ func TestOperatorVisualState744(t *testing.T) {
 		if err != nil || got.String() != tc.want {
 			t.Errorf("operatorVisualState(%q, %q) = %q, %v; want %q", tc.state, tc.posture, got, err, tc.want)
 		}
+	}
+}
+
+// This checked-in status fixture crosses the persisted read-model/UI boundary:
+// provider exhaustion must never regress to the incident's idle · available label.
+func TestProviderLimitedStateFixtureCannotRenderIdleAvailable986(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "provider-limited-status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture providerLimitFixture
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Agents) != 1 {
+		t.Fatalf("fixture agents = %d", len(fixture.Agents))
+	}
+	label := fixture.Agents[0].State + " · " + fixture.Agents[0].LoopPosture
+	if label == "idle · available" || label != "provider-limited · blocked" {
+		t.Fatalf("blocked fixture rendered %q", label)
 	}
 }

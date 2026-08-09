@@ -95,6 +95,19 @@ func AssessForFleet(d Driver, pane string) State {
 	if st != StateIdle {
 		return st
 	}
+	if probe, ok := d.(ExecutionBlockProbe); ok {
+		if blocked, _ := probe.ExecutionBlocked(pane); blocked {
+			return StateProviderLimited
+		}
+	}
+	// A ready-looking composer beneath provider-limit chrome is physically idle
+	// but cannot execute a turn. Publish that distinction from the same read-only
+	// pane probe used by failover; never let status advertise it as available.
+	if probe, ok := RateLimitInstantSupport(d); ok {
+		if limited, _, _ := probe.RateLimitInstant(pane); limited {
+			return StateProviderLimited
+		}
+	}
 	if probe, ok := d.(ComposerStateProbe); ok {
 		st = ElevateIdle(st, probe.ComposerState(pane))
 		if st != StateIdle {

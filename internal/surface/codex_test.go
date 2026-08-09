@@ -475,3 +475,13 @@ func TestCodexReplyAfterBindsPaneProcess(t *testing.T) {
 		t.Fatalf("ReplyAfter = (%q, %v, %v)", got, found, err)
 	}
 }
+
+func TestCodexExecutionBlockedUsesPassivePaneChrome986(t *testing.T) {
+	c := codex{capturePane: func(string) (string, error) {
+		return "  You have reached your usage limit\n  Try again later\n  › \n", nil
+	}}
+	blocked, reason := c.ExecutionBlocked("flotilla:5.0")
+	if !blocked || !strings.Contains(strings.ToLower(reason), "usage limit") {
+		t.Fatalf("ExecutionBlocked = (%v, %q), want usage-limit block", blocked, reason)
+	}
+}
