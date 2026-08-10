@@ -41,22 +41,23 @@ func TestParseBusy(t *testing.T) {
 		// claude-code v2.1.178 (2026-06-16). The OLD `\(\d+s ·`-only regex returned FALSE for
 		// all of these, so a short turn (or the first seconds of any turn) read as idle and a
 		// confirmed delivery false-negatived. These are the regression cases.
-		{"early spinner, no counter", "✻ Cooking…", true},
-		{"early spinner, middot glyph frame", "· Cooking…", true},
-		{"early spinner, sparkle glyph + long gerund", "✢ Quantumizing…", true},
-		{"early spinner, hyphenated gerund", "✶ Sock-hopping…", true},
+		{"early spinner, no counter", "✻ Cooking…\n❯ ", true},
+		{"early spinner, middot glyph frame", "· Cooking…\n❯ ", true},
+		{"early spinner, sparkle glyph + long gerund", "✢ Quantumizing…\n❯ ", true},
+		{"early spinner, hyphenated gerund", "✶ Sock-hopping…\n❯ ", true},
 		// OCR-F2: the verb is token-based (not [A-Z][a-z]+), so apostrophe gerunds — real
 		// claude-code spinner verbs — match in the EARLY (counterless) phase too, rather than
 		// false-negativing like the old narrow class would.
-		{"early spinner, apostrophe gerund", "✻ Mullin'…", true},
+		{"early spinner, apostrophe gerund", "✻ Mullin'…\n❯ ", true},
 		// --- COUNTER phase: same gerund+"…" plus the elapsed counter.
-		{"counter spinner (seconds)", "● 333\n✻ Frosting… (3s · ↓ 25 tokens · thinking)\n", true},
-		{"counter spinner (live capture)", "✽ Scurrying… (53s · ↓ 3.4k tokens)", true},
+		{"counter spinner (seconds)", "● 333\n✻ Frosting… (3s · ↓ 25 tokens · thinking)\n❯ ", true},
+		{"counter spinner (live capture)", "✽ Scurrying… (53s · ↓ 3.4k tokens)\n❯ ", true},
 		// --- MINUTE-format long turn: "(3m 14s ·" never matched the old `\(\d+s ·`; the
 		// gerund+"…" marker catches it (and a >59s turn no longer reads as idle).
-		{"minute-format long turn", "✻ Deliberating… (3m 14s · almost done thinking with high effort)", true},
-		// --- legacy hint (current claude-code does not render it, kept as a cheap secondary).
-		{"esc to interrupt", "doing work...\nesc to interrupt", true},
+		{"minute-format long turn", "✻ Deliberating… (3m 14s · almost done thinking with high effort)\n❯ ", true},
+		// --- Unsupported legacy prose is not a render marker, even beside composer.
+		{"legacy hint beside composer", "esc to interrupt\n❯ ", false},
+		{"quoted legacy hint in visible tail", "● Duty note: monitor panes that show esc to interrupt\n● acknowledged\n❯ ", false},
 
 		// --- Idle / completed states must read as NOT busy.
 		{"completed-turn summary (Worked for)", "● answer here\n✻ Worked for 8m 33s", false},
@@ -75,11 +76,10 @@ func TestParseBusy(t *testing.T) {
 		// leading glyph, and "❯" is excluded.
 		{"composer line containing a counter substring", "❯ it took (3s · earlier)\n  ⏵⏵ auto mode on", false},
 
-		// An old spinner line scrolled up in history must NOT false-positive: only the live
-		// tail (last `tail` lines) is scanned, line by line. The blank-line count here is
-		// LOAD-BEARING — it pushes the spinner (lines 0-1) past the tail=8 window — so do not
-		// trim it when editing this fixture.
+		// An old spinner line scrolled into history must NOT false-positive: only the row
+		// immediately above the structurally located composer carries live provenance.
 		{"stale spinner in scrollback", "✻ Frosting… (3s · ↓ 25 tokens)\n● done\n\n\n\n\n\n\n❯ \n  ⏵⏵ auto mode on", false},
+		{"spinner in history but not composer-adjacent", "✻ Frosting… (3s · ↓ 25 tokens)\n● quoted follow-up\n❯ ", false},
 	}
 	for _, c := range cases {
 		if got := ParseBusy(c.captured); got != c.busy {
