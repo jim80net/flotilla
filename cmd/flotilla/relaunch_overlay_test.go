@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -10,6 +13,38 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
+
+func TestCommandEntryPointsCallSharedRelaunchReconciler(t *testing.T) {
+	for _, path := range []struct {
+		name, file string
+	}{
+		{name: "switch", file: "switch.go"},
+		{name: "recycle", file: "recycle.go"},
+		{name: "resume", file: "resume.go"},
+	} {
+		t.Run(path.name, func(t *testing.T) {
+			parsed, err := parser.ParseFile(token.NewFileSet(), path.file, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := call.Fun.(*ast.Ident)
+				if ok && ident.Name == "reconcileRelaunchOverlay" {
+					calls++
+				}
+				return true
+			})
+			if calls != 1 {
+				t.Fatalf("%s production reconciliation calls = %d, want exactly 1", path.file, calls)
+			}
+		})
+	}
+}
 
 func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
