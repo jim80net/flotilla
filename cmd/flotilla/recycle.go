@@ -63,6 +63,7 @@ type recycleOps struct {
 	readMarker   func(target string) (string, error)                // deliver.ReadMarker
 	stampGen     func(target, token string) error                   // deliver.StampRecycleGen
 	readGen      func(target string) (string, error)                // deliver.ReadRecycleGen
+	reconcile    func(agent, slot, surface string) error            // workspace.ReconcileActiveOverlay
 	lock         func(target string) (release func(), err error)    // AcquirePaneTxn → Release
 	sleep        func(time.Duration)
 	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
@@ -99,6 +100,7 @@ func (n worktreeCloseNote) prose() string {
 // and the designated path are precomputed by cmdRecycle from the driver's RecycleBridge.
 type recyclePlan struct {
 	agent, key, cwd, launch   string
+	slot, selectedSurface     string
 	token, designatedPath     string
 	handoffText, takeoverText string
 	ownPane                   string // $TMUX_PANE — the command's own pane (canonical self-recycle compare)
@@ -275,6 +277,11 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 	if err := ops.stampGen(target, p.token); err != nil {
 		return "", wtNote, fmt.Errorf("phase 3: stamping the recycle generation for %q failed: %w", p.agent, err)
+	}
+	if ops.reconcile != nil {
+		if err := ops.reconcile(p.agent, p.slot, p.selectedSurface); err != nil {
+			return "", wtNote, fmt.Errorf("phase 3: %q relaunched successfully but active-harness reconciliation failed: %w", p.agent, err)
+		}
 	}
 
 	// PHASE 4 — takeover (point the fresh, clean-context session at the bridge, imperatively).
@@ -510,10 +517,11 @@ func cmdRecycle(args []string) error {
 	} else if warn != "" {
 		fmt.Fprintln(os.Stderr, "flotilla: "+warn)
 	}
-	recipe, err := workspace.ResolveRecipe(agentName, flat)
+	selection, err := workspace.ResolvePrimarySelection(agentName, flat, agent.Surface)
 	if err != nil {
 		return err
 	}
+	recipe := selection.Recipe
 	// Resolve cwd to its realpath so the durability check's under-cwd validation
 	// (filepath.Rel of cwd vs the designated handoff path) cannot break under a symlinked
 	// checkout (the designated path is joined onto cwd).
@@ -567,6 +575,7 @@ func cmdRecycle(args []string) error {
 		designated := bridge.HandoffPath(recipe.Cwd, token)
 		plan := recyclePlan{
 			agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
+			slot: selection.Slot, selectedSurface: selection.Surface,
 			token: token, designatedPath: designated,
 			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
 			ownPane: os.Getenv("TMUX_PANE"), minHandoffBytes: defaultMinHandoff,
@@ -610,6 +619,7 @@ func cmdRecycle(args []string) error {
 		readMarker:   deliver.ReadMarker,
 		stampGen:     deliver.StampRecycleGen,
 		readGen:      deliver.ReadRecycleGen,
+		reconcile:    workspace.ReconcileActiveOverlay,
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {
@@ -647,6 +657,7 @@ func cmdRecycle(args []string) error {
 		designated := bridge.HandoffPath(recipe.Cwd, token)
 		plan = recyclePlan{
 			agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
+			slot: selection.Slot, selectedSurface: selection.Surface,
 			token: token, designatedPath: designated,
 			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
 			ownPane:         os.Getenv("TMUX_PANE"),
