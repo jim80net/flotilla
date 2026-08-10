@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -630,10 +631,10 @@ func ensureDeliveryID(j *Job) {
 		return
 	}
 	if j.MessageID != "" {
-		j.DeliveryID = deliveryIdentity("job", string(j.Kind), j.Sender, j.MessageID)
+		j.DeliveryID = deliveryidentity.Encode("job", string(j.Kind), j.Sender, j.MessageID)
 		return
 	}
-	j.DeliveryID = deliveryIdentity("watch-sequence", fmt.Sprint(deliverySequence.Add(1)))
+	j.DeliveryID = deliveryidentity.Encode("watch-sequence", fmt.Sprint(deliverySequence.Add(1)))
 }
 
 // HasPendingRelayFor reports whether a KindRelay for agent is queued or in-flight (#523).

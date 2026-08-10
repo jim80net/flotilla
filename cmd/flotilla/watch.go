@@ -21,6 +21,7 @@ import (
 	"github.com/jim80net/flotilla/internal/decisionbrief"
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 	"github.com/jim80net/flotilla/internal/frontier"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
@@ -312,7 +313,7 @@ func cmdWatch(args []string) error {
 	}
 	legacySend := func(send watch.IdentifiedSendFunc) watch.SendFunc {
 		return func(agent, message string) error {
-			return send(agent, message, watch.NewDirectDeliveryIdentity())
+			return send(agent, message, deliveryidentity.New("watch-direct"))
 		}
 	}
 	plainSend := mkSend(confirm.SubmitDelivery)

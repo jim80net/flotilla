@@ -6,8 +6,9 @@ import (
 	"log"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 )
 
 // Confirmed delivery turns "the tmux keystrokes ran" into "a turn started." The relay
@@ -93,7 +94,6 @@ type pendingDraftTracker struct {
 }
 
 var processPendingDrafts = pendingDraftTracker{since: make(map[pendingDraftKey]time.Time)}
-var unkeyedDeliverySequence atomic.Uint64
 
 func (p *pendingDraftTracker) observe(key pendingDraftKey, now time.Time) time.Time {
 	p.mu.Lock()
@@ -205,7 +205,7 @@ const (
 // retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
 // read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
-	return c.SubmitDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
+	return c.SubmitDelivery(d, pane, text, deliveryidentity.New("surface-submit"))
 }
 
 // SubmitDelivery is Submit with a stable identity that must be retained across retries of the
@@ -219,7 +219,7 @@ func (c Confirm) SubmitDelivery(d Driver, pane, text, deliveryID string) error {
 // A Working pane must expose a positively cleared main composer; queued/pending/overlay or
 // undetermined composers fail closed before paste. Confirmation after paste is identical to Submit.
 func (c Confirm) SubmitInterrupt(d Driver, pane, text string) error {
-	return c.SubmitInterruptDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
+	return c.SubmitInterruptDelivery(d, pane, text, deliveryidentity.New("surface-interrupt"))
 }
 
 // SubmitInterruptDelivery is SubmitInterrupt with a stable queued-delivery identity.
@@ -440,7 +440,7 @@ func composerBlockReason(d Driver, pane string) string {
 // every path, so a body that "just submitted (cleared)" can never be mistaken for "recovered → re-
 // send" — a double-deliver is impossible by construction.
 func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
-	return c.SubmitWithSelfHealDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
+	return c.SubmitWithSelfHealDelivery(d, pane, text, deliveryidentity.New("surface-self-heal"))
 }
 
 // SubmitWithSelfHealDelivery is SubmitWithSelfHeal with a stable queued-delivery identity.
