@@ -294,11 +294,11 @@ func cmdWatch(args []string) error {
 	// submit and its Enter-only retry / self-heal.
 	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
 		return func(agent, message string) error {
-			drv, ok := surface.Get(agentSurface(cfg, agent))
-			if !ok {
-				return fmt.Errorf("unknown surface for agent %q", agent)
-			}
 			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+			if err != nil {
+				return err
+			}
+			drv, err := resolveWatchSendDriver(agent, agentSurface(cfg, agent), pane, deliver.PaneCommand, log.Printf)
 			if err != nil {
 				return err
 			}
@@ -2384,6 +2384,21 @@ func agentSurface(cfg *roster.Config, name string) string {
 		return a.Surface
 	}
 	return ""
+}
+
+// resolveWatchSendDriver applies the same live-harness-wins policy used by result reads and
+// recycle before watch submits to a pane. A readable but stale active-harness overlay must not
+// select a driver whose composer probe cannot classify the process actually running in the pane.
+func resolveWatchSendDriver(agent, configuredSurface, pane string, paneCommand func(string) (string, error), logf func(string, ...any)) (surface.Driver, error) {
+	drv, liveSurface, drift, err := surface.ResolveDriver(configuredSurface, pane, paneCommand)
+	if err != nil {
+		return nil, fmt.Errorf("resolve delivery surface for agent %q: %w", agent, err)
+	}
+	if drift && logf != nil {
+		logf("flotilla watch: delivery drift — %s roster/overlay surface is %q but pane runs %q; delivering with live harness",
+			agent, effectiveSurface(configuredSurface), liveSurface)
+	}
+	return drv, nil
 }
 
 // adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval
