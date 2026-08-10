@@ -127,7 +127,7 @@ func cmdResume(args []string) error {
 	}
 
 	session, window := launch.ResumeTarget(recipe, agentName)
-	ops := resumeOps{
+	ops := newResumeOps(resumeOpsLeaves{
 		resolve:    deliver.Resolve,
 		assess:     drv.Assess,
 		respawn:    deliver.RespawnPane,
@@ -137,10 +137,7 @@ func cmdResume(args []string) error {
 		newSession: deliver.NewSession,
 		newWindow:  deliver.NewWindow,
 		tag:        deliver.TagPane,
-		reconcile: func(relaunchAgent, target, slot, selectedSurface string) error {
-			return reconcileRelaunchOverlay(relaunchAgent, target, slot, selection.Recipe, agent.Surface, workspace.ActiveOverlay{}, deliver.PaneCommand)
-		},
-	}
+	}, selection.Recipe, agent.Surface, deliver.PaneCommand)
 	// Pre-seed codex directory trust for the desk cwd (worktree-aware) before
 	// any launch branch, so a codex harness never boots into the interactive
 	// first-run trust menu a remote coordinator cannot answer. Wired through the

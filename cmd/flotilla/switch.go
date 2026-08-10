@@ -876,7 +876,7 @@ func cmdSwitch(args []string) error {
 	// bool needs no synchronization.
 	relaunched := false
 
-	ops := switchOps{
+	ops := newSwitchOps(switchOpsLeaves{
 		resolve: deliver.Resolve,
 		paneID:  deliver.PaneID,
 		inMode:  deliver.PaneInMode,
@@ -909,15 +909,6 @@ func cmdSwitch(args []string) error {
 			return txn.Release, nil
 		},
 		recordPhase: recordPhase,
-		writeOverlay: func(target string) error {
-			return reconcileRelaunchOverlay(agentName, target, toSlot.Name, chain, agent.Surface, workspace.ActiveOverlay{
-				Provider:       toSlot.Provider,
-				SubscriptionID: toSlot.SubscriptionID,
-				SwitchedAt:     time.Now().UTC().Format(time.RFC3339),
-				SwitchToken:    token,
-				Reason:         reason,
-			}, deliver.PaneCommand)
-		},
 		writeBundle: func() error {
 			return writeContinuityBundle(bundlePath, continuityBundle{
 				BundleVersion:  switchBundleVersion,
@@ -942,7 +933,7 @@ func cmdSwitch(args []string) error {
 			})
 		},
 		sleep: time.Sleep,
-	}
+	}, agentName, toSlot.Name, chain, agent.Surface, workspace.ActiveOverlay{Provider: toSlot.Provider, SubscriptionID: toSlot.SubscriptionID, SwitchedAt: time.Now().UTC().Format(time.RFC3339), SwitchToken: token, Reason: reason}, deliver.PaneCommand)
 	if surface.SelfHealEnabled() {
 		ops.selfHeal = func(target string) { confirmSubmit.Heal(toDrv, target) }
 	}

@@ -603,7 +603,7 @@ func cmdRecycle(args []string) error {
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
-	ops := recycleOps{
+	ops := newRecycleOps(recycleOpsLeaves{
 		resolve:      deliver.Resolve,
 		paneID:       deliver.PaneID,
 		inMode:       deliver.PaneInMode,
@@ -619,9 +619,6 @@ func cmdRecycle(args []string) error {
 		readMarker:   deliver.ReadMarker,
 		stampGen:     deliver.StampRecycleGen,
 		readGen:      deliver.ReadRecycleGen,
-		reconcile: func(relaunchAgent, target, slot, selectedSurface string) error {
-			return reconcileRelaunchOverlay(relaunchAgent, target, slot, selection.Recipe, agent.Surface, workspace.ActiveOverlay{}, deliver.PaneCommand)
-		},
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {
@@ -636,7 +633,7 @@ func cmdRecycle(args []string) error {
 		answerMenu:     deliver.SendMenuChoice,
 		countDirty:     deliver.CountUncommitted,
 		rotate:         func(target string) error { return surface.RotateContext(drv, target) },
-	}
+	}, selection.Recipe, agent.Surface, deliver.PaneCommand)
 	// Self-heal is DEFAULT-ON for recycle close polls when FLOTILLA_SELF_HEAL is set;
 	// also enable for close-poll overlay healing when SendCtrlC is available (#436).
 	if surface.SelfHealEnabled() {

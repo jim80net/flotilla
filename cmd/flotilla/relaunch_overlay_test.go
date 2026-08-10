@@ -14,13 +14,23 @@ import (
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
+func resumeTestLeaves(o resumeOps) resumeOpsLeaves {
+	return resumeOpsLeaves{resolve: o.resolve, assess: o.assess, respawn: o.respawn, readMarker: o.readMarker, killPane: o.killPane, hasSession: o.hasSession, newSession: o.newSession, newWindow: o.newWindow, tag: o.tag, preLaunch: o.preLaunch}
+}
+func recycleTestLeaves(o recycleOps) recycleOpsLeaves {
+	return recycleOpsLeaves{resolve: o.resolve, paneID: o.paneID, inMode: o.inMode, assess: o.assess, composer: o.composer, absent: o.absent, durable: o.durable, deliver: o.deliver, closeFn: o.closeFn, remainOnExit: o.remainOnExit, paneDead: o.paneDead, selfHeal: o.selfHeal, respawn: o.respawn, readMarker: o.readMarker, stampGen: o.stampGen, readGen: o.readGen, lock: o.lock, sleep: o.sleep, rotate: o.rotate, cwd: o.cwd, removeWorktree: o.removeWorktree, capturePane: o.capturePane, answerMenu: o.answerMenu, countDirty: o.countDirty}
+}
+func switchTestLeaves(o switchOps) switchOpsLeaves {
+	return switchOpsLeaves{resolve: o.resolve, paneID: o.paneID, inMode: o.inMode, assess: o.assess, composer: o.composer, absent: o.absent, durable: o.durable, deliver: o.deliver, closeFn: o.closeFn, remainOnExit: o.remainOnExit, paneDead: o.paneDead, selfHeal: o.selfHeal, respawn: o.respawn, readMarker: o.readMarker, stampGen: o.stampGen, readGen: o.readGen, lock: o.lock, recordPhase: o.recordPhase, writeBundle: o.writeBundle, sleep: o.sleep}
+}
+
 func TestCommandEntryPointsCallSharedRelaunchReconciler(t *testing.T) {
 	for _, path := range []struct {
-		name, file string
+		name, file, constructor string
 	}{
-		{name: "switch", file: "switch.go"},
-		{name: "recycle", file: "recycle.go"},
-		{name: "resume", file: "resume.go"},
+		{name: "switch", file: "switch.go", constructor: "newSwitchOps"},
+		{name: "recycle", file: "recycle.go", constructor: "newRecycleOps"},
+		{name: "resume", file: "resume.go", constructor: "newResumeOps"},
 	} {
 		t.Run(path.name, func(t *testing.T) {
 			parsed, err := parser.ParseFile(token.NewFileSet(), path.file, nil, 0)
@@ -34,7 +44,7 @@ func TestCommandEntryPointsCallSharedRelaunchReconciler(t *testing.T) {
 					return true
 				}
 				ident, ok := call.Fun.(*ast.Ident)
-				if ok && ident.Name == "reconcileRelaunchOverlay" {
+				if ok && ident.Name == path.constructor {
 					calls++
 				}
 				return true
@@ -59,10 +69,7 @@ func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T
 	}{
 		{name: "switch", run: func(agent string) error {
 			r := happySwitch()
-			ops := fakeSwitchOps(r)
-			ops.writeOverlay = func(target string) error {
-				return reconcileRelaunchOverlay(agent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{SwitchToken: "token"}, func(string) (string, error) { return "codex", nil })
-			}
+			ops := newSwitchOps(switchTestLeaves(fakeSwitchOps(r)), agent, "fallback-0", chain, "codex", workspace.ActiveOverlay{SwitchToken: "token"}, func(string) (string, error) { return "codex", nil })
 			plan := testSwitchPlan()
 			plan.agent = agent
 			_, err := runSwitch(ops, plan)
@@ -70,10 +77,7 @@ func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T
 		}},
 		{name: "recycle", run: func(agent string) error {
 			r := happyRec()
-			ops := fakeRecycleOps(r)
-			ops.reconcile = func(relaunchAgent, target, _, _ string) error {
-				return reconcileRelaunchOverlay(relaunchAgent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{}, func(string) (string, error) { return "codex", nil })
-			}
+			ops := newRecycleOps(recycleTestLeaves(fakeRecycleOps(r)), chain, "codex", func(string) (string, error) { return "codex", nil })
 			plan := testPlan()
 			plan.agent = agent
 			plan.slot = "fallback-0"
@@ -84,10 +88,7 @@ func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T
 		{name: "resume", run: func(agent string) error {
 			plan := resumePlan{agent: agent, key: agent, cwd: "/work/desk", launch: "grok", session: "flotilla", window: agent, slot: "fallback-0", selectedSurface: "grok"}
 			rec := &resumeRec{}
-			ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, agent, false)
-			ops.reconcile = func(relaunchAgent, target, _, _ string) error {
-				return reconcileRelaunchOverlay(relaunchAgent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{}, func(string) (string, error) { return "codex", nil })
-			}
+			ops := newResumeOps(resumeTestLeaves(fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, agent, false)), chain, "codex", func(string) (string, error) { return "codex", nil })
 			_, err := runResume(ops, plan)
 			return err
 		}},
