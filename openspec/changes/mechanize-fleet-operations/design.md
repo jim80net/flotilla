@@ -45,7 +45,9 @@ Launch migration applies the same prerequisite independently: the candidate rost
 
 **Rationale:** treating first install as an irrevocable fork prevents shipped safety corrections from reaching existing fleets, while unconditional replacement destroys legitimate local doctrine. Version/digest-aware refresh preserves both product responsibility and operator edits, and turns the ambiguity into an inspectable lifecycle rather than an implicit ownership transfer.
 
-Existing installations without recorded packaged version/digest migrate conservatively. If local bytes match a known historical packaged digest, migration may bind that known version and treat the file as unmodified. Otherwise provenance is unknown: migration preserves local bytes, stages the current packaged candidate, and requires the same explicit keep-local, accept-packaged, or merge resolution. Unknown provenance is never inferred to mean unmodified.
+Existing installations without recorded packaged version/digest migrate conservatively. Historical qualification comes from one closed catalog shipped inside each product release, versioned with that release, owned by the product's release maintainers, and authenticated by the product release-signing identity. Catalog entries bind asset identity, packaged version, and content digest. The catalog changes only through a newly signed product release; runtime files, local configuration, installed bytes, caches, mirrors, and operator-supplied metadata cannot add or override entries.
+
+If local bytes match exactly one entry in the authenticated catalog, migration may bind that asset/version and treat the file as unmodified. If the catalog is absent, cannot be authenticated, contains multiple qualifying entries for the bytes/asset, or has no match, provenance remains unknown: migration preserves local bytes, stages the current packaged candidate, and requires the same explicit keep-local, accept-packaged, or merge resolution. Locally supplied or cache-derived digest claims are rejected as qualification sources and recorded as such; unknown or ambiguous provenance is never inferred to mean unmodified.
 
 ## Area 1 — span computation
 

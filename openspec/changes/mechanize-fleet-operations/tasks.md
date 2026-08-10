@@ -69,8 +69,10 @@
 - [ ] 8.1 Add packaged version/digest metadata and installed-origin records for whole-file doctrine assets.
 - [ ] 8.2 Atomically refresh an unmodified prior packaged asset to a newer version.
 - [ ] 8.3 Detect local edits, stage the packaged candidate, and implement explicit keep-local, accept-packaged, and merge resolutions without silent overwrite.
-- [ ] 8.4 Migrate metadata-less installations by binding exact known historical package digests as unmodified and otherwise preserving local bytes pending explicit resolution.
-- [ ] 8.5 Persist resolution provenance and surface continuing drift; test known historical matches, unknown provenance, all three conflict choices, interrupted writes, and repeated upgrades.
+- [ ] 8.4 Ship a closed, versioned historical digest catalog owned by release maintainers and authenticated by the product release-signing identity; bind each entry to asset, packaged version, and digest, and update it only through authenticated releases.
+- [ ] 8.5 Migrate metadata-less installations only on one exact authoritative catalog match; preserve local bytes on no match, multiple matches, catalog absence, or catalog authentication failure.
+- [ ] 8.6 Reject runtime, local, cache, mirror, installed-file, and operator-supplied digest metadata as historical qualification sources; add an explicit negative control proving such metadata cannot enable automatic refresh.
+- [ ] 8.7 Persist resolution provenance and surface continuing drift; test authoritative single matches, no/multiple matches, unavailable/unauthenticated catalog, all three conflict choices, interrupted writes, and repeated upgrades.
 
 ## 9. Integration and release gate
 
