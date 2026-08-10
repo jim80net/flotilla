@@ -76,6 +76,21 @@ func TestInjectorHasPendingRelayFor(t *testing.T) {
 	}
 }
 
+func TestDeliveryIdentityStableAcrossRetryAndDistinctAcrossSameBodyJobs(t *testing.T) {
+	a := Job{Kind: KindRelay, MessageID: "message-a", Message: "identical body"}
+	ensureDeliveryID(&a)
+	retry := a
+	ensureDeliveryID(&retry)
+	b := Job{Kind: KindRelay, MessageID: "message-b", Message: "identical body"}
+	ensureDeliveryID(&b)
+	if a.DeliveryID == "" || retry.DeliveryID != a.DeliveryID {
+		t.Fatalf("retry identity changed: first=%q retry=%q", a.DeliveryID, retry.DeliveryID)
+	}
+	if b.DeliveryID == a.DeliveryID {
+		t.Fatalf("distinct same-body jobs aliased identity %q", a.DeliveryID)
+	}
+}
+
 func TestInjectorHasPendingRelayForClearsAfterTransientRetry(t *testing.T) {
 	var attempts atomic.Int32
 	in := NewInjector(func(string, string) error {

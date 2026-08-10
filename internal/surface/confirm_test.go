@@ -36,8 +36,9 @@ func (s *confirmStub) Assess(string) State {
 // is the caller's policy, so there is nothing to record here.
 func newConfirm(enter *int) Confirm {
 	return Confirm{
-		SendEnter: func(string) error { *enter++; return nil },
-		Sleep:     func(time.Duration) {},
+		SendEnter:     func(string) error { *enter++; return nil },
+		Sleep:         func(time.Duration) {},
+		pendingDrafts: &pendingDraftTracker{since: make(map[pendingDraftKey]time.Time)},
 	}
 }
 
@@ -429,6 +430,116 @@ func TestConfirmSubmitGateRefusesListNav(t *testing.T) {
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if !errors.Is(err, ErrPanelBlocked) || d.submitCalls != 0 {
 		t.Errorf("err=%v Submit=%d, want ErrPanelBlocked + Submit=0", err, d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitGateDefersFreshIdlePendingDraftBeforePaste(t *testing.T) {
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: []ComposerDisposition{ComposerPending}}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "queued delivery")
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy defer", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want zero keystrokes into a human draft", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGatePendingHoldUsesFirstObservationAndExpires(t *testing.T) {
+	enter := 0
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	c := newConfirm(&enter)
+	c.Now = func() time.Time { return now }
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq: []ComposerDisposition{
+			ComposerPending, // first observation
+			ComposerPending, // retry before bound: must not reset the clock
+			ComposerPending, // retry at bound: proceed
+			ComposerCleared, ComposerCleared,
+		},
+	}
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("fresh pending err = %v, want ErrBusy", err)
+	}
+	now = now.Add(pendingDraftHold - time.Second)
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("pre-bound pending err = %v, want ErrBusy", err)
+	}
+	now = now.Add(time.Second)
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); err != nil {
+		t.Fatalf("pending at hold bound: %v", err)
+	}
+	if d.submitCalls != 1 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want one delivery after bounded hold", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGateDistinctSameBodyDeliveryGetsFreshHold(t *testing.T) {
+	enter := 0
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	c := newConfirm(&enter)
+	c.Now = func() time.Time { return now }
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerPending},
+	}
+	if err := c.SubmitDelivery(d, "0:0.0", "identical body", "delivery-a"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("delivery A err = %v, want ErrBusy", err)
+	}
+	now = now.Add(pendingDraftHold)
+	if err := c.SubmitDelivery(d, "0:0.0", "identical body", "delivery-b"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("fresh delivery B inherited A clock: err=%v, want ErrBusy", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, fresh same-body delivery bypassed hold", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGatePendingClearsBeforeBoundThenDelivers(t *testing.T) {
+	enter := 0
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	c := newConfirm(&enter)
+	c.Now = func() time.Time { return now }
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerPending, ComposerCleared, ComposerCleared, ComposerCleared},
+	}
+	if err := c.SubmitDelivery(d, "0:0.0", "clearing body", "delivery-clear"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("fresh pending err = %v, want ErrBusy", err)
+	}
+	now = now.Add(time.Minute)
+	if err := c.SubmitDelivery(d, "0:0.0", "clearing body", "delivery-clear"); err != nil {
+		t.Fatalf("cleared before bound: %v", err)
+	}
+	if d.submitCalls != 1 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want normal delivery after draft clears", d.submitCalls, enter)
+	}
+}
+
+func TestSubmitInterruptGateStillRefusesWorkingPendingBeforePaste(t *testing.T) {
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateWorking}, stateSeq: []ComposerDisposition{ComposerPending}}
+	err := newConfirm(&enter).SubmitInterrupt(d, "0:0.0", "operator delivery")
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want zero keystrokes into a pending working composer", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGateIdleClearedStillDelivers(t *testing.T) {
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerCleared, ComposerCleared},
+	}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "queued delivery"); err != nil {
+		t.Fatalf("idle cleared submit: %v", err)
+	}
+	if d.submitCalls != 1 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want one paste and no retry", d.submitCalls, enter)
 	}
 }
 

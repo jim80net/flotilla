@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 )
 
 // Confirmed delivery turns "the tmux keystrokes ran" into "a turn started." The relay
@@ -73,7 +76,40 @@ const (
 	// poll to render could still be missed; the logConfirmed/logUnconfirmed instrumentation is the
 	// production canary for that (revalidate the margin against submitSettleDelay on a TUI upgrade).
 	clearedConfirmPolls = 2
+
+	// pendingDraftHold is the maximum time a queued delivery yields to a draft already present in
+	// an idle composer. The first observation is retained across retries for that delivery, so a
+	// persistent abandoned draft cannot defer the delivery forever.
+	pendingDraftHold = 5 * time.Minute
 )
+
+type pendingDraftKey struct {
+	pane       string
+	deliveryID string
+}
+
+type pendingDraftTracker struct {
+	mu    sync.Mutex
+	since map[pendingDraftKey]time.Time
+}
+
+var processPendingDrafts = pendingDraftTracker{since: make(map[pendingDraftKey]time.Time)}
+
+func (p *pendingDraftTracker) observe(key pendingDraftKey, now time.Time) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if first, ok := p.since[key]; ok {
+		return first
+	}
+	p.since[key] = now
+	return now
+}
+
+func (p *pendingDraftTracker) clear(key pendingDraftKey) {
+	p.mu.Lock()
+	delete(p.since, key)
+	p.mu.Unlock()
+}
 
 // ErrBusy means the pane assessed as Working at delivery time: confirmed delivery did NOT
 // submit (never fire into a busy composer — the root cause). The caller decides what to do
@@ -116,6 +152,11 @@ var ErrPanelBlocked = errors.New("surface: composer is input-blocked behind the 
 type Confirm struct {
 	SendEnter func(pane string) error // the idempotent Enter-only retry (deliver.SendEnter)
 	Sleep     func(time.Duration)     // the confirm-poll wait (time.Sleep)
+	// Now is injectable for the bounded idle-composer draft hold. Production defaults to time.Now.
+	Now func() time.Time
+	// pendingDrafts is test-injectable; production shares the process tracker so the first-observed
+	// time survives the watch injector's retries of the same pane+delivery identity.
+	pendingDrafts *pendingDraftTracker
 	// SendCtrlC is the OPTIONAL self-heal primitive (deliver.SendCtrlC): a Ctrl-C that escapes a
 	// focus-stealing agents-panel overlay back to the main composer. When nil, self-heal is DISABLED
 	// (SubmitWithSelfHeal == Submit) — the default-off kill-switch is "do not wire SendCtrlC". It is
@@ -164,7 +205,13 @@ const (
 // retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
 // read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, false)
+	return c.SubmitDelivery(d, pane, text, deliveryidentity.New("surface-submit"))
+}
+
+// SubmitDelivery is Submit with a stable identity that must be retained across retries of the
+// same queued delivery. Distinct deliveries must carry distinct IDs even when their bodies match.
+func (c Confirm) SubmitDelivery(d Driver, pane, text, deliveryID string) error {
+	return c.submit(d, pane, text, deliveryID, false)
 }
 
 // SubmitInterrupt delivers a verified operator message even while the target is Working.
@@ -172,10 +219,15 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 // A Working pane must expose a positively cleared main composer; queued/pending/overlay or
 // undetermined composers fail closed before paste. Confirmation after paste is identical to Submit.
 func (c Confirm) SubmitInterrupt(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, true)
+	return c.SubmitInterruptDelivery(d, pane, text, deliveryidentity.New("surface-interrupt"))
 }
 
-func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
+// SubmitInterruptDelivery is SubmitInterrupt with a stable queued-delivery identity.
+func (c Confirm) SubmitInterruptDelivery(d Driver, pane, text, deliveryID string) error {
+	return c.submit(d, pane, text, deliveryID, true)
+}
+
+func (c Confirm) submit(d Driver, pane, text, deliveryID string, allowWorking bool) (resultErr error) {
 	// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
 	state := d.Assess(pane)
 	switch state {
@@ -200,6 +252,8 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 	//     row, REFUSE before pasting. A paste there would MIS-DELIVER the body to a background agent
 	//     AND the post-submit check would FALSE-CONFIRM it (the composer clears) — a silent wrong-
 	//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. An
+	//     Pending main composer means a human or another writer has an unsubmitted draft. An idle
+	//     pending composer defers for a bounded interval; a working one remains blocked. An
 	//     Undetermined probe also fails closed because a
 	//     highlighted selector row can share the composer's prompt glyph. The
 	//     post-submit composer state remains the delivery authority after a
@@ -210,6 +264,7 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 	}
 	if sp != nil {
 		composer := sp.ComposerState(pane)
+		pendingKey := pendingDraftKey{pane: pane, deliveryID: deliveryID}
 		switch composer {
 		case ComposerSubAgent:
 			logPanelBlocked(pane, "gate:sub-composer")
@@ -217,12 +272,43 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 		case ComposerListNav:
 			logPanelBlocked(pane, "gate:list-nav")
 			return ErrPanelBlocked
+		case ComposerPending:
+			if state != StateIdle {
+				logPanelBlocked(pane, "gate:working-composer-pending")
+				return ErrPanelBlocked
+			}
+			tracker := c.pendingDrafts
+			if tracker == nil {
+				tracker = &processPendingDrafts
+			}
+			now := time.Now()
+			if c.Now != nil {
+				now = c.Now()
+			}
+			first := tracker.observe(pendingKey, now)
+			if now.Sub(first) < pendingDraftHold {
+				log.Printf("flotilla confirm: pane %s idle composer has pending draft; deferring delivery for up to %s", pane, pendingDraftHold)
+				return ErrBusy
+			}
+			// Retain the original timestamp if the delivery attempt itself fails, so a retry cannot
+			// restart the hold. A confirmed delivery clears this delivery-scoped observation.
+			defer func() {
+				if resultErr == nil {
+					tracker.clear(pendingKey)
+				}
+			}()
 		case ComposerUndetermined:
 			if reason := composerBlockReason(d, pane); reason != "" {
 				logPanelBlocked(pane, "gate:"+reason)
 				return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
 			}
 			return ErrTransient
+		default:
+			tracker := c.pendingDrafts
+			if tracker == nil {
+				tracker = &processPendingDrafts
+			}
+			tracker.clear(pendingKey)
 		}
 		if state == StateWorking && composer != ComposerCleared {
 			logPanelBlocked(pane, "gate:working-composer-not-clear")
@@ -354,6 +440,11 @@ func composerBlockReason(d Driver, pane string) string {
 // every path, so a body that "just submitted (cleared)" can never be mistaken for "recovered → re-
 // send" — a double-deliver is impossible by construction.
 func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
+	return c.SubmitWithSelfHealDelivery(d, pane, text, deliveryidentity.New("surface-self-heal"))
+}
+
+// SubmitWithSelfHealDelivery is SubmitWithSelfHeal with a stable queued-delivery identity.
+func (c Confirm) SubmitWithSelfHealDelivery(d Driver, pane, text, deliveryID string) error {
 	if c.SendCtrlC != nil {
 		if sp, ok := d.(ComposerStateProbe); ok && d.Assess(pane) == StateIdle {
 			if st := sp.ComposerState(pane); st == ComposerSubAgent || st == ComposerListNav {
@@ -361,7 +452,7 @@ func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
 			}
 		}
 	}
-	return c.Submit(d, pane, text)
+	return c.SubmitDelivery(d, pane, text, deliveryID)
 }
 
 // Heal runs the bounded overlay self-heal WITHOUT submitting anything — the heal-only entry point

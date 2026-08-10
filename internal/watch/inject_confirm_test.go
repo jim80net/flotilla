@@ -349,26 +349,30 @@ func TestRelayHeavyPaneComposerClearNoFalseAlarm(t *testing.T) {
 	}
 }
 
-func TestRelayHeavyPaneComposerStaysPendingStillEscalates(t *testing.T) {
-	// The invariant guard, end-to-end: when the composer stays PENDING (the body never left it —
-	// a genuine non-delivery) and the spinner never appears, the relay MUST still raise the loud
-	// alarm. The false-negative fix must not weaken the never-silent-drop guarantee.
-	drv := &composerDriver{state: surface.ComposerPending} // body stuck in the composer
+func TestRelayIdlePendingComposerDefersWithoutMirroring(t *testing.T) {
+	// A pre-existing pending body belongs to the pane's human writer. The confirmed-delivery gate
+	// returns the busy/defer signal before paste; the injector must retain the relay rather than
+	// mirror it as delivered or raise a terminal panel alarm.
+	drv := &composerDriver{state: surface.ComposerPending}
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored []Job
 	var alerts []string
+	var deferred []Job
 	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "xo-pane", msg) }, 0)
-	in.reEnqueue = func(Job, time.Duration) {}
+	in.reEnqueue = func(j Job, _ time.Duration) { deferred = append(deferred, j) }
 	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
 	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
 
 	in.deliver(Job{Agent: "xo", Message: "operator: exec summary", Kind: "relay"})
 
-	if len(alerts) != 1 {
-		t.Fatalf("a genuine non-delivery did not escalate: alerts=%v", alerts)
+	if len(alerts) != 0 {
+		t.Fatalf("fresh pending draft raised a terminal alert: alerts=%v", alerts)
 	}
 	if len(mirrored) != 0 {
-		t.Fatalf("a non-delivered message was mirrored: mirrored=%d", len(mirrored))
+		t.Fatalf("a deferred delivery was mirrored: mirrored=%d", len(mirrored))
+	}
+	if len(deferred) != 1 {
+		t.Fatalf("pending delivery deferred=%d, want 1", len(deferred))
 	}
 }
 

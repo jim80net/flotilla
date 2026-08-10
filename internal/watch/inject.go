@@ -11,8 +11,10 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -88,6 +90,9 @@ type Job struct {
 	// MessageID is the origin message's durable id (a Discord snowflake today). Set by the
 	// relay on ingest; keys the disk-backed pending queue (#286).
 	MessageID string
+	// DeliveryID is the stable identity for one injector delivery across busy retries. It prevents
+	// bounded composer holds from aliasing distinct deliveries that happen to have identical text.
+	DeliveryID string
 	// OperatorUserID is the Discord author id for KindRelay (adjutant-buffer-v2 arc keying).
 	// Empty for non-relay jobs or older callers.
 	OperatorUserID string
@@ -130,6 +135,12 @@ type Job struct {
 // the delivery failed (escalated for a relay).
 type SendFunc func(agent, message string) error
 
+// IdentifiedSendFunc is the production confirmed-delivery seam. deliveryID is stable across
+// retries of one Job and distinct for separate jobs, even when their message bodies are equal.
+type IdentifiedSendFunc func(agent, message, deliveryID string) error
+
+var deliverySequence atomic.Uint64
+
 // Injector serializes all deliveries through one worker goroutine, so a relayed
 // message and a heartbeat tick that are ready at the same instant are delivered
 // one fully after the other — never interleaved.
@@ -141,8 +152,11 @@ type SendFunc func(agent, message string) error
 type Injector struct {
 	jobs                      chan Job
 	send                      SendFunc
-	relaySend                 SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
-	operatorInterruptSend     SendFunc      // optional: verified operator-only path that may submit while Working (#956).
+	identifiedSend            IdentifiedSendFunc
+	relaySend                 SendFunc // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
+	identifiedRelaySend       IdentifiedSendFunc
+	operatorInterruptSend     SendFunc // optional: verified operator-only path that may submit while Working (#956).
+	identifiedInterruptSend   IdentifiedSendFunc
 	stop                      chan struct{} // worker: drain then exit
 	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
 	done                      chan struct{}
@@ -173,8 +187,19 @@ type Injector struct {
 // use the plain send. Must be set before Start.
 func (in *Injector) SetRelaySend(relaySend SendFunc) { in.relaySend = relaySend }
 
+// SetIdentifiedSend wires the stable-delivery-identity production path.
+func (in *Injector) SetIdentifiedSend(send IdentifiedSendFunc) { in.identifiedSend = send }
+
+// SetIdentifiedRelaySend wires the relay/self-heal path with stable delivery identity.
+func (in *Injector) SetIdentifiedRelaySend(send IdentifiedSendFunc) { in.identifiedRelaySend = send }
+
 // SetOperatorInterruptSend wires the only delivery path allowed to enter a Working composer.
 func (in *Injector) SetOperatorInterruptSend(send SendFunc) { in.operatorInterruptSend = send }
+
+// SetIdentifiedOperatorInterruptSend wires operator interrupts with stable delivery identity.
+func (in *Injector) SetIdentifiedOperatorInterruptSend(send IdentifiedSendFunc) {
+	in.identifiedInterruptSend = send
+}
 
 // SetMirror installs a hook called after each CONFIRMED delivery, for the audit
 // trail. Must be set before Start.
@@ -276,19 +301,29 @@ func (in *Injector) Start() {
 // tick). Any other error is a real delivery failure: a relay escalates LOUDLY (never silent),
 // a tick logs only. A failed delivery never kills the worker.
 func (in *Injector) deliver(j Job) {
+	ensureDeliveryID(&j)
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send
-	if j.Kind == KindOperatorInterrupt && in.operatorInterruptSend != nil {
+	identifiedSend := in.identifiedSend
+	if j.Kind == KindOperatorInterrupt && (in.operatorInterruptSend != nil || in.identifiedInterruptSend != nil) {
 		send = in.operatorInterruptSend
-	} else if in.relaySend != nil && usesSelfHealSend(j.Kind) {
+		identifiedSend = in.identifiedInterruptSend
+	} else if (in.relaySend != nil || in.identifiedRelaySend != nil) && usesSelfHealSend(j.Kind) {
 		send = in.relaySend
+		identifiedSend = in.identifiedRelaySend
+	}
+	deliver := func() error {
+		if identifiedSend != nil {
+			return identifiedSend(j.Agent, j.Message, j.DeliveryID)
+		}
+		return send(j.Agent, j.Message)
 	}
 	var err error
 	if j.Kind == KindSend && j.OutboxBound && in.rosterDir != "" {
 		attempted, attemptErr := outbox.AttemptCurrent(in.rosterDir, outbox.Entry{
 			ID: j.MessageID, Sender: j.Sender, Recipient: intendedRecipient(j), Epoch: j.Epoch,
-		}, func() error { return send(j.Agent, j.Message) })
+		}, deliver)
 		if !attempted {
 			if attemptErr != nil {
 				log.Printf("flotilla watch: outbox validation failed for send %s from %q to %q: %v", j.MessageID, j.Sender, j.Agent, attemptErr)
@@ -301,7 +336,7 @@ func (in *Injector) deliver(j Job) {
 		}
 		err = attemptErr
 	} else {
-		err = send(j.Agent, j.Message)
+		err = deliver()
 	}
 	switch {
 	case err == nil:
@@ -561,6 +596,7 @@ func (in *Injector) Enqueue(j Job) {
 	if j.IntendedRecipient == "" {
 		j.IntendedRecipient = j.Agent
 	}
+	ensureDeliveryID(&j)
 	jobs := []Job{j}
 	if in.coordinatorIngress != nil && !j.ingressResolved {
 		jobs = in.coordinatorIngress.Apply(j)
@@ -588,6 +624,17 @@ func (in *Injector) Enqueue(j Job) {
 			return
 		}
 	}
+}
+
+func ensureDeliveryID(j *Job) {
+	if j == nil || j.DeliveryID != "" {
+		return
+	}
+	if j.MessageID != "" {
+		j.DeliveryID = deliveryidentity.Encode("job", string(j.Kind), j.Sender, j.MessageID)
+		return
+	}
+	j.DeliveryID = deliveryidentity.Encode("watch-sequence", fmt.Sprint(deliverySequence.Add(1)))
 }
 
 // HasPendingRelayFor reports whether a KindRelay for agent is queued or in-flight (#523).

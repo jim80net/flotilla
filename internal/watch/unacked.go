@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/deliveryidentity"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -35,18 +36,28 @@ type CoordinatorWake = SendFunc
 // UnackedBackstop periodically scans bound channels for operator messages with
 // no fleet acknowledgment and surfaces a digest (issue #234).
 type UnackedBackstop struct {
-	cfg          *roster.Config
-	current      func() *roster.Config
-	reader       RecentHistoryReader
-	alert        func(string)
-	wake         CoordinatorWake
-	coordinator  func(*roster.Config) string
-	store        unackedStateStore
-	ackRoot      string
-	scanCfg      unacked.Config
-	lookback     int
-	pollInterval time.Duration
-	now          func() time.Time
+	cfg            *roster.Config
+	current        func() *roster.Config
+	reader         RecentHistoryReader
+	alert          func(string)
+	wake           CoordinatorWake
+	identifiedWake IdentifiedSendFunc
+	coordinator    func(*roster.Config) string
+	store          unackedStateStore
+	ackRoot        string
+	scanCfg        unacked.Config
+	lookback       int
+	pollInterval   time.Duration
+	now            func() time.Time
+}
+
+// SetIdentifiedWake wires a coordinator wake that preserves one logical
+// delivery identity across sweep retries. The identity is derived from the
+// originating channel message, never from an individual send attempt.
+func (u *UnackedBackstop) SetIdentifiedWake(wake IdentifiedSendFunc) {
+	if u != nil {
+		u.identifiedWake = wake
+	}
 }
 
 // NewUnackedBackstop builds the standing un-acked detector. coordinator resolves
@@ -186,7 +197,7 @@ func (u *UnackedBackstop) sweepChannelWithConfig(cfg *roster.Config, b roster.Ch
 			changed = true
 			idx = len(st.Records) - 1
 		}
-		if u.wake != nil && !st.Records[idx].WakeDone {
+		if (u.wake != nil || u.identifiedWake != nil) && !st.Records[idx].WakeDone {
 			if err := u.tryCoordinatorWake(cfg, b, f); err != nil {
 				if errors.Is(err, surface.ErrBusy) {
 					log.Printf("flotilla watch: unacked coordinator wake skipped for %s (busy mid-turn) — will retry next sweep; channel alert is the backstop", u.coordinator(cfg))
@@ -213,6 +224,9 @@ func (u *UnackedBackstop) tryCoordinatorWake(cfg *roster.Config, b roster.Channe
 	}
 	body := fmt.Sprintf("[flotilla unacked-backstop] Operator message on %s (%s) has no fleet acknowledgment (%s, age %s; checked channel replies and exact turn-final marker):\n  id=%s\n  %q\nReview channel history and act — the alert above is the persistent backstop.",
 		channelLabel(b), b.ChannelID, f.Reason, f.Age.Round(time.Minute), f.MessageID, f.Snippet)
+	if u.identifiedWake != nil {
+		return u.identifiedWake(agent, body, deliveryidentity.Encode("unacked", b.ChannelID, f.MessageID))
+	}
 	return u.wake(agent, body)
 }
 
