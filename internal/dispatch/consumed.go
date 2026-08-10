@@ -185,6 +185,11 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		}
 		for _, p := range f.Entries {
 			if e.Nonce != "" && p.Nonce == e.Nonce {
+				// Full payload hashes disambiguate a nonce collision. Preserve both
+				// settlements so each distinct dispatch can be queried durably.
+				if e.PayloadHash != "" && p.PayloadHash != "" && e.PayloadHash != p.PayloadHash {
+					continue
+				}
 				// A send-time coordinator-recipient entry settles only its own hop
 				// (#707): per-edge settlements of the same nonce coexist, in either
 				// insertion order — the hop entry must not block the true

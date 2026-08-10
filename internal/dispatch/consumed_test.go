@@ -12,7 +12,7 @@ import (
 	"github.com/jim80net/flotilla/internal/inbound"
 )
 
-func TestConsumeIdempotent_SameNonce(t *testing.T) {
+func TestConsumeIdempotent_SameNonceAndHash(t *testing.T) {
 	dir := t.TempDir()
 	reg := NewRegistry(dir)
 	e := ConsumedEntry{
@@ -33,14 +33,18 @@ func TestConsumeIdempotent_SameNonce(t *testing.T) {
 	if ins2 {
 		t.Fatal("second consume with same nonce must be idempotent (inserted=false)")
 	}
-	// Different hash, same nonce — still idempotent (nonce authoritative).
+	// Different non-empty hash disambiguates a nonce collision and must retain
+	// an independently queryable settlement.
 	e.PayloadHash = "hash2-different"
 	ins3, err := reg.Consume(e)
-	if err != nil || ins3 {
-		t.Fatalf("same nonce different hash: inserted=%v err=%v, want false", ins3, err)
+	if err != nil || !ins3 {
+		t.Fatalf("same nonce different hash: inserted=%v err=%v, want true", ins3, err)
 	}
-	if got := len(reg.Load()); got != 1 {
-		t.Fatalf("entries = %d, want 1", got)
+	if got := len(reg.Load()); got != 2 {
+		t.Fatalf("entries = %d, want 2", got)
+	}
+	if !reg.IsConsumed(e.Nonce, "hash1") || !reg.IsConsumed(e.Nonce, "hash2-different") {
+		t.Fatal("both colliding payload settlements must remain independently consumed")
 	}
 }
 
