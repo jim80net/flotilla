@@ -112,8 +112,8 @@ func TestClaudeAssessParity(t *testing.T) {
 		{"panecommand error → unknown (transient glitch, not a crash)", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
 		{"capture error → unknown (#55: non-material, not a false finish)", "node", nil, false, "", boom, StateUnknown},
-		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)", nil, StateWorking},
-		{"esc-to-interrupt → working", "node", nil, false, "doing\nesc to interrupt", nil, StateWorking},
+		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)\n❯ ", nil, StateWorking},
+		{"legacy esc-to-interrupt prose → idle", "node", nil, false, "doing\nesc to interrupt\n❯ ", nil, StateIdle},
 		{"idle composer → idle", "node", nil, false, "❯ \n  ⏵⏵ auto mode on", nil, StateIdle},
 		{"worktree-exit prompt → awaiting-input", "node", nil, false, "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm", nil, StateAwaitingInput},
 	}
