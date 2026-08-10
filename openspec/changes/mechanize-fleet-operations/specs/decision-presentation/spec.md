@@ -100,3 +100,29 @@ Implementation planning SHALL evaluate both an existing burn-on-read service and
 #### Scenario: Implementation option is selected
 - **WHEN** product implementation planning chooses build or adopt
 - **THEN** the selected option demonstrates at-most-once disclosure, confirmed-versus-ambiguous consumed-state auditability, board-value exclusion, and unread expiry before implementation approval
+
+### Requirement: Decision option labels preserve full content end to end
+Decision options SHALL be structured records with explicitly quoted YAML label scalars. The source-aware compiler SHALL reject an unquoted option label before semantic decoding. Compilation SHALL preserve the ordered option array and emit `option_count` plus a canonical content digest over every full decoded label. The API, primary renderer, and drill-in renderer SHALL preserve and verify the same count, order, content, and digest.
+
+#### Scenario: Metacharacter-rich labels round-trip intact
+- **WHEN** a valid decision fixture contains quoted option labels with hash tokens, single and double quotes, colons, and other YAML metacharacter classes
+- **THEN** compilation, API output, primary rendering, and drill-in rendering preserve the exact decoded label content and order
+- **AND** option count and canonical content digest agree at every tier
+
+#### Scenario: Hash-bearing label is unquoted
+- **WHEN** an option label containing a hash token is authored as a plain unquoted YAML scalar
+- **THEN** source-aware compilation fails loudly before comment semantics can silently collapse the label
+- **AND** no decision payload or board entry is emitted
+
+### Requirement: Option loss or truncation is never silent
+Primary and drill-in views SHALL render every verified option label in full using wrapping or expansion without implicit clipping or ellipsis. Any tier that detects count/content/digest mismatch SHALL fail closed where possible. A bounded surface unable to render full content SHALL display an explicit conspicuous truncation/error marker and SHALL withhold decision controls for the affected list.
+
+#### Scenario: API omits an option
+- **WHEN** renderer input has an option count or content digest inconsistent with the compiled decision
+- **THEN** the renderer does not present the incomplete list as valid
+- **AND** it displays an explicit integrity error without actionable decision controls
+
+#### Scenario: Label exceeds primary-view width
+- **WHEN** a verified option label is longer than the primary view's nominal width
+- **THEN** the view wraps or expands to expose the complete label
+- **AND** it does not silently clip, ellipsize, or shorten the option

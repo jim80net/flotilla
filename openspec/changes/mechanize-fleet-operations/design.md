@@ -110,6 +110,12 @@ The YAML-to-JSON compiler preserves this metadata without changing completion se
 
 Legacy goals with no presentation metadata default to `staged`. Automated ranking may suggest changes later, but it cannot silently overwrite coordinator-authored judgment.
 
+### Option-list integrity
+
+Decision options are structured records with an explicit label, not prose parsed by the renderer. YAML authoring requires option labels to use quoted scalar style; the compiler inspects the source-aware YAML node before ordinary decoding and rejects an unquoted label, preventing comment or mapping metacharacters from silently changing intended content. It then emits the ordered option array together with `option_count` and a canonical content digest over the full decoded labels.
+
+The API preserves the ordered array, count, and digest. Both primary and drill-in renderers verify count and digest before display and render every label in full using wrapping/expansion rather than implicit clipping or ellipsis. A mismatch fails the API/read model closed where possible; if a bounded presentation surface cannot render the full content, it shows a conspicuous explicit truncation/error marker and withholds decision controls rather than presenting a shortened option as selectable. Silent loss, collapse, or shortening is never valid.
+
 ### Sensitive brief attachments
 
 A decision brief may include a reference to sensitive context, but the board document and compiled goal/decision payload contain only an opaque burn-on-read token reference and non-sensitive lifecycle metadata—never the sensitive value. Retrieval is honestly **at-most-once**, not exactly-once: the first authorized reader atomically claims the token and destroys its retrievable value before transfer. No retry can return the value. An unread token has a mandatory expiry; expiry destroys the retrievable value and leaves an auditable expired state.
@@ -156,4 +162,4 @@ The motivating hypothesis is provisional: current observations suggest a direct 
 
 ## Sequencing
 
-The implementation is divided by capability. Message identity/provenance/receipts builds first because operator reply correctness is the strongest requirement. Atomic topology apply precedes detectors that depend on reload census. Span computation precedes drowning detection. Decision presentation, durable seat attachments, and doctrine refresh can build independently. Each phase requires independent review and its own positive, negative-control, migration, and failure-path tests.
+The implementation is divided by capability. Message identity/provenance/receipts builds first because operator reply correctness is the strongest requirement. Atomic topology apply precedes detectors that depend on reload census. Span computation precedes drowning detection. Decision presentation, durable seat attachments, and doctrine refresh can build independently. Each phase requires independent review and its own positive, negative-control, migration, and failure-path tests. Decision-presentation tests include required source-to-render fixtures whose labels contain hash tokens, quotes, colons, and other YAML metacharacter classes.

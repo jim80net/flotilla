@@ -56,6 +56,9 @@
 - [ ] 6.9 Add optional opaque sensitive-attachment references with atomic claim-and-destroy before transfer, at-most-once disclosure, confirmed `consumed` state, and ambiguous `consumed_unconfirmed` state that never permits redisclosure.
 - [ ] 6.10 Enforce mandatory unread-token expiry and prove sensitive values never enter board documents, compiled goal payloads, presentation APIs, logs, caches, analytics, or exports.
 - [ ] 6.11 Test confirmed consumption, connection loss after claim, failure proven before claim, concurrent-reader exclusion, no redisclosure from `consumed_unconfirmed`, expiry-before-read, unauthorized access, and board-value negative controls.
+- [ ] 6.12 Make decision options structured records with source-aware enforcement of quoted YAML label scalars; emit and preserve ordered options, option count, and canonical content digest through compile and API.
+- [ ] 6.13 Verify count/content integrity in primary and drill-in renderers; render full labels via wrapping/expansion and fail closed or show a conspicuous integrity/truncation marker with decision controls withheld.
+- [ ] 6.14 Add the required firing test from YAML source through both renderers with labels containing hash tokens, single/double quotes, colons, and other YAML metacharacter classes; include unquoted-hash compile rejection and count/digest mismatch controls.
 
 ## 7. Durable seat attachments
 
