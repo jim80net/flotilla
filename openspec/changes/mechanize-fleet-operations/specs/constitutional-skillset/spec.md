@@ -25,3 +25,17 @@ The system SHALL NOT overwrite a locally modified whole-file doctrine asset. It 
 - **WHEN** the operator selects `accept_packaged` or supplies a merged result
 - **THEN** the chosen content is installed atomically
 - **AND** its provenance, source packaged version, and resulting digest are durable and queryable
+
+### Requirement: Legacy doctrine provenance migrates conservatively
+For an existing whole-file doctrine installation with no recorded packaged version/digest, migration SHALL preserve local bytes unless they exactly match a known historical packaged digest. A known match MAY be bound to that package version as unmodified. Unknown provenance SHALL stage the current packaged candidate and require explicit `keep_local`, `accept_packaged`, or `merge` resolution without overwriting local bytes.
+
+#### Scenario: Legacy bytes match a historical package
+- **WHEN** an installation lacks provenance metadata but its bytes match a known historical packaged digest
+- **THEN** migration records the matching package version/digest
+- **AND** the asset may follow the unmodified refresh path
+
+#### Scenario: Legacy bytes have unknown provenance
+- **WHEN** an installation lacks provenance metadata and its bytes match no known historical packaged digest
+- **THEN** migration preserves the local file unchanged
+- **AND** stages the current packaged candidate for explicit keep-local, accept-packaged, or merge resolution
+- **AND** does not infer that the local bytes are unedited

@@ -29,17 +29,23 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 
 **Rationale:** these relationships drive accountability, routing, and history across a goal's lifetime. Making them rename-fragile would let a presentation edit orphan durable work or silently attach it to a later seat reusing a name. A soft display hint is still useful, but it is a projection, not identity.
 
+Before resolving any legacy goal attachment, migration validates that every candidate roster seat has a nonempty ID satisfying the canonical seat-ID grammar and that IDs are globally unique. A uniquely matching display name does not make an empty, invalid, or duplicated seat ID safe; migration fails closed before writing any attachment.
+
 ### Launch recipes key on immutable seats
 
 **Decision:** per-seat launch recipes are keyed by `seat_id` and carry the current display name only as optional presentation metadata. Legacy name-keyed recipes migrate through the same unique roster resolution and fail closed on missing or ambiguous names.
 
 **Rationale:** launch recipes encode how a standing seat is recovered. A display-name change must not orphan its harness, failover policy, or recovery path, and requiring manual recipe surgery for every rename defeats immutable roster identity.
 
+Launch migration applies the same prerequisite independently: the candidate roster must have nonempty, canonically valid, globally unique seat IDs before any name-keyed recipe is resolved or rewritten.
+
 ### Whole-file doctrine assets are product-managed and versioned
 
 **Decision:** packaged whole-file doctrine assets remain product-managed safety assets after installation; they do not silently become permanent operator-owned forks. Each installed asset records packaged version and digest. An unmodified prior version upgrades atomically. A locally modified asset is never overwritten: refresh stages the new packaged candidate, reports drift/conflict, and requires an explicit keep-local, accept-packaged, or merge resolution whose result and provenance are recorded.
 
 **Rationale:** treating first install as an irrevocable fork prevents shipped safety corrections from reaching existing fleets, while unconditional replacement destroys legitimate local doctrine. Version/digest-aware refresh preserves both product responsibility and operator edits, and turns the ambiguity into an inspectable lifecycle rather than an implicit ownership transfer.
+
+Existing installations without recorded packaged version/digest migrate conservatively. If local bytes match a known historical packaged digest, migration may bind that known version and treat the file as unmodified. Otherwise provenance is unknown: migration preserves local bytes, stages the current packaged candidate, and requires the same explicit keep-local, accept-packaged, or merge resolution. Unknown provenance is never inferred to mean unmodified.
 
 ## Area 1 — span computation
 
@@ -104,9 +110,9 @@ Legacy goals with no presentation metadata default to `staged`. Automated rankin
 
 ### Sensitive brief attachments
 
-A decision brief may include a reference to sensitive context, but the board document and compiled goal/decision payload contain only an opaque burn-on-read token reference and non-sensitive lifecycle metadata—never the sensitive value. The first authorized retrieval returns the value exactly once and destroys the retrievable value atomically. Later retrievals return only consumed state identifying who consumed it and when. An unread token has a mandatory expiry; expiry destroys the retrievable value and leaves an auditable expired state.
+A decision brief may include a reference to sensitive context, but the board document and compiled goal/decision payload contain only an opaque burn-on-read token reference and non-sensitive lifecycle metadata—never the sensitive value. Retrieval is honestly **at-most-once**, not exactly-once: the first authorized reader atomically claims the token and destroys its retrievable value before transfer. No retry can return the value. An unread token has a mandatory expiry; expiry destroys the retrievable value and leaves an auditable expired state.
 
-Authorization, first-read delivery, destruction, and consumed-state recording are one atomic operation: concurrent readers cannot both receive the value, and a failed delivery cannot be falsely recorded as consumed. Board and drill-in readers never dereference tokens automatically or include token values in logs, caches, analytics, exports, or API documents.
+If the service can confirm the claimed response completed, state becomes `consumed` with consumer and time. If connection loss or another transport failure makes transfer completion unknowable after claim, state becomes `consumed_unconfirmed` with claimant, claim time, and attempt metadata. That state explicitly means the value may or may not have reached the claimant; it is never represented as confirmed delivery and never permits redisclosure. A failure provably occurring before a successful claim leaves the token unread. Concurrent readers cannot both claim the token. Board and drill-in readers never dereference tokens automatically or include token values in logs, caches, analytics, exports, or API documents.
 
 Implementation planning retains two open options: adopt an existing burn-on-read paste service that satisfies these invariants, or build a minimal product-owned implementation. The operator has delegated that build-versus-adopt choice to product implementation planning; this design intentionally does not select one.
 
@@ -131,6 +137,12 @@ For each `(message_id, recipient)` the query model distinguishes at least:
 `composed → queued → delivered → consumed → acked`
 
 and terminal alternatives `dropped` or `canceled`. Delivery attempts and duplicate observations are subordinate records. State transitions are durable, timestamped, actor/path-attributed, monotonic except for explicitly recorded corrections, and queryable by message ID for every recipient class. `Delivered` means transport-confirmed delivery, `consumed` means receiver-side durable consumption, and `acked` means the intended recipient successfully acknowledged that registry row. Absence of evidence remains `unknown`, never `acked`.
+
+### First verification artifact
+
+Before receipt hardening or implementation assumptions, a controlled test sends one message through the direct CLI delivery path and one through the durable-outbox sweeper path, then reads the delivery ledger after each send. The measured question is whether both paths produce equivalent attributable delivery evidence.
+
+The motivating hypothesis is provisional: current observations suggest a direct coordinator delivery may be ledger-visible while a sweeper delivery may lack equivalent ledger evidence. The test exists to confirm, refine, or falsify that hypothesis. This design does not assert a sweeper blind spot, prescribe a fix, or turn the observation into doctrine before measurement.
 
 ## Failure posture and observability
 

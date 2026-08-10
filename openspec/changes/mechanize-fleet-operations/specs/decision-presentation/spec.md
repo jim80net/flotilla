@@ -57,14 +57,14 @@ A decision brief MAY reference sensitive context through an opaque burn-on-read 
 - **THEN** the board exposes an opaque retrieval reference and non-sensitive state
 - **AND** no sensitive value appears in the board document or presentation payload
 
-### Requirement: Sensitive attachment is delivered at most once
-The first authorized retrieval SHALL atomically deliver the sensitive value once, destroy the retrievable value, and record consumed state. Concurrent or subsequent retrievals SHALL NOT receive the value and SHALL return only consumed state identifying the consumer and consumption time.
+### Requirement: Sensitive attachment disclosure is at most once
+The first authorized retrieval SHALL atomically claim the token and destroy the retrievable value before transfer. Concurrent or subsequent retrievals SHALL NOT receive the value. The system SHALL distinguish confirmed consumption from ambiguous delivery and SHALL never redisclose a claimed value.
 
 #### Scenario: First authorized retrieval succeeds
 - **WHEN** an authorized reader retrieves an unread, unexpired attachment
-- **THEN** the sensitive value is delivered exactly once
-- **AND** the retrievable value is destroyed
-- **AND** consumer identity and consumption time become durably queryable
+- **AND** the service confirms the claimed response completed
+- **THEN** the sensitive value has been disclosed at most once
+- **AND** state becomes `consumed` with consumer identity and consumption time
 
 #### Scenario: Later reader uses the same reference
 - **WHEN** any reader retrieves an already consumed reference
@@ -75,6 +75,16 @@ The first authorized retrieval SHALL atomically deliver the sensitive value once
 - **WHEN** two authorized readers concurrently retrieve the same unread reference
 - **THEN** at most one receives the sensitive value
 - **AND** every other reader receives only the resulting consumed state
+
+#### Scenario: Connection fails after claim
+- **WHEN** an authorized reader claims an unread token but connection loss makes response completion unknowable
+- **THEN** the retrievable value remains destroyed and is never returned again
+- **AND** state becomes `consumed_unconfirmed` with claimant, claim time, and attempt metadata
+- **AND** readers are told explicitly that delivery may or may not have completed
+
+#### Scenario: Retrieval fails before claim
+- **WHEN** an authorization or transport failure is proven to occur before the token is claimed
+- **THEN** the token remains unread and retrievable by a later authorized attempt
 
 ### Requirement: Unread sensitive attachments expire
 Every burn-on-read token SHALL have a mandatory expiry. When an unread token expires, the system SHALL destroy the retrievable value and retain an auditable expired state without the value.
@@ -89,4 +99,4 @@ Implementation planning SHALL evaluate both an existing burn-on-read service and
 
 #### Scenario: Implementation option is selected
 - **WHEN** product implementation planning chooses build or adopt
-- **THEN** the selected option demonstrates single delivery, consumed-state auditability, board-value exclusion, and unread expiry before implementation approval
+- **THEN** the selected option demonstrates at-most-once disclosure, confirmed-versus-ambiguous consumed-state auditability, board-value exclusion, and unread expiry before implementation approval

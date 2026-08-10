@@ -17,6 +17,11 @@ Goal owner, conversation-agent, and work-item agent attachments SHALL store immu
 - **THEN** compilation fails with an actionable identity error
 - **AND** it does not guess or preserve a rename-fragile durable relationship
 
+#### Scenario: Uniquely named goal seat has an unsafe ID
+- **WHEN** a legacy attachment's display name resolves uniquely but any candidate roster seat has an empty ID, an ID violating canonical seat-ID validation, or an ID duplicated by another seat
+- **THEN** goal migration fails closed before writing any attachment
+- **AND** it reports the invalid or nonunique seat identity
+
 ### Requirement: Launch recipes use immutable seat identity
 Per-seat launch recipes SHALL be keyed by immutable `seat_id`. A recipe MAY carry a current display name as presentation metadata, but rename SHALL NOT alter recipe ownership or recovery behavior.
 
@@ -32,3 +37,8 @@ Per-seat launch recipes SHALL be keyed by immutable `seat_id`. A recipe MAY carr
 - **WHEN** a name-keyed legacy recipe is missing from the roster or ambiguous
 - **THEN** migration fails closed with an actionable identity error
 - **AND** the system does not attach the recipe by guesswork
+
+#### Scenario: Uniquely named launch seat has an unsafe ID
+- **WHEN** a legacy recipe name resolves uniquely but any candidate roster seat has an empty ID, an ID violating canonical seat-ID validation, or an ID duplicated by another seat
+- **THEN** launch migration fails closed before rekeying any recipe
+- **AND** it reports the invalid or nonunique seat identity

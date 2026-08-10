@@ -62,3 +62,13 @@ For every logical message and intended recipient, the system SHALL durably expos
 - **WHEN** the recipient invokes acknowledgement for a message already marked `acked`
 - **THEN** the command reports the existing durable transition idempotently
 - **AND** inspection identifies the actor and path that recorded it
+
+### Requirement: Receipt work begins with a controlled two-path measurement
+The first receipt verification artifact SHALL send one controlled message through the direct CLI delivery path and one through the durable-outbox sweeper path, then read and compare the delivery ledger after each. The artifact SHALL report observed evidence without assuming path equivalence or a sweeper defect before measurement.
+
+#### Scenario: Direct and swept deliveries are measured
+- **WHEN** the controlled two-path verification runs
+- **THEN** it records the delivery-ledger evidence attributable to the direct CLI message
+- **AND** records the delivery-ledger evidence attributable to the durable-outbox sweeper message
+- **AND** reports whether the paths are equivalent, different, or inconclusive
+- **AND** does not prescribe hardening unless the measured result establishes a gap

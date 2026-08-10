@@ -4,13 +4,14 @@
 
 ## 1. Message identity, provenance, and truthful receipts (strongest requirement)
 
-- [ ] 1.1 Define typed composition envelope, immutable message and seat identity, typed operator origin surface/channel, channel-consumed authenticated operator identity, hop identity, routing class, and recipient class; make display names presentation-only and define explicit legacy/unattributed decoding.
-- [ ] 1.2 Assign identity and provenance at every composition ingress and preserve them through durable queueing, relays, retries, and transport serialization.
-- [ ] 1.3 Route operator replies to the recorded origin surface/channel, with pending/failure behavior and no silent fallback to another surface.
-- [ ] 1.4 Unify dispatch-footer eligibility and receipt-registry eligibility so every emitted acknowledgement instruction is satisfiable, including coordinator recipients.
-- [ ] 1.5 Implement the durable per-recipient receipt state machine and a one-query history by message ID, including attempts, duplicates, timestamps, actors, and paths.
-- [ ] 1.6 Add positive and negative controls for multi-nonce duplicates, nonce-less legacy arrivals, coordinator acknowledgement, unsupported acknowledgement suppression, dropped-vs-acked distinction, and reply-to-origin across relay hops.
-- [ ] 1.7 Replace truncated random message/nonce generation with full configured entropy and bind registry acknowledgement/consumption to nonce plus message ID plus recipient; test collision refusal and rename-stable delivery history.
+- [ ] 1.1 Run the controlled two-path receipt measurement: send one message through direct CLI delivery and one through the durable-outbox sweeper, read the delivery ledger after each, and report equivalent, different, or inconclusive evidence without assuming or hardening a sweeper gap before measurement.
+- [ ] 1.2 Define typed composition envelope, immutable message and seat identity, typed operator origin surface/channel, channel-consumed authenticated operator identity, hop identity, routing class, and recipient class; make display names presentation-only and define explicit legacy/unattributed decoding.
+- [ ] 1.3 Assign identity and provenance at every composition ingress and preserve them through durable queueing, relays, retries, and transport serialization.
+- [ ] 1.4 Route operator replies to the recorded origin surface/channel, with pending/failure behavior and no silent fallback to another surface.
+- [ ] 1.5 Unify dispatch-footer eligibility and receipt-registry eligibility so every emitted acknowledgement instruction is satisfiable, including coordinator recipients.
+- [ ] 1.6 Implement the durable per-recipient receipt state machine and a one-query history by message ID, including attempts, duplicates, timestamps, actors, and paths.
+- [ ] 1.7 Add positive and negative controls for multi-nonce duplicates, nonce-less legacy arrivals, coordinator acknowledgement, unsupported acknowledgement suppression, dropped-vs-acked distinction, and reply-to-origin across relay hops.
+- [ ] 1.8 Replace truncated random message/nonce generation with full configured entropy and bind registry acknowledgement/consumption to nonce plus message ID plus recipient; test collision refusal and rename-stable delivery history.
 
 ## 2. Atomic topology apply
 
@@ -52,23 +53,24 @@
 - [ ] 6.6 Add a dual-read legacy adapter for current awaiting/blocked decisions and attached briefs, deduplicate against explicit records, expose migration coverage, and fail cutover on any previously visible unresolved item loss.
 - [ ] 6.7 After verified lossless migration, populate operator decisions only from explicit `operator_decision` reasons while retaining other blocked classes in separate visible status populations.
 - [ ] 6.8 During implementation planning, evaluate an existing burn-on-read service and a minimal product-owned implementation against the same invariants; record the delegated build-versus-adopt decision without prejudging it in design.
-- [ ] 6.9 Add optional opaque sensitive-attachment references whose first authorized retrieval atomically delivers and destroys the value, while later reads expose only consumer/time state.
+- [ ] 6.9 Add optional opaque sensitive-attachment references with atomic claim-and-destroy before transfer, at-most-once disclosure, confirmed `consumed` state, and ambiguous `consumed_unconfirmed` state that never permits redisclosure.
 - [ ] 6.10 Enforce mandatory unread-token expiry and prove sensitive values never enter board documents, compiled goal payloads, presentation APIs, logs, caches, analytics, or exports.
-- [ ] 6.11 Test successful single read, concurrent-reader exclusion, consumed-state auditability, failed-delivery atomicity, expiry-before-read, unauthorized access, and board-value negative controls.
+- [ ] 6.11 Test confirmed consumption, connection loss after claim, failure proven before claim, concurrent-reader exclusion, no redisclosure from `consumed_unconfirmed`, expiry-before-read, unauthorized access, and board-value negative controls.
 
 ## 7. Durable seat attachments
 
 - [ ] 7.1 Change goal owner, conversation-agent, and work-item agent attachments to immutable seat IDs with current display-name projections.
 - [ ] 7.2 Change launch-recipe keys to immutable seat IDs with optional display-name metadata.
-- [ ] 7.3 Add fail-closed, unique-resolution migrations for legacy name-valued goal attachments and name-keyed launch recipes.
-- [ ] 7.4 Test rename survival plus missing, ambiguous, and reused-name negative controls for goals and launch recovery.
+- [ ] 7.3 Add fail-closed migrations for legacy name-valued goal attachments and name-keyed launch recipes that first require nonempty, canonically valid, globally unique seat IDs, then require unique name resolution.
+- [ ] 7.4 Test rename survival plus empty, invalid, duplicated, missing, ambiguous, and reused-identity negative controls independently at both migration seams.
 
 ## 8. Versioned whole-file doctrine assets
 
 - [ ] 8.1 Add packaged version/digest metadata and installed-origin records for whole-file doctrine assets.
 - [ ] 8.2 Atomically refresh an unmodified prior packaged asset to a newer version.
 - [ ] 8.3 Detect local edits, stage the packaged candidate, and implement explicit keep-local, accept-packaged, and merge resolutions without silent overwrite.
-- [ ] 8.4 Persist resolution provenance and surface continuing drift; test unmodified refresh, all three conflict choices, interrupted writes, and repeated upgrades.
+- [ ] 8.4 Migrate metadata-less installations by binding exact known historical package digests as unmodified and otherwise preserving local bytes pending explicit resolution.
+- [ ] 8.5 Persist resolution provenance and surface continuing drift; test known historical matches, unknown provenance, all three conflict choices, interrupted writes, and repeated upgrades.
 
 ## 9. Integration and release gate
 
