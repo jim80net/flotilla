@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -124,11 +125,31 @@ func TestClaudeAssessParity(t *testing.T) {
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
 				parseBusy:   deliver.ParseBusy,
+				parseBusyAt: deliver.ParseBusyAt,
+				cursorState: func(string) (int, bool, error) {
+					lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
+					return len(lines) - 1, false, nil
+				},
 			}
 			if got := c.Assess("0:0.0"); got != tc.want {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClaudeAssessHistoricalSpinnerPromptPairIsNotWorking(t *testing.T) {
+	captured := "✻ Historical… (3s · ↓ 25 tokens)\n❯ old prompt\n● current response"
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return captured, nil },
+		parseBusy:   deliver.ParseBusy,
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("historical spinner+prompt pair Assess = %v, want idle", got)
 	}
 }
 

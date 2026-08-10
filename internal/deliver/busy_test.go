@@ -87,3 +87,16 @@ func TestParseBusy(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBusyAtUsesCursorProvenance(t *testing.T) {
+	captured := "✻ Historical… (3s · ↓ 25 tokens)\n❯ old prompt\n● later response\n✽ Working… (2s · ↓ 4 tokens)\n❯ "
+	if ParseBusyAt(captured, 2) {
+		t.Fatal("historical spinner+prompt at a non-cursor row classified busy")
+	}
+	if !ParseBusyAt(captured, 4) {
+		t.Fatal("live cursor composer with adjacent spinner did not classify busy")
+	}
+	if ParseBusy("✻ Historical…\n❯ old prompt\n● later response") {
+		t.Fatal("text fallback treated historical prompt followed by content as live")
+	}
+}
