@@ -60,7 +60,7 @@ GENERIC_PATTERNS=(
   'github_pat_[A-Za-z0-9_]{20,}'
   'xox[baprs]-[A-Za-z0-9-]{10,}'
   'xai-[A-Za-z0-9]{20,}'
-  'sk-(ant-)?[A-Za-z0-9_-]{20,}'
+  '(?<![A-Za-z0-9_-])sk-(ant-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])'
   'AKIA[0-9A-Z]{16}'
   '-----BEGIN [A-Z ]*PRIVATE KEY-----'
 )
@@ -163,22 +163,64 @@ scan_file() {
   fi
 }
 
-scan_issues() {
-  echo "== boundary guard: scanning open issues + PRs (gh) =="
-  command -v gh >/dev/null || { echo "gh not available; skipping issues scan"; return; }
-  local payload
-  payload="$(gh issue list --state open --limit 300 --json number,title,body 2>/dev/null || echo '[]')"
-  payload="$payload$(gh pr list --state open --limit 300 --json number,title,body 2>/dev/null || echo '[]')"
-  if echo "$payload" | grep -nIP "$full_alternation" >/dev/null 2>&1; then
-    echo "PRIVATE TOKEN found in an open issue/PR:"
-    echo "$payload" | grep -oIP "\"number\":[0-9]+|$full_alternation" | grep -B1 -P "$full_alternation" || true
+scan_issue_payload() {
+  local payload="$1"
+  local source="$2"
+  local encoded object number content
+  if ! echo "$payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "boundary scan error: $source payload is not a JSON array"
     fail=1
-  else
-    echo "open issues/PRs clean."
+    return
   fi
-  if [ -n "$warn_alternation" ]; then
-    warn_report "$(echo "$payload" | grep -nIP "$warn_alternation" 2>/dev/null || true)"
-  fi
+  while IFS= read -r encoded; do
+    [ -z "$encoded" ] && continue
+    if ! object="$(printf '%s' "$encoded" | base64 --decode 2>/dev/null)"; then
+      echo "boundary scan error: could not decode a $source object"
+      fail=1
+      continue
+    fi
+    if ! number="$(printf '%s' "$object" | jq -er '.number | numbers' 2>/dev/null)"; then
+      echo "boundary scan error: $source object has no numeric number"
+      fail=1
+      continue
+    fi
+    if ! content="$(printf '%s' "$object" | jq -er '[(.title // ""), (.body // "")] | map(strings) | join("\n")' 2>/dev/null)"; then
+      echo "boundary scan error: $source #$number has invalid title/body fields"
+      fail=1
+      continue
+    fi
+    if printf '%s\n' "$content" | grep -qIP "$full_alternation" 2>/dev/null; then
+      echo "$source #$number"
+      fail=1
+    fi
+    if [ -n "$warn_alternation" ] && printf '%s\n' "$content" | grep -qIP "$warn_alternation" 2>/dev/null; then
+      warn_report "$source #$number"
+    fi
+  done < <(echo "$payload" | jq -r '.[] | @base64' 2>/dev/null)
+}
+
+scan_issues() {
+	echo "== boundary guard: scanning open issues + PRs (gh) =="
+	command -v gh >/dev/null || { echo "gh not available; skipping issues scan"; return; }
+	local issues prs before
+	if ! issues="$(gh issue list --state open --limit 300 --json number,title,body 2>/dev/null)"; then
+		echo "boundary scan error: could not list open issues"
+		fail=1
+		return
+	fi
+	if ! prs="$(gh pr list --state open --limit 300 --json number,title,body 2>/dev/null)"; then
+		echo "boundary scan error: could not list open PRs"
+		fail=1
+		return
+	fi
+	before="$fail"
+	scan_issue_payload "$issues" "issue"
+	scan_issue_payload "$prs" "PR"
+	if [ "$fail" -eq "$before" ]; then
+		echo "open issues/PRs clean."
+	else
+		echo "PRIVATE TOKEN found in the open issue/PR objects listed above."
+	fi
 }
 
 # Dispatch. `--file F` scans one file (hook + conformance test); otherwise the tree
