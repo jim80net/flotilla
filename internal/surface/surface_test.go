@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -112,8 +113,8 @@ func TestClaudeAssessParity(t *testing.T) {
 		{"panecommand error → unknown (transient glitch, not a crash)", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
 		{"capture error → unknown (#55: non-material, not a false finish)", "node", nil, false, "", boom, StateUnknown},
-		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)", nil, StateWorking},
-		{"esc-to-interrupt → working", "node", nil, false, "doing\nesc to interrupt", nil, StateWorking},
+		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)\n❯ ", nil, StateWorking},
+		{"legacy esc-to-interrupt prose → idle", "node", nil, false, "doing\nesc to interrupt\n❯ ", nil, StateIdle},
 		{"idle composer → idle", "node", nil, false, "❯ \n  ⏵⏵ auto mode on", nil, StateIdle},
 		{"worktree-exit prompt → awaiting-input", "node", nil, false, "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm", nil, StateAwaitingInput},
 	}
@@ -123,12 +124,38 @@ func TestClaudeAssessParity(t *testing.T) {
 				paneCommand: func(string) (string, error) { return tc.cmd, tc.cmdErr },
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
-				parseBusy:   deliver.ParseBusy,
+				parseBusyAt: deliver.ParseBusyAt,
+				cursorState: func(string) (int, bool, error) {
+					lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
+					return len(lines) - 1, false, nil
+				},
 			}
 			if got := c.Assess("0:0.0"); got != tc.want {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClaudeAssessHistoricalSpinnerPromptPairIsNotWorking(t *testing.T) {
+	captured := "✻ Historical… (3s · ↓ 25 tokens)\n❯ old prompt\n● current response"
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return captured, nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("historical spinner+prompt pair Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 0, false, errors.New("cursor unavailable") }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("cursor-error degraded arm Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 1, true, nil }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("copy-mode degraded arm Assess = %v, want idle", got)
 	}
 }
 
