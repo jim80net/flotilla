@@ -31,3 +31,20 @@ Only unresolved work explicitly classified `operator_decision` SHALL enter the o
 - **WHEN** unresolved work is classified `review_gate`
 - **THEN** it remains visible as a gate
 - **AND** it does not consume one of the three primary operator-decision positions
+
+### Requirement: Decision migration is dual-read and lossless
+Until every currently visible legacy awaiting/blocked decision and attached brief is classified with an explicit reason and stable decision reference, the decisions read model SHALL union explicit `operator_decision` records with a legacy adapter reproducing the pre-change decision and attachment population. It SHALL deduplicate by stable source reference and prefer explicit metadata. The adapter SHALL NOT be disabled until a verified migration shows no previously visible unresolved decision or attached brief is lost.
+
+#### Scenario: Legacy awaiting decision has an attached brief
+- **WHEN** an awaiting/blocked legacy decision and its brief have not yet received explicit reason metadata
+- **THEN** both remain visible through the legacy adapter
+- **AND** the decision remains eligible for primary or staged presentation
+
+#### Scenario: Decision gains explicit metadata during dual-read
+- **WHEN** a legacy-projected decision is also available as an explicit `operator_decision` with the same stable source reference
+- **THEN** the read model emits one decision using the explicit presentation metadata
+
+#### Scenario: Cutover would remove a visible decision
+- **WHEN** migration comparison finds an unresolved item visible under the legacy reader but absent from the explicit reader
+- **THEN** disabling the legacy adapter fails closed
+- **AND** status reports the unmigrated source reference

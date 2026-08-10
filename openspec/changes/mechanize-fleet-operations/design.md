@@ -43,7 +43,9 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 
 ## Area 1 — span computation
 
-Span is a projection over the accepted roster generation, not a separately authored counter. For a seat, count its direct `line` children plus active `standing_redispatch` relationships. Exclude adjutant edges and transient report-and-exit subagents. Status exposes the immutable `seat_id`, current display name, count, contributing relationship seat IDs, and topology generation so clients can join and explain the number across renames.
+Span is a projection over the accepted roster generation, not a separately authored counter. A `standing_redispatch` has immutable edge ID, owner and target seat IDs, activation time, and exactly one lifecycle state: `active`, `expired`, or `revoked`, with terminal time and reason for terminal states. Validation permits at most one active standing-redispatch edge for an owner-target pair; replay of the same edge ID is idempotent and conflicting duplicates fail closed.
+
+For a seat, form the union of target seat IDs reached by direct `line` edges and active `standing_redispatch` edges. Each distinct target contributes exactly one standing charge even when both relationship kinds connect the same owner and target. Exclude adjutant edges and transient report-and-exit subagents. Status exposes the immutable `seat_id`, current display name, count, and contributor records shaped as target `seat_id` plus contributing relationship kinds/edge IDs and topology generation, so clients can explain deduplication and join the number across renames.
 
 Invalid or unresolved relationship targets fail topology validation; status must not guess. During migration, legacy parent edges map to `line`. No legacy representation is interpreted as `standing_redispatch` without an explicit declaration.
 
@@ -51,7 +53,9 @@ Invalid or unresolved relationship targets fail topology validation; status must
 
 The drowning detector evaluates the same span projection and flags counts greater than three. It is a sibling of existing operational detectors: it owns durable detector state, status projection, bounded reminders, and recovery when the count returns to three or below.
 
-The nudge goes to the drowning seat's coordinator and asks for reorganization; it does not mutate topology. Deduplication keys on seat plus topology generation and condition episode, preventing every polling tick from becoming a new alert. A roster reload immediately re-evaluates the detector census.
+The nudge goes to the drowning seat's accountable coordinator and asks for reorganization; it does not mutate topology. It is a durable `gate_escalation` message, never adjutant-compressed, and uses message identity plus truthful delivery receipts, bounded retry, and visible pending/failed status. Deduplication keys on seat plus topology generation and condition episode, preventing every polling tick from becoming a new alert.
+
+If the drowning seat is a root seat, has no resolvable coordinator, or its coordinator route is unavailable, the detector targets the configured operator-escalation destination. If neither normal nor fallback route is currently deliverable, it retains the nudge durably, marks the episode `escalation_unrouteable`, exposes the reason in fleet status, and retries when topology or transport availability changes; it never drops or reports the nudge as delivered. A roster reload immediately re-evaluates the detector census and route.
 
 ## Area 3 — adjutant routing classes
 
@@ -72,11 +76,13 @@ Topology mutation is a transaction with three visible phases:
 
 1. **Plan:** construct a complete candidate generation from the requested changes without modifying live files or runtime state.
 2. **Validate:** validate schema, immutable identities, unique names/channels, parent acyclicity, relationship targets, coordinator/adjutant constraints, channel ownership, and every derived routing invariant against the complete candidate.
-3. **Apply:** durably stage the complete generation, atomically publish one generation pointer/snapshot, then notify runtime readers to hot-reload it.
+3. **Apply:** durably stage the complete generation, ask every critical roster-dependent runtime consumer to preload and acknowledge readiness for that exact generation, then atomically move the single active-generation pointer only after the readiness barrier closes.
 
-Validation failure leaves both durable and live topology unchanged. Apply failure before publication leaves the old generation authoritative; failure after atomic publication is surfaced as a reload fault and retried against the published generation, never by rolling readers through a partial multi-file edit. Transport pins the last accepted complete generation and remains available while a candidate is invalid.
+Validation or preload failure leaves the old generation active and authoritative; the candidate remains staged with a reload fault for retry or abandonment. Sends accepted during validation, preload, or a reload fault pin the old active generation end-to-end for producer resolution, envelope metadata, queue policy, and consumer resolution. No send may cross a generation boundary within one logical delivery.
 
-Hot reload is a generation barrier: roster-dependent resolvers and the detector census re-capture from the same new snapshot before the generation is reported active. Long-running operations may finish on their pinned old generation; new operations use the new one. The audit journal records who requested the plan, candidate digest, validation outcome, publication time, and reload outcome without storing private message content.
+After every critical consumer has preloaded the candidate, activation is one atomic pointer change. New operations then pin the new generation, while already-started operations complete on the retained old snapshot. Because consumers resolve through their operation's pinned immutable snapshot rather than mutable local current state, activation cannot create a producer-new/consumer-old split. A post-activation consumer fault is a service fault against an already-preloaded snapshot: that consumer stops accepting new work and reports unhealthy rather than falling back to a different generation; other consumers do not synthesize or roll back partial topology.
+
+Hot reload is therefore a prepare/activate barrier: roster-dependent resolvers and the detector census re-capture from the same candidate snapshot and acknowledge readiness before it becomes active. The audit journal records who requested the plan, candidate digest, validation outcome, per-consumer preload outcome, activation time, and health outcome without storing private message content.
 
 ## Area 5 — decision presentation
 
@@ -88,7 +94,9 @@ Decision truth and presentation are separate. An unresolved decision remains an 
 - the authoring coordinator and update time;
 - an optional short rationale about stakes and staleness.
 
-Presentation consumes explicit blocked-reason semantics rather than interpreting every blocked marker as an operator decision. Only unresolved items classified `operator_decision` enter the operator decisions population; review gates, external dependencies, and execution blockers remain visible in their own status populations.
+Presentation consumes explicit blocked-reason semantics rather than interpreting every blocked marker as an operator decision. In steady state, only unresolved items classified `operator_decision` enter the operator decisions population; review gates, external dependencies, and execution blockers remain visible in their own status populations.
+
+Migration is dual-read and lossless. Until every currently visible legacy awaiting/blocked decision and attached brief has an explicit reason and stable decision reference, the decisions read model unions explicit `operator_decision` records with a legacy adapter that reproduces the pre-change decision population and attachment rules. It deduplicates an explicit and legacy projection by stable source reference, preferring explicit metadata. Legacy items remain eligible for primary/staged presentation and drill-in, and status exposes migration coverage. The legacy adapter may be disabled only after a verified migration proves that every item visible under the old reader remains visible under the new reader or is explicitly completed; cutover fails closed on any population difference.
 
 The YAML-to-JSON compiler preserves this metadata without changing completion semantics. The primary decisions view renders at most three unresolved decisions, ordered by explicit coordinator rank with a deterministic stable tie-break. Drill-in renders all unresolved decisions, including staged and primary items. Overflow primary designations remain visible on drill-in and are reported as a presentation warning; nothing is dropped or silently reclassified.
 

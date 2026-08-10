@@ -16,23 +16,23 @@
 
 - [ ] 2.1 Define a versioned topology bundle and offline plan representation covering roster identities, parent/relationship edges, adjutants, and channel ownership.
 - [ ] 2.2 Implement full-candidate validation for references, uniqueness, cycles, coordinator/adjutant constraints, channels, and derived routing invariants.
-- [ ] 2.3 Implement durable staging and atomic generation publication with rollback-before-publish and retry-after-publish failure semantics.
-- [ ] 2.4 Convert runtime roster readers and transport resolution to pin complete generations; hot-reload roster consumers and detector census behind one generation barrier.
-- [ ] 2.5 Add transaction audit records and tests proving an invalid or interrupted multi-part edit cannot expose partial topology or brick transport.
+- [ ] 2.3 Implement durable staging, per-consumer preload/readiness acknowledgement, and atomic activation only after the old-active-until-barrier condition is met.
+- [ ] 2.4 Convert runtime roster readers and transport resolution to pin one immutable generation end to end; retain old snapshots for overlapping operations and fail unhealthy rather than falling back across generations.
+- [ ] 2.5 Add transaction audit records and tests proving an invalid or interrupted multi-part edit cannot expose partial topology or brick transport, including a send-during-reload-fault negative control.
 
 ## 3. Span computation
 
-- [ ] 3.1 Add explicit `line`, `standing_redispatch`, and `adjutant` relationship kinds with migration of legacy parents to `line`.
-- [ ] 3.2 Derive per-seat standing-charge contributors and count from one topology generation, excluding adjutants and transient report-and-exit work.
+- [ ] 3.1 Add explicit `line`, `standing_redispatch`, and `adjutant` relationship kinds with migration of legacy parents to `line`; give standing re-dispatch edges immutable IDs and active/expired/revoked lifecycle metadata.
+- [ ] 3.2 Derive per-seat standing-charge contributors as the union of line and active standing-redispatch targets, enforcing one active owner-target re-dispatch and reporting all relationship sources for a deduplicated contributor.
 - [ ] 3.3 Expose immutable subject/contributor seat IDs, current display names, count, and topology generation in CLI and status API projections.
 - [ ] 3.4 Test mixed relationship kinds, rename-stable identities, invalid targets, and generation consistency.
 
 ## 4. Drowning detection
 
 - [ ] 4.1 Implement the greater-than-three standing-charge detector over the canonical span projection.
-- [ ] 4.2 Persist condition episodes, project status, and send a deduplicated reorganize nudge to the accountable coordinator without mutating topology.
+- [ ] 4.2 Persist condition episodes, project status, and send a deduplicated durable `gate_escalation` reorganize nudge with truthful receipts and bounded retry, without mutating topology.
 - [ ] 4.3 Re-census on accepted topology generation changes and resolve an episode when span returns to three or below.
-- [ ] 4.4 Test threshold boundaries, reminder bounds, coordinator targeting, reload behavior, and adjutant/transient negative controls.
+- [ ] 4.4 Add root-seat, missing/unrouteable coordinator, delivery-failure, operator-escalation fallback, and no-route durable-status controls alongside threshold, reminder, reload, and adjutant/transient tests.
 
 ## 5. Adjutant routing classes
 
@@ -49,7 +49,8 @@
 - [ ] 6.3 Render no more than three unresolved primary decisions with deterministic ordering; render every unresolved decision on drill-in.
 - [ ] 6.4 Surface overflow/invalid presentation warnings without hiding or silently rewriting decisions.
 - [ ] 6.5 Test compiler preservation, legacy defaults, top-three bounds, stable ties, overflow, and completed-decision exclusion.
-- [ ] 6.6 Populate operator decisions only from explicit `operator_decision` reasons; retain other blocked classes in separate visible status populations.
+- [ ] 6.6 Add a dual-read legacy adapter for current awaiting/blocked decisions and attached briefs, deduplicate against explicit records, expose migration coverage, and fail cutover on any previously visible unresolved item loss.
+- [ ] 6.7 After verified lossless migration, populate operator decisions only from explicit `operator_decision` reasons while retaining other blocked classes in separate visible status populations.
 
 ## 7. Durable seat attachments
 
