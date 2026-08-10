@@ -620,7 +620,7 @@ func cmdRecycle(args []string) error {
 		stampGen:     deliver.StampRecycleGen,
 		readGen:      deliver.ReadRecycleGen,
 		reconcile: func(relaunchAgent, target, slot, selectedSurface string) error {
-			return reconcileRelaunchOverlay(relaunchAgent, target, selection.Recipe, agent.Surface, workspace.ActiveOverlay{}, deliver.PaneCommand)
+			return reconcileRelaunchOverlay(relaunchAgent, target, slot, selection.Recipe, agent.Surface, workspace.ActiveOverlay{}, deliver.PaneCommand)
 		},
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)

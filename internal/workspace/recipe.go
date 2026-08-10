@@ -25,11 +25,6 @@ const ActiveHarnessFileName = "active-harness.json"
 // "fallback-1", … in chain order. These names are the overlay's `slot` vocabulary.
 const SlotPrimary = "primary"
 
-// SlotObservedUnslotted records a live, recognized harness whose surface is not
-// represented by the current launch chain. It preserves empirical routing truth
-// without falsely assigning the observation to an incompatible recipe slot.
-const SlotObservedUnslotted = "observed-unslotted"
-
 // ActiveOverlay is the parsed `~/.flotilla/<agent>/active-harness.json`: the live slot
 // a desk is running plus the metadata a switch records. It is host-local and written
 // atomically (WriteActiveOverlay); an absent overlay means the primary slot. The
@@ -272,9 +267,6 @@ func ResolveResumeSelection(agent string, flat *launch.Config, defaultSurface st
 	}
 	if ov.Slot == "" || ov.Surface == "" {
 		return ResumeSelection{}, fmt.Errorf("resume %q: active-harness overlay must name both slot and surface", agent)
-	}
-	if ov.Slot == SlotObservedUnslotted {
-		return ResumeSelection{Slot: ov.Slot, Surface: ov.Surface, Source: "active-harness observed-unslotted", Recipe: chain}, nil
 	}
 	selection, err := resumeSelectionForSlot(chain, ov.Slot, defaultSurface, "active-harness overlay")
 	if err != nil {

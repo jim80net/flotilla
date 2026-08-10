@@ -179,7 +179,7 @@ func TestRunRecycleReconcilesStaleOverlayAfterConfirmedRelaunch(t *testing.T) {
 	r := happyRec()
 	ops := fakeRecycleOps(r)
 	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
-		return reconcileRelaunchOverlay(agent, target, launch.Recipe{Launch: "claude"}, "claude-code", workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
+		return reconcileRelaunchOverlay(agent, target, workspace.SlotPrimary, launch.Recipe{Launch: "claude"}, "claude-code", workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
 	}
 	plan := testPlan()
 	plan.slot = workspace.SlotPrimary
