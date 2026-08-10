@@ -28,7 +28,7 @@ chmod +x "$FAKE_BIN/gh"
 
 run_guard() {
   local issues="$1"
-  local prs="${2:-[]}" 
+  local prs="${2:-[]}"
   set +e
   OUTPUT="$(cd "$REPO" && env \
     PATH="$FAKE_BIN:$PATH" \
@@ -83,6 +83,12 @@ require_contains 'open issues/PRs clean.'
 run_guard '[]' '[]'
 [[ "$RC" -eq 0 ]]
 require_contains 'open issues/PRs clean.'
+
+# Malformed object fields fail closed instead of disappearing from a string-only map.
+run_guard '[{"body":{"nested":"clean"},"number":4,"title":"clean"}]'
+[[ "$RC" -eq 1 ]]
+require_contains 'boundary scan error: issue #4 has invalid title/body fields'
+require_absent 'open issues/PRs clean.'
 
 # Advisory matches use the same per-object attribution without failing the gate.
 WARN_PATTERN='TEST_WARN_[A-Z]+' run_guard '[{"body":"TEST_WARN_ALPHA","number":12,"title":"clean"}]'

@@ -184,7 +184,12 @@ scan_issue_payload() {
       fail=1
       continue
     fi
-    if ! content="$(printf '%s' "$object" | jq -er '[(.title // ""), (.body // "")] | map(strings) | join("\n")' 2>/dev/null)"; then
+    if ! content="$(printf '%s' "$object" | jq -er '
+      if ((.title | type) == "string" and (.body | type) == "string")
+      then [.title, .body] | join("\n")
+      else error("title/body must be strings")
+      end
+    ' 2>/dev/null)"; then
       echo "boundary scan error: $source #$number has invalid title/body fields"
       fail=1
       continue
