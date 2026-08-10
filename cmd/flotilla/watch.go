@@ -1261,6 +1261,7 @@ func cmdWatch(args []string) error {
 			if err != nil {
 				return err
 			}
+			backstop.SetIdentifiedWake(plainSend)
 			go backstop.Run(ctx)
 			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s working-followup=%s)\n",
 				*unackedPath, timing.ScanInterval, timing.MinAge, timing.WorkingFollowUp)

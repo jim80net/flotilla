@@ -109,6 +109,24 @@ func TestUnackedBackstop_NoOperatorIDInert(t *testing.T) {
 	}
 }
 
+func TestUnackedBackstop_RetryPreservesLogicalDeliveryIdentity(t *testing.T) {
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	cfg := &roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}, Agents: []roster.Agent{{Name: "cos"}}}
+	msg := transport.Message{ID: "message-100", AuthorID: "op", Content: "Please review this", Timestamp: now.Add(-45 * time.Minute)}
+	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {msg}}}, "", "", nil, nil, nil)
+	var ids []string
+	u.SetIdentifiedWake(func(_, _, deliveryID string) error {
+		ids = append(ids, deliveryID)
+		return surface.ErrBusy
+	})
+	st := unackedState{}
+	u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now)
+	u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now.Add(5*time.Minute))
+	if len(ids) != 2 || ids[0] != "unacked:C1:message-100" || ids[1] != ids[0] {
+		t.Fatalf("logical delivery identity changed across retry: %v", ids)
+	}
+}
+
 func TestUnackedBackstop_PrunePersistsOnQuietSweep(t *testing.T) {
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
