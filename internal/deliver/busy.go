@@ -136,26 +136,6 @@ func parseCursorSnapshotOutput(out string) (cursorX, cursorY int, visible, inMod
 	return x, y, fields[2] == "1", fields[3] == "1", nil
 }
 
-// ParseBusy is the testable core: true only when the row immediately above the
-// structurally located composer shows the current glyph+gerund working spinner.
-// Position is the available render provenance: identical marker prose quoted in
-// conversation history cannot describe the active state. The unsupported legacy
-// "esc to interrupt" substring is deliberately not a signal; current supported
-// Claude Code renders the anchored spinner.
-func ParseBusy(captured string) bool {
-	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	composer := len(lines) - 1
-	for composer >= 0 && strings.TrimSpace(lines[composer]) == "" {
-		composer--
-	}
-	// The text-only compatibility path accepts only a bottom-most composer row.
-	// A prompt followed by conversation content is historical, not live chrome.
-	if composer < 0 || !claudeComposer.MatchString(lines[composer]) {
-		return false
-	}
-	return composer > 0 && workingSpinner.MatchString(lines[composer-1])
-}
-
 // ParseBusyAt uses the terminal cursor as provenance for the live composer.
 // A historical spinner+prompt pair elsewhere in the capture cannot classify
 // Working because the terminal does not vouch for that prompt row.

@@ -124,7 +124,6 @@ func TestClaudeAssessParity(t *testing.T) {
 				paneCommand: func(string) (string, error) { return tc.cmd, tc.cmdErr },
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
-				parseBusy:   deliver.ParseBusy,
 				parseBusyAt: deliver.ParseBusyAt,
 				cursorState: func(string) (int, bool, error) {
 					lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
@@ -144,12 +143,19 @@ func TestClaudeAssessHistoricalSpinnerPromptPairIsNotWorking(t *testing.T) {
 		paneCommand: func(string) (string, error) { return "node", nil },
 		isShell:     func(string) bool { return false },
 		capturePane: func(string) (string, error) { return captured, nil },
-		parseBusy:   deliver.ParseBusy,
 		parseBusyAt: deliver.ParseBusyAt,
 		cursorState: func(string) (int, bool, error) { return 2, false, nil },
 	}
 	if got := c.Assess("0:0.0"); got != StateIdle {
 		t.Fatalf("historical spinner+prompt pair Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 0, false, errors.New("cursor unavailable") }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("cursor-error degraded arm Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 1, true, nil }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("copy-mode degraded arm Assess = %v, want idle", got)
 	}
 }
 

@@ -1,6 +1,9 @@
 package deliver
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseCursorSnapshotOutput(t *testing.T) {
 	cases := []struct {
@@ -31,7 +34,7 @@ func TestParseCursorSnapshotOutput(t *testing.T) {
 	}
 }
 
-func TestParseBusy(t *testing.T) {
+func TestParseBusyAt(t *testing.T) {
 	cases := []struct {
 		name     string
 		captured string
@@ -82,8 +85,9 @@ func TestParseBusy(t *testing.T) {
 		{"spinner in history but not composer-adjacent", "✻ Frosting… (3s · ↓ 25 tokens)\n● quoted follow-up\n❯ ", false},
 	}
 	for _, c := range cases {
-		if got := ParseBusy(c.captured); got != c.busy {
-			t.Errorf("%s: ParseBusy = %v, want %v", c.name, got, c.busy)
+		lines := strings.Split(strings.TrimRight(c.captured, "\n"), "\n")
+		if got := ParseBusyAt(c.captured, len(lines)-1); got != c.busy {
+			t.Errorf("%s: ParseBusyAt = %v, want %v", c.name, got, c.busy)
 		}
 	}
 }
@@ -95,8 +99,5 @@ func TestParseBusyAtUsesCursorProvenance(t *testing.T) {
 	}
 	if !ParseBusyAt(captured, 4) {
 		t.Fatal("live cursor composer with adjacent spinner did not classify busy")
-	}
-	if ParseBusy("✻ Historical…\n❯ old prompt\n● later response") {
-		t.Fatal("text fallback treated historical prompt followed by content as live")
 	}
 }
