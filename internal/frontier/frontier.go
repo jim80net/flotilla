@@ -364,6 +364,20 @@ func RefreshDerived(f Frame, raw []byte) (refreshed Frame, active bool, err erro
 		f.ObservedStatus = item.Classification
 		return f, true, nil
 	}
+	// The tracked identity disappeared. Advance the derived frontier to the source's next
+	// actionable item; the caller CAS-replaces the evaluated frame so a concurrent authored frame
+	// still wins. Preserve the interrupt context while replacing only source-derived identity.
+	next, ok, err := DeriveFromBacklog(f.Coordinator, f.SourcePath, raw)
+	if err != nil {
+		return f, false, err
+	}
+	if ok {
+		next.Priority = f.Priority
+		next.Source = f.Source
+		next.SideItem = f.SideItem
+		next.At = f.At
+		return next, true, nil
+	}
 	return f, false, nil
 }
 

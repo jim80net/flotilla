@@ -2137,6 +2137,18 @@ func returnToFrontierOnFinish(
 	frontierSource func(agent string) string,
 	readTurnFinal func(agent string) (string, bool, error),
 ) func(agent string) {
+	return returnToFrontierOnFinishWithSourceRead(cfg, rosterDir, tracker, enqueue, frontierSource, os.ReadFile, readTurnFinal)
+}
+
+func returnToFrontierOnFinishWithSourceRead(
+	cfg *roster.Config,
+	rosterDir string,
+	tracker *frontier.Tracker,
+	enqueue func(watch.Job),
+	frontierSource func(agent string) string,
+	readSource func(path string) ([]byte, error),
+	readTurnFinal func(agent string) (string, bool, error),
+) func(agent string) {
 	if tracker == nil {
 		return nil
 	}
@@ -2170,7 +2182,7 @@ func returnToFrontierOnFinish(
 				}
 				return
 			}
-			raw, err := os.ReadFile(f.SourcePath)
+			raw, err := readSource(f.SourcePath)
 			if err != nil {
 				if tracker.RecordSourceError(agent) {
 					log.Printf("flotilla watch: return-to-frontier detector error %s: source %q unreadable: %v; retaining evidence and suppressing nudge", agent, f.SourcePath, err)
@@ -2191,7 +2203,7 @@ func returnToFrontierOnFinish(
 				}
 				return
 			}
-			if refreshed.SourceRevision != f.SourceRevision || refreshed.ReturnTo != f.ReturnTo || refreshed.ObservedStatus != f.ObservedStatus {
+			if refreshed.ItemID != f.ItemID || refreshed.SourceRevision != f.SourceRevision || refreshed.ReturnTo != f.ReturnTo || refreshed.ObservedStatus != f.ObservedStatus {
 				replaced, err := frontier.ReplaceDerivedIfUnchanged(path, f, refreshed)
 				if err != nil {
 					log.Printf("flotilla watch: return-to-frontier refresh failed for %s: %v", agent, err)

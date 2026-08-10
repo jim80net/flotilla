@@ -160,7 +160,7 @@ func TestReturnToFrontierRefreshesDerivedFrameAtomically(t *testing.T) {
 	recordFrontierOnBuffer(dir, "alpha-xo", source, []string{"side item"})
 	path := roster.LayerFrontierPath(dir, "alpha-xo")
 	before, _, _ := frontier.Load(path)
-	if err := os.WriteFile(source, []byte("## Backlog\n- [next] exact work\n"), 0o600); err != nil {
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] replacement work\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
@@ -173,11 +173,51 @@ func TestReturnToFrontierRefreshesDerivedFrameAtomically(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load refreshed: ok=%v err=%v", ok, err)
 	}
-	if after.ItemID != before.ItemID || after.SourceRevision == before.SourceRevision || after.ObservedStatus != "next" {
+	if after.ItemID == before.ItemID || after.SourceRevision == before.SourceRevision || after.ObservedStatus != "next" || !strings.Contains(after.ReturnTo, "replacement work") {
 		t.Fatalf("atomic refresh = %+v, before %+v", after, before)
 	}
 	if len(jobs) != 1 {
 		t.Fatalf("active refreshed frame jobs=%d, want 1", len(jobs))
+	}
+}
+
+func TestReturnToFrontierReplacementPreservesConcurrentAuthoredFrame(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "alpha.md")
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] old item\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordFrontierOnBuffer(dir, "alpha-xo", source, []string{"side item"})
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] replacement item\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := roster.LayerFrontierPath(dir, "alpha-xo")
+	authored := frontier.Frame{Coordinator: "alpha-xo", ReturnTo: "authored priority", Origin: frontier.OriginAuthored}
+	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
+	var jobs []watch.Job
+	hook := returnToFrontierOnFinishWithSourceRead(cfg, dir, frontier.NewTracker(),
+		func(j watch.Job) { jobs = append(jobs, j) },
+		func(string) string { return source },
+		func(sourcePath string) ([]byte, error) {
+			raw, err := os.ReadFile(sourcePath)
+			if err != nil {
+				return nil, err
+			}
+			// Simulate deliberate authoring after the finish path read the derived snapshot but
+			// before it attempts the derived-only CAS replacement.
+			if err := frontier.Save(path, authored); err != nil {
+				return nil, err
+			}
+			return raw, nil
+		},
+		func(string) (string, bool, error) { return "side item done", true, nil })
+	hook("alpha-xo")
+	if len(jobs) != 0 {
+		t.Fatalf("stale derived replacement nudged over authored frame: %+v", jobs)
+	}
+	got, ok, err := frontier.Load(path)
+	if err != nil || !ok || got.Origin != frontier.OriginAuthored || got.ReturnTo != authored.ReturnTo {
+		t.Fatalf("concurrent authored frame = %+v ok=%v err=%v", got, ok, err)
 	}
 }
 

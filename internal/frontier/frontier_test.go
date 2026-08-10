@@ -225,6 +225,28 @@ func TestDerivedSourceNextToDoneRetires(t *testing.T) {
 	}
 }
 
+func TestDerivedSourceMissingIdentityAdvancesToNextActionable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alpha.md")
+	oldRaw := []byte("## Backlog\n- [next] old item\n")
+	old, ok, err := DeriveFromBacklog("alpha-xo", path, oldRaw)
+	if err != nil || !ok {
+		t.Fatalf("derive old: ok=%v err=%v", ok, err)
+	}
+	old.Source = "adjutant-buffer"
+	old.SideItem = "side item"
+	newRaw := []byte("## Backlog\n- [next] new item\n")
+	refreshed, active, err := RefreshDerived(old, newRaw)
+	if err != nil || !active {
+		t.Fatalf("refresh replacement: active=%v err=%v", active, err)
+	}
+	if refreshed.ItemID == old.ItemID || !strings.Contains(refreshed.ReturnTo, "new item") {
+		t.Fatalf("replacement did not advance: old=%+v refreshed=%+v", old, refreshed)
+	}
+	if refreshed.Source != old.Source || refreshed.SideItem != old.SideItem {
+		t.Fatalf("replacement lost interrupt context: %+v", refreshed)
+	}
+}
+
 func TestDerivedSourceRemovedDelegatedBlockedAndAwaitingRetire(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alpha.md")
 	original := []byte("## Backlog\n- [in-flight] validate exact item\n")
@@ -233,7 +255,7 @@ func TestDerivedSourceRemovedDelegatedBlockedAndAwaitingRetire(t *testing.T) {
 		t.Fatalf("derive: ok=%v err=%v", ok, err)
 	}
 	for name, raw := range map[string]string{
-		"removed":       "## Backlog\n- [next] another item\n",
+		"removed":       "## Backlog\n",
 		"delegated":     "## Backlog\n- [in-flight] [delegated] validate exact item\n",
 		"blocked":       "## Backlog\n- [blocked] validate exact item\n",
 		"awaiting-auth": "## Backlog\n- [awaiting-auth] validate exact item\n",
