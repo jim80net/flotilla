@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestCheckResumeViaReturnToPointer(t *testing.T) {
@@ -58,12 +59,10 @@ func TestRecordPreemptRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flotilla-xo-frontier.json")
 	f := Frame{
-		Coordinator: "xo",
-		ReturnTo:    "[in-flight] goal-loop step 1",
-		Priority:    PriorityMechanical,
-		Source:      "adjutant-buffer",
-		SideItem:    "backend: edge",
-		At:          time.Now().UTC(),
+		Coordinator: "xo", ReturnTo: "[in-flight] goal-loop step 1",
+		Priority: PriorityMechanical, Source: "adjutant-buffer", SideItem: "backend: edge",
+		SourcePath: "backlog.md", ItemID: "sha256:item", SourceRevision: "sha256:revision",
+		ObservedStatus: "in-flight", At: time.Now().UTC(),
 	}
 	if err := RecordPreempt(path, f); err != nil {
 		t.Fatal(err)
@@ -94,7 +93,8 @@ func TestRecordPreemptPreservesAuthoredFrame695(t *testing.T) {
 	if err := Save(path, authored); err != nil {
 		t.Fatal(err)
 	}
-	derived := Frame{Coordinator: "xo", ReturnTo: "stale backlog fallback", Source: "seam", At: time.Now().UTC()}
+	derived := Frame{Coordinator: "xo", ReturnTo: "stale backlog fallback", Source: "seam", At: time.Now().UTC(),
+		SourcePath: "backlog.md", ItemID: "sha256:item", SourceRevision: "sha256:revision", ObservedStatus: "next"}
 	if err := RecordPreempt(path, derived); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,8 @@ func TestRecordPreemptPreservesAuthoredFrame695(t *testing.T) {
 
 func TestRecordPreemptWritesDerivedFallbackIntoEmptyFrontier695(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "frontier.json")
-	if err := RecordPreempt(path, Frame{Coordinator: "xo", ReturnTo: "backlog fallback"}); err != nil {
+	if err := RecordPreempt(path, Frame{Coordinator: "xo", ReturnTo: "backlog fallback", SourcePath: "backlog.md",
+		ItemID: "sha256:item", SourceRevision: "sha256:revision", ObservedStatus: "next"}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := Load(path)
@@ -208,6 +209,117 @@ func TestClearIfUnchangedClearsEvaluatedFrame695(t *testing.T) {
 	}
 	if _, ok, err := Load(path); err != nil || ok {
 		t.Fatalf("frame remains after conditional clear: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestDerivedSourceNextToDoneRetires(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alpha.md")
+	active := []byte("## Backlog\n- [next] finish source validation\n")
+	f, ok, err := DeriveFromBacklog("alpha-xo", path, active)
+	if err != nil || !ok {
+		t.Fatalf("derive: ok=%v err=%v", ok, err)
+	}
+	done := []byte("## Backlog\n- [done] finish source validation\n")
+	if _, active, err := RefreshDerived(f, done); err != nil || active {
+		t.Fatalf("done refresh: active=%v err=%v", active, err)
+	}
+}
+
+func TestDerivedSourceRemovedDelegatedBlockedAndAwaitingRetire(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alpha.md")
+	original := []byte("## Backlog\n- [in-flight] validate exact item\n")
+	f, ok, err := DeriveFromBacklog("alpha-xo", path, original)
+	if err != nil || !ok {
+		t.Fatalf("derive: ok=%v err=%v", ok, err)
+	}
+	for name, raw := range map[string]string{
+		"removed":       "## Backlog\n- [next] another item\n",
+		"delegated":     "## Backlog\n- [in-flight] [delegated] validate exact item\n",
+		"blocked":       "## Backlog\n- [blocked] validate exact item\n",
+		"awaiting-auth": "## Backlog\n- [awaiting-auth] validate exact item\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, active, err := RefreshDerived(f, []byte(raw)); err != nil || active {
+				t.Fatalf("refresh: active=%v err=%v", active, err)
+			}
+		})
+	}
+}
+
+func TestReplaceDerivedAtomicAndPreservesAuthored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frontier.json")
+	old := Frame{Coordinator: "alpha-xo", ReturnTo: "old", Origin: OriginDerived, ItemID: "sha256:old", At: time.Now().UTC()}
+	if err := Save(path, old); err != nil {
+		t.Fatal(err)
+	}
+	replacement := old
+	replacement.ReturnTo = "new"
+	replacement.SourceRevision = "sha256:new"
+	if replaced, err := ReplaceDerivedIfUnchanged(path, old, replacement); err != nil || !replaced {
+		t.Fatalf("replace: replaced=%v err=%v", replaced, err)
+	}
+	if replaced, err := ReplaceDerivedIfUnchanged(path, old, old); err != nil || replaced {
+		t.Fatalf("stale CAS: replaced=%v err=%v", replaced, err)
+	}
+	authored := Frame{Coordinator: "alpha-xo", ReturnTo: "authored", Origin: OriginAuthored, At: time.Now().UTC()}
+	if err := Save(path, authored); err != nil {
+		t.Fatal(err)
+	}
+	if replaced, err := ReplaceDerivedIfUnchanged(path, authored, replacement); err != nil || replaced {
+		t.Fatalf("authored replace: replaced=%v err=%v", replaced, err)
+	}
+	got, _, _ := Load(path)
+	if got.ReturnTo != "authored" {
+		t.Fatalf("authored frame overwritten: %+v", got)
+	}
+}
+
+func TestRecordPreemptAtomicallySupersedesDerivedOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frontier.json")
+	old := Frame{Coordinator: "alpha-xo", ReturnTo: "old", SourcePath: "alpha.md", ItemID: "sha256:old",
+		SourceRevision: "sha256:revision-1", ObservedStatus: "next"}
+	newer := Frame{Coordinator: "alpha-xo", ReturnTo: "new", SourcePath: "alpha.md", ItemID: "sha256:new",
+		SourceRevision: "sha256:revision-2", ObservedStatus: "in-flight"}
+	if err := RecordPreempt(path, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordPreempt(path, newer); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := Load(path)
+	if err != nil || !ok || got.ReturnTo != "new" || got.ItemID != "sha256:new" {
+		t.Fatalf("superseded derived = %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestDerivedDisplayTruncationIsRuneSafeAndIdentityIsFull(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alpha.md")
+	text := strings.Repeat("a", 111) + "界" + strings.Repeat("z", 40)
+	raw := []byte("## Backlog\n- [next] " + text + "\n")
+	f, ok, err := DeriveFromBacklog("alpha-xo", path, raw)
+	if err != nil || !ok {
+		t.Fatalf("derive: ok=%v err=%v", ok, err)
+	}
+	if !utf8.ValidString(f.ReturnTo) || len(f.ReturnTo) > 120 {
+		t.Fatalf("display pointer invalid/truncated unsafely: len=%d %q", len(f.ReturnTo), f.ReturnTo)
+	}
+	if len(f.ItemID) != len("sha256:")+64 {
+		t.Fatalf("ItemID = %q, want full sha256", f.ItemID)
+	}
+}
+
+func TestRefreshDerivedFailsClosedOnTornSource(t *testing.T) {
+	f := Frame{Origin: OriginDerived, SourcePath: "alpha.md", ItemID: "sha256:item"}
+	for name, raw := range map[string][]byte{
+		"invalid UTF-8":   {0xff, 0xfe},
+		"missing section": []byte("## Notes\n- [next] item\n"),
+		"torn marker":     []byte("## Backlog\n- [ne"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, active, err := RefreshDerived(f, raw); err == nil || active {
+				t.Fatalf("refresh: active=%v err=%v, want suppressed error", active, err)
+			}
+		})
 	}
 }
 

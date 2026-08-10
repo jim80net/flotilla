@@ -5,7 +5,9 @@
 package frontier
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/backlog"
 )
@@ -38,14 +41,18 @@ const (
 
 // Frame is the durable frontier sidecar (flotilla-<coordinator>-frontier.json).
 type Frame struct {
-	Coordinator   string    `json:"coordinator"`
-	ReturnTo      string    `json:"return_to"`
-	Priority      Priority  `json:"priority"`
-	ActiveWarrant string    `json:"active_warrant,omitempty"`
-	Source        string    `json:"interrupt_source"`
-	SideItem      string    `json:"side_item,omitempty"`
-	Origin        Origin    `json:"origin,omitempty"`
-	At            time.Time `json:"at"`
+	Coordinator    string    `json:"coordinator"`
+	ReturnTo       string    `json:"return_to"`
+	Priority       Priority  `json:"priority"`
+	ActiveWarrant  string    `json:"active_warrant,omitempty"`
+	Source         string    `json:"interrupt_source"`
+	SideItem       string    `json:"side_item,omitempty"`
+	Origin         Origin    `json:"origin,omitempty"`
+	SourcePath     string    `json:"source_path,omitempty"`
+	ItemID         string    `json:"item_id,omitempty"`
+	SourceRevision string    `json:"source_revision,omitempty"`
+	ObservedStatus string    `json:"observed_status,omitempty"`
+	At             time.Time `json:"at"`
 }
 
 // Result is the turn-final guard verdict for one coordinator finish.
@@ -201,6 +208,30 @@ func ClearIfUnchanged(path string, expected Frame) (bool, error) {
 	return cleared, err
 }
 
+// ReplaceDerivedIfUnchanged atomically replaces the evaluated derived frame. Authored frames and
+// concurrently changed derived frames are never overwritten.
+func ReplaceDerivedIfUnchanged(path string, expected, replacement Frame) (bool, error) {
+	if path == "" || expected.Origin != OriginDerived || replacement.Origin != OriginDerived {
+		return false, nil
+	}
+	replaced := false
+	err := withSidecarLock(path, func() error {
+		current, ok, err := Load(path)
+		if err != nil || !ok {
+			return err
+		}
+		if current.Origin != OriginDerived || !sameFrame(current, expected) {
+			return nil
+		}
+		if err := saveUnlocked(path, replacement); err != nil {
+			return err
+		}
+		replaced = true
+		return nil
+	})
+	return replaced, err
+}
+
 func clearUnlocked(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove frontier %q: %w", path, err)
@@ -216,15 +247,23 @@ func sameFrame(a, b Frame) bool {
 		a.Source == b.Source &&
 		a.SideItem == b.SideItem &&
 		a.Origin == b.Origin &&
+		a.SourcePath == b.SourcePath &&
+		a.ItemID == b.ItemID &&
+		a.SourceRevision == b.SourceRevision &&
+		a.ObservedStatus == b.ObservedStatus &&
 		a.At.Equal(b.At)
 }
 
 // RecordPreempt writes a derived frontier fallback when a non-urgent interrupt
-// buffers at the seam. An existing non-empty frame is authoritative and survives;
-// returnTo must be a durable pointer (backlog line, issue id, goal-loop nonce), not raw history.
+// buffers at the seam. An authored frame is authoritative and survives. A derived frame is
+// atomically superseded by the newly observed source item so stale derived state is not cached
+// forever; returnTo is display text, while ItemID is the durable full identity.
 func RecordPreempt(path string, f Frame) error {
 	if path == "" || strings.TrimSpace(f.ReturnTo) == "" {
 		return nil
+	}
+	if f.SourcePath == "" || f.ItemID == "" || f.SourceRevision == "" || f.ObservedStatus == "" {
+		return errors.New("derived frontier requires source_path, item_id, source_revision, and observed_status")
 	}
 	if f.At.IsZero() {
 		f.At = time.Now().UTC()
@@ -234,16 +273,17 @@ func RecordPreempt(path string, f Frame) error {
 	}
 	f.Origin = OriginDerived
 	return withSidecarLock(path, func() error {
-		if _, ok, err := Load(path); err != nil {
+		if current, ok, err := Load(path); err != nil {
 			return err
-		} else if ok {
+		} else if ok && current.Origin != OriginDerived {
 			return nil
 		}
 		return saveUnlocked(path, f)
 	})
 }
 
-// ReturnToFromBacklog returns the first actionable backlog item line as a durable pointer.
+// ReturnToFromBacklog returns the first actionable backlog item as display text. Durable derived
+// frames should use DeriveFromBacklog, which additionally records full identity and provenance.
 func ReturnToFromBacklog(md string) (pointer, label string, ok bool) {
 	st := backlog.Parse(md)
 	var line string
@@ -258,12 +298,124 @@ func ReturnToFromBacklog(md string) (pointer, label string, ok bool) {
 	if line == "" {
 		return "", "", false
 	}
-	pointer = line
-	if len(pointer) > 120 {
-		pointer = pointer[:120]
-	}
+	pointer = DisplayText(line)
 	label = pointer
 	return pointer, label, true
+}
+
+// DeriveFromBacklog returns a derived frame for the first actionable, non-delegated item.
+// The item identity excludes its status marker so next→done can be recognized as the same item.
+func DeriveFromBacklog(coordinator, sourcePath string, raw []byte) (Frame, bool, error) {
+	if !utf8.Valid(raw) {
+		return Frame{}, false, fmt.Errorf("frontier source %q is not valid UTF-8", sourcePath)
+	}
+	scan := backlog.Scan(string(raw))
+	if !scan.Found {
+		return Frame{}, false, fmt.Errorf("frontier source %q has no ## Backlog section", sourcePath)
+	}
+	if err := validateSourceScan(sourcePath, scan); err != nil {
+		return Frame{}, false, err
+	}
+	for _, item := range scan.Items {
+		if !actionableItem(item) || delegatedBacklogLine(item.Head) {
+			continue
+		}
+		return Frame{
+			Coordinator:    coordinator,
+			ReturnTo:       DisplayText(item.Head),
+			ActiveWarrant:  DisplayText(item.Head),
+			Origin:         OriginDerived,
+			SourcePath:     filepath.Clean(sourcePath),
+			ItemID:         itemID(item),
+			SourceRevision: sourceDigest(raw),
+			ObservedStatus: item.Classification,
+		}, true, nil
+	}
+	return Frame{}, false, nil
+}
+
+// RefreshDerived verifies a derived frame against a freshly read exact source. active is false
+// when the item was removed or moved to a settle-neutral/done/delegated state. An error means the
+// source is unverifiable; callers retain the frame as evidence but must suppress its active claim.
+func RefreshDerived(f Frame, raw []byte) (refreshed Frame, active bool, err error) {
+	if f.Origin != OriginDerived || f.SourcePath == "" || f.ItemID == "" {
+		return f, true, nil
+	}
+	if !utf8.Valid(raw) {
+		return f, false, fmt.Errorf("frontier source %q is not valid UTF-8", f.SourcePath)
+	}
+	scan := backlog.Scan(string(raw))
+	if !scan.Found {
+		return f, false, fmt.Errorf("frontier source %q has no ## Backlog section", f.SourcePath)
+	}
+	if err := validateSourceScan(f.SourcePath, scan); err != nil {
+		return f, false, err
+	}
+	for _, item := range scan.Items {
+		if itemID(item) != f.ItemID {
+			continue
+		}
+		if !actionableItem(item) || delegatedBacklogLine(item.Head) {
+			return f, false, nil
+		}
+		f.ReturnTo = DisplayText(item.Head)
+		f.ActiveWarrant = DisplayText(item.Head)
+		f.SourceRevision = sourceDigest(raw)
+		f.ObservedStatus = item.Classification
+		return f, true, nil
+	}
+	return f, false, nil
+}
+
+func validateSourceScan(path string, scan backlog.ScanResult) error {
+	for _, item := range scan.Items {
+		if item.Classification == "malformed" {
+			return fmt.Errorf("frontier source %q has a malformed item at line %d", path, item.StartLine)
+		}
+	}
+	return nil
+}
+
+func actionableItem(item backlog.Item) bool {
+	switch item.Classification {
+	case "done", "blocked", "needs-attention", "awaiting-auth":
+		return false
+	default:
+		return true
+	}
+}
+
+var itemIdentityPrefix = regexp.MustCompile(`^\s*(?:\d+\.|[-*+])\s+(?:\[[^]]+\]\s*)?`)
+
+func itemID(item backlog.Item) string {
+	identity := itemIdentityPrefix.ReplaceAllString(item.Raw, "")
+	sum := sha256.Sum256([]byte(strings.TrimSpace(identity)))
+	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
+func sourceDigest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("sha256:%x", sum[:])
+}
+
+// DisplayText returns the rune-safe, display-only projection of full source identity text.
+func DisplayText(s string) string {
+	return truncateDisplay(strings.TrimSpace(s), 120)
+}
+
+func truncateDisplay(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := 0
+	for cut < len(s) {
+		_, width := utf8.DecodeRuneInString(s[cut:])
+		if cut+width > maxBytes {
+			break
+		}
+		cut += width
+	}
+	return s[:cut]
 }
 
 func delegatedBacklogLine(line string) bool {
@@ -319,7 +471,7 @@ func distinctiveSnippet(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 24 {
 		if len(s) > 80 {
-			return s[:80]
+			return truncateDisplay(s, 80)
 		}
 		return s
 	}

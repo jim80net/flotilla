@@ -127,6 +127,8 @@ func cmdWatch(args []string) error {
 	maxQuiet := fs.Int("max-quiet-intervals", 0, "change-detector liveness ping cadence N in intervals (0 ⇒ mode default)")
 	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "the goal-driven loop's fleet backlog (markdown; - [<status>] items). Unset ⇒ the backlog gate is OFF (XO settles as before). Read fresh each tick, NOT content-hashed (it is the XO's own output)")
+	var frontierSources frontierSourceFlag
+	fs.Var(&frontierSources, "frontier-source", "published return-to source mapping coordinator=path (repeatable; --backlog-file maps only the primary XO)")
 	backlogStuckCap := fs.Int("backlog-stuck-cap", 5, "goal-driven loop: drives of one unblocked item without progress before it is escalated + deprioritized")
 	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE). When set, load agrees channels with reports_to or refuses")
 	coordinatorRecycleTenureFlag := fs.String(
@@ -519,7 +521,7 @@ func cmdWatch(args []string) error {
 					body = leaderPingBody(leaderAckPath)
 				}
 			default: // WakeMaterial
-				enqueueLayerMaterialWake(cfg, rosterDir, xo, xo, reasons, ackInstr, *settledPath, *backlogPath, injector.Enqueue)
+				enqueueLayerMaterialWake(cfg, rosterDir, xo, xo, reasons, ackInstr, *settledPath, frontierSources.pathFor(xo, xo, *backlogPath), injector.Enqueue)
 				return
 			}
 			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
@@ -538,7 +540,7 @@ func cmdWatch(args []string) error {
 				log.Printf("flotilla watch: ignoring unexpected layer wake kind %v for %q", kind, owner)
 				return
 			}
-			enqueueLayerMaterialWake(cfg, rosterDir, xo, owner, reasons, ackInstr, *settledPath, *backlogPath, injector.Enqueue)
+			enqueueLayerMaterialWake(cfg, rosterDir, xo, owner, reasons, ackInstr, *settledPath, frontierSources.pathFor(owner, xo, *backlogPath), injector.Enqueue)
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -845,6 +847,7 @@ func cmdWatch(args []string) error {
 			),
 			ReturnToFrontierOnFinish: returnToFrontierOnFinish(
 				cfg, rosterDir, frontierTracker, injector.Enqueue,
+				func(agent string) string { return frontierSources.pathFor(agent, xo, *backlogPath) },
 				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
 			),
 			DroppedDispatchOnFinish: watch.DroppedDispatchFinishHook(
@@ -2095,36 +2098,32 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 
 // recordFrontierOnBuffer persists the #530 return_to frame when a non-urgent interrupt buffers.
 func recordFrontierOnBuffer(rosterDir, owner, backlogPath string, reasons []string) {
-	returnTo, label, ok := resolveFrontierReturnTo(backlogPath)
+	f, ok, err := resolveFrontierReturnTo(owner, backlogPath)
+	if err != nil {
+		log.Printf("flotilla watch: frontier source unavailable for %q: %v", owner, err)
+		return
+	}
 	if !ok {
 		return
 	}
-	sideItem := strings.Join(reasons, "; ")
-	if len(sideItem) > 120 {
-		sideItem = sideItem[:120]
-	}
-	f := frontier.Frame{
-		Coordinator:   owner,
-		ReturnTo:      returnTo,
-		ActiveWarrant: label,
-		Priority:      frontier.PriorityMechanical,
-		Source:        "adjutant-buffer",
-		SideItem:      sideItem,
-	}
+	sideItem := frontier.DisplayText(strings.Join(reasons, "; "))
+	f.Priority = frontier.PriorityMechanical
+	f.Source = "adjutant-buffer"
+	f.SideItem = sideItem
 	if err := frontier.RecordPreempt(roster.LayerFrontierPath(rosterDir, owner), f); err != nil {
 		log.Printf("flotilla watch: frontier record failed for %q: %v", owner, err)
 	}
 }
 
-func resolveFrontierReturnTo(backlogPath string) (pointer, label string, ok bool) {
+func resolveFrontierReturnTo(owner, backlogPath string) (frontier.Frame, bool, error) {
 	if backlogPath == "" {
-		return "", "", false
+		return frontier.Frame{}, false, nil
 	}
 	raw, err := os.ReadFile(backlogPath)
 	if err != nil {
-		return "", "", false
+		return frontier.Frame{}, false, err
 	}
-	return frontier.ReturnToFromBacklog(string(raw))
+	return frontier.DeriveFromBacklog(owner, backlogPath, raw)
 }
 
 // returnToFrontierOnFinish builds the #530 frontier guard: on each coordinator finish,
@@ -2135,6 +2134,7 @@ func returnToFrontierOnFinish(
 	rosterDir string,
 	tracker *frontier.Tracker,
 	enqueue func(watch.Job),
+	frontierSource func(agent string) string,
 	readTurnFinal func(agent string) (string, bool, error),
 ) func(agent string) {
 	if tracker == nil {
@@ -2152,6 +2152,56 @@ func returnToFrontierOnFinish(
 		}
 		if !ok {
 			return
+		}
+		if f.Origin == frontier.OriginDerived {
+			if f.Coordinator != agent {
+				if tracker.RecordSourceError(agent) {
+					log.Printf("flotilla watch: return-to-frontier detector error %s: derived frame owner is %q; retaining evidence and suppressing nudge", agent, f.Coordinator)
+				}
+				return
+			}
+			published := ""
+			if frontierSource != nil {
+				published = frontierSource(agent)
+			}
+			if published == "" || filepath.Clean(published) != filepath.Clean(f.SourcePath) {
+				if tracker.RecordSourceError(agent) {
+					log.Printf("flotilla watch: return-to-frontier detector error %s: derived source %q is not published for this coordinator; retaining evidence and suppressing nudge", agent, f.SourcePath)
+				}
+				return
+			}
+			raw, err := os.ReadFile(f.SourcePath)
+			if err != nil {
+				if tracker.RecordSourceError(agent) {
+					log.Printf("flotilla watch: return-to-frontier detector error %s: source %q unreadable: %v; retaining evidence and suppressing nudge", agent, f.SourcePath, err)
+				}
+				return
+			}
+			refreshed, active, err := frontier.RefreshDerived(f, raw)
+			if err != nil {
+				if tracker.RecordSourceError(agent) {
+					log.Printf("flotilla watch: return-to-frontier detector error %s: source %q unverifiable: %v; retaining evidence and suppressing nudge", agent, f.SourcePath, err)
+				}
+				return
+			}
+			tracker.ClearSourceError(agent)
+			if !active {
+				if _, err := frontier.ClearIfUnchanged(path, f); err != nil {
+					log.Printf("flotilla watch: return-to-frontier retire failed for %s: %v", agent, err)
+				}
+				return
+			}
+			if refreshed.SourceRevision != f.SourceRevision || refreshed.ReturnTo != f.ReturnTo || refreshed.ObservedStatus != f.ObservedStatus {
+				replaced, err := frontier.ReplaceDerivedIfUnchanged(path, f, refreshed)
+				if err != nil {
+					log.Printf("flotilla watch: return-to-frontier refresh failed for %s: %v", agent, err)
+					return
+				}
+				if !replaced {
+					return
+				}
+				f = refreshed
+			}
 		}
 		text, hasFinal, err := readTurnFinal(agent)
 		if err != nil {

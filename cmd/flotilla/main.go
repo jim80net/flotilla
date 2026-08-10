@@ -310,6 +310,8 @@ flags for 'dash':
   --ack-file <path>       XO liveness ack file to age (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
   --tracker-file <path>   backlog markdown the history view reads (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
   --backlog-file <path>   drive backlog Goals uses (default $FLOTILLA_BACKLOG_FILE, else --tracker-file)
+  --frontier-source <coordinator=path>
+                            publish an owner-filtered return-to source (repeatable; backlog-file maps only the primary XO)
   --bind <addr>           local listen address (default 127.0.0.1:8787; loopback only in this phase)
   --repo <owner/name>     GitHub repo for the issue tracker (reserved for the tracker phase; unused here)
 

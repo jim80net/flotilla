@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,25 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
 )
+
+func TestFrontierSourceMappingIsOwnerFiltered(t *testing.T) {
+	var sources frontierSourceFlag
+	if err := sources.Set("alpha-xo=/trackers/alpha.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sources.Set("beta-xo=/trackers/beta.md"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sources.pathFor("alpha-xo", "alpha-xo", "/trackers/global.md"); got != "/trackers/alpha.md" {
+		t.Fatalf("alpha source = %q", got)
+	}
+	if got := sources.pathFor("beta-xo", "alpha-xo", "/trackers/global.md"); got != "/trackers/beta.md" {
+		t.Fatalf("beta source = %q", got)
+	}
+	if got := (frontierSourceFlag{}).pathFor("beta-xo", "alpha-xo", "/trackers/global.md"); got != "" {
+		t.Fatalf("foreign coordinator inherited global backlog: %q", got)
+	}
+}
 
 func TestRecordFrontierOnBufferWritesSidecar(t *testing.T) {
 	dir := t.TempDir()
@@ -30,6 +51,9 @@ func TestRecordFrontierOnBufferWritesSidecar(t *testing.T) {
 	if f.Source != "adjutant-buffer" {
 		t.Fatalf("Source = %q", f.Source)
 	}
+	if f.SourcePath != backlogPath || f.ItemID == "" || f.SourceRevision == "" || f.ObservedStatus != "in-flight" {
+		t.Fatalf("derived provenance incomplete: %+v", f)
+	}
 }
 
 func TestReturnToFrontierOnFinishClearsWhenSatisfied(t *testing.T) {
@@ -39,14 +63,15 @@ func TestReturnToFrontierOnFinishClearsWhenSatisfied(t *testing.T) {
 		Coordinator: "xo",
 		ReturnTo:    "[in-flight] resume goal-loop (#530)",
 		Source:      "adjutant-buffer",
+		Origin:      frontier.OriginAuthored,
 	}
-	if err := frontier.RecordPreempt(path, f); err != nil {
+	if err := frontier.Save(path, f); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &roster.Config{XOAgent: "xo", Agents: []roster.Agent{{Name: "xo"}}}
 	tracker := frontier.NewTracker()
 	var jobs []watch.Job
-	hook := returnToFrontierOnFinish(cfg, dir, tracker, func(j watch.Job) { jobs = append(jobs, j) },
+	hook := returnToFrontierOnFinish(cfg, dir, tracker, func(j watch.Job) { jobs = append(jobs, j) }, nil,
 		func(string) (string, bool, error) {
 			return "Resuming [in-flight] resume goal-loop (#530) — next authorized step.", true, nil
 		})
@@ -62,17 +87,129 @@ func TestReturnToFrontierOnFinishClearsWhenSatisfied(t *testing.T) {
 func TestReturnToFrontierOnFinishNudgesOnViolation(t *testing.T) {
 	dir := t.TempDir()
 	path := roster.LayerFrontierPath(dir, "xo")
-	f := frontier.Frame{Coordinator: "xo", ReturnTo: "[in-flight] #530", Source: "adjutant-buffer"}
-	if err := frontier.RecordPreempt(path, f); err != nil {
+	f := frontier.Frame{Coordinator: "xo", ReturnTo: "[in-flight] #530", Source: "adjutant-buffer", Origin: frontier.OriginAuthored}
+	if err := frontier.Save(path, f); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &roster.Config{XOAgent: "xo", Agents: []roster.Agent{{Name: "xo"}}}
 	tracker := frontier.NewTracker()
 	var job watch.Job
-	hook := returnToFrontierOnFinish(cfg, dir, tracker, func(j watch.Job) { job = j },
+	hook := returnToFrontierOnFinish(cfg, dir, tracker, func(j watch.Job) { job = j }, nil,
 		func(string) (string, bool, error) { return "Side item done. Idle.", true, nil })
 	hook("xo")
 	if job.Agent != "xo" || !strings.Contains(job.Message, "return-to-frontier") {
 		t.Fatalf("want nudge job, got %+v", job)
+	}
+}
+
+func TestReturnToFrontierRetiresDoneDerivedItemBeforeNudge(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "alpha.md")
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] complete exact work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordFrontierOnBuffer(dir, "alpha-xo", source, []string{"side item"})
+	if err := os.WriteFile(source, []byte("## Backlog\n- [done] complete exact work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
+	var jobs []watch.Job
+	hook := returnToFrontierOnFinish(cfg, dir, frontier.NewTracker(), func(j watch.Job) { jobs = append(jobs, j) },
+		func(string) string { return source },
+		func(string) (string, bool, error) { return "side item done", true, nil })
+	hook("alpha-xo")
+	if len(jobs) != 0 {
+		t.Fatalf("retired item nudged: %+v", jobs)
+	}
+	if _, ok, _ := frontier.Load(roster.LayerFrontierPath(dir, "alpha-xo")); ok {
+		t.Fatal("done derived frame was not retired")
+	}
+}
+
+func TestReturnToFrontierRejectsForeignLayerSource(t *testing.T) {
+	dir := t.TempDir()
+	alphaSource := filepath.Join(dir, "alpha.md")
+	betaSource := filepath.Join(dir, "beta.md")
+	if err := os.WriteFile(alphaSource, []byte("## Backlog\n- [next] alpha work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(betaSource, []byte("## Backlog\n- [next] beta work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordFrontierOnBuffer(dir, "alpha-xo", alphaSource, []string{"side item"})
+	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
+	var jobs []watch.Job
+	hook := returnToFrontierOnFinish(cfg, dir, frontier.NewTracker(), func(j watch.Job) { jobs = append(jobs, j) },
+		func(string) string { return betaSource },
+		func(string) (string, bool, error) { return "side item done", true, nil })
+	hook("alpha-xo")
+	if len(jobs) != 0 {
+		t.Fatalf("foreign source produced nudge: %+v", jobs)
+	}
+	if _, ok, _ := frontier.Load(roster.LayerFrontierPath(dir, "alpha-xo")); !ok {
+		t.Fatal("foreign-source mismatch discarded evidence frame")
+	}
+}
+
+func TestReturnToFrontierRefreshesDerivedFrameAtomically(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "alpha.md")
+	if err := os.WriteFile(source, []byte("## Backlog\n- [in-flight] exact work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordFrontierOnBuffer(dir, "alpha-xo", source, []string{"side item"})
+	path := roster.LayerFrontierPath(dir, "alpha-xo")
+	before, _, _ := frontier.Load(path)
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] exact work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
+	var jobs []watch.Job
+	hook := returnToFrontierOnFinish(cfg, dir, frontier.NewTracker(), func(j watch.Job) { jobs = append(jobs, j) },
+		func(string) string { return source },
+		func(string) (string, bool, error) { return "side item done", true, nil })
+	hook("alpha-xo")
+	after, ok, err := frontier.Load(path)
+	if err != nil || !ok {
+		t.Fatalf("load refreshed: ok=%v err=%v", ok, err)
+	}
+	if after.ItemID != before.ItemID || after.SourceRevision == before.SourceRevision || after.ObservedStatus != "next" {
+		t.Fatalf("atomic refresh = %+v, before %+v", after, before)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("active refreshed frame jobs=%d, want 1", len(jobs))
+	}
+}
+
+func TestReturnToFrontierUnreadableSourceSuppressesAndLogsOnce(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "alpha.md")
+	if err := os.WriteFile(source, []byte("## Backlog\n- [next] exact work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordFrontierOnBuffer(dir, "alpha-xo", source, []string{"side item"})
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{XOAgent: "alpha-xo", Agents: []roster.Agent{{Name: "alpha-xo"}}}
+	var jobs []watch.Job
+	tracker := frontier.NewTracker()
+	hook := returnToFrontierOnFinish(cfg, dir, tracker, func(j watch.Job) { jobs = append(jobs, j) },
+		func(string) string { return source },
+		func(string) (string, bool, error) { return "side item done", true, nil })
+	var logs bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(original) })
+	hook("alpha-xo")
+	hook("alpha-xo")
+	if len(jobs) != 0 {
+		t.Fatalf("unverifiable source nudged: %+v", jobs)
+	}
+	if got := strings.Count(logs.String(), "detector error"); got != 1 {
+		t.Fatalf("detector errors=%d, want exactly 1; logs=%q", got, logs.String())
+	}
+	if _, ok, _ := frontier.Load(roster.LayerFrontierPath(dir, "alpha-xo")); !ok {
+		t.Fatal("unreadable source discarded evidence frame")
 	}
 }
