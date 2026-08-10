@@ -432,6 +432,44 @@ func TestConfirmSubmitGateRefusesListNav(t *testing.T) {
 	}
 }
 
+func TestConfirmSubmitGateRefusesIdlePendingDraftBeforePaste(t *testing.T) {
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: []ComposerDisposition{ComposerPending}}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "queued delivery")
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want zero keystrokes into a human draft", d.submitCalls, enter)
+	}
+}
+
+func TestSubmitInterruptGateStillRefusesWorkingPendingBeforePaste(t *testing.T) {
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateWorking}, stateSeq: []ComposerDisposition{ComposerPending}}
+	err := newConfirm(&enter).SubmitInterrupt(d, "0:0.0", "operator delivery")
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want zero keystrokes into a pending working composer", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGateIdleClearedStillDelivers(t *testing.T) {
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerCleared, ComposerCleared},
+	}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "queued delivery"); err != nil {
+		t.Fatalf("idle cleared submit: %v", err)
+	}
+	if d.submitCalls != 1 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want one paste and no retry", d.submitCalls, enter)
+	}
+}
+
 func TestConfirmSubmitGateRefusesUndeterminedBeforePaste692(t *testing.T) {
 	enter := 0
 	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: []ComposerDisposition{ComposerUndetermined}}

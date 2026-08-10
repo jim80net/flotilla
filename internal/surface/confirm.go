@@ -200,7 +200,8 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 	//     row, REFUSE before pasting. A paste there would MIS-DELIVER the body to a background agent
 	//     AND the post-submit check would FALSE-CONFIRM it (the composer clears) — a silent wrong-
 	//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. An
-	//     Undetermined probe also fails closed because a
+	//     Pending main composer means a human or another writer has an unsubmitted draft; REFUSE so
+	//     delivery never pastes over it. An Undetermined probe also fails closed because a
 	//     highlighted selector row can share the composer's prompt glyph. The
 	//     post-submit composer state remains the delivery authority after a
 	//     positively identified composer passes this gate.
@@ -216,6 +217,9 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 			return ErrPanelBlocked
 		case ComposerListNav:
 			logPanelBlocked(pane, "gate:list-nav")
+			return ErrPanelBlocked
+		case ComposerPending:
+			logPanelBlocked(pane, "gate:composer-pending")
 			return ErrPanelBlocked
 		case ComposerUndetermined:
 			if reason := composerBlockReason(d, pane); reason != "" {
