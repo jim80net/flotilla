@@ -82,14 +82,7 @@ func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 		return false
 	}
 	for _, e := range r.Load() {
-		if nonce != "" && e.Nonce == nonce {
-			if payloadHash != "" && e.PayloadHash != "" && payloadHash != e.PayloadHash {
-				log.Printf("flotilla dispatch: NONCE COLLISION detected for %q: payload hashes differ; refusing to settle", nonce)
-				continue
-			}
-			return true
-		}
-		if nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash {
+		if consumedIdentityMatches(nonce, payloadHash, e) {
 			return true
 		}
 	}
@@ -141,14 +134,7 @@ func (r *Registry) SettlesInboundRow(nonce, payloadHash, recipient string) bool 
 		return false
 	}
 	for _, e := range r.Load() {
-		matched := false
-		switch {
-		case nonce != "" && e.Nonce == nonce:
-			matched = true
-		case nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash:
-			matched = true
-		}
-		if !matched {
+		if !consumedIdentityMatches(nonce, payloadHash, e) {
 			continue
 		}
 		if e.Reason == ReasonCoordinatorRecipient && e.Recipient != recipient {
@@ -157,6 +143,21 @@ func (r *Registry) SettlesInboundRow(nonce, payloadHash, recipient string) bool 
 		return true
 	}
 	return false
+}
+
+// consumedIdentityMatches is the single settlement predicate used by both
+// direct lookup and inbound supervision. A nonce remains authoritative when
+// either side lacks a payload hash for legacy compatibility; when both hashes
+// exist, disagreement is a detected collision and must never settle the row.
+func consumedIdentityMatches(nonce, payloadHash string, e ConsumedEntry) bool {
+	if nonce != "" && e.Nonce == nonce {
+		if payloadHash != "" && e.PayloadHash != "" && payloadHash != e.PayloadHash {
+			log.Printf("flotilla dispatch: NONCE COLLISION detected for %q: payload hashes differ; refusing to settle", nonce)
+			return false
+		}
+		return true
+	}
+	return nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash
 }
 
 // Consume records a settled dispatch. Idempotent: a second call with the same
