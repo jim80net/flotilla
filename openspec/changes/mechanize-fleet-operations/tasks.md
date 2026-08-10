@@ -51,6 +51,10 @@
 - [ ] 6.5 Test compiler preservation, legacy defaults, top-three bounds, stable ties, overflow, and completed-decision exclusion.
 - [ ] 6.6 Add a dual-read legacy adapter for current awaiting/blocked decisions and attached briefs, deduplicate against explicit records, expose migration coverage, and fail cutover on any previously visible unresolved item loss.
 - [ ] 6.7 After verified lossless migration, populate operator decisions only from explicit `operator_decision` reasons while retaining other blocked classes in separate visible status populations.
+- [ ] 6.8 During implementation planning, evaluate an existing burn-on-read service and a minimal product-owned implementation against the same invariants; record the delegated build-versus-adopt decision without prejudging it in design.
+- [ ] 6.9 Add optional opaque sensitive-attachment references whose first authorized retrieval atomically delivers and destroys the value, while later reads expose only consumer/time state.
+- [ ] 6.10 Enforce mandatory unread-token expiry and prove sensitive values never enter board documents, compiled goal payloads, presentation APIs, logs, caches, analytics, or exports.
+- [ ] 6.11 Test successful single read, concurrent-reader exclusion, consumed-state auditability, failed-delivery atomicity, expiry-before-read, unauthorized access, and board-value negative controls.
 
 ## 7. Durable seat attachments
 

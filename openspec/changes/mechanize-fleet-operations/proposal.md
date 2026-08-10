@@ -8,6 +8,8 @@ Two operator requirements anchor the change. For decision load: **“Anyhow, the
 
 Deployments bridge this gap today with manual discipline: an operator message received through a chat relay gets a reply through that relay, while operator input typed directly in a pane gets an in-pane reply. The product graduates that convention into envelope and routing semantics so correctness no longer depends on a coordinator remembering which surface was used.
 
+Sensitive context needed for a decision is likewise kept manually on restricted detail surfaces today. Decision briefs need an optional safe reference path so all decision information can be delivered without ever placing a secret in the board document.
+
 This change graduates six manual practices into generic product capabilities without encoding any deployment's topology, paths, identities, channels, or incidents. It is design-only; implementation begins only after independent review and separate build sequencing.
 
 ## What changes
@@ -16,7 +18,7 @@ This change graduates six manual practices into generic product capabilities wit
 2. Detect spans above three, surface the condition, and nudge the responsible coordinator to reorganize.
 3. Represent adjutant relationships independently from line ownership and classify traffic as routine or gate/escalation so only routine flow may be compressed.
 4. Add a plan/validate/apply topology transaction that validates the complete parent-and-channel graph before an atomic swap and hot reload, including detector-census refresh.
-5. Add coordinator-authored decision presentation state so the primary decisions view shows at most three judged priorities while drill-in retains every unresolved decision.
+5. Add coordinator-authored decision presentation state so the primary decisions view shows at most three judged priorities while drill-in retains every unresolved decision, plus optional expiring burn-on-read references for sensitive brief attachments.
 6. Assign stable message identity and source-channel provenance at composition, carry both through relays, make replies return to the origin surface, and expose truthful per-recipient delivery receipts for every recipient class.
 
 ## Impact

@@ -48,3 +48,45 @@ Until every currently visible legacy awaiting/blocked decision and attached brie
 - **WHEN** migration comparison finds an unresolved item visible under the legacy reader but absent from the explicit reader
 - **THEN** disabling the legacy adapter fails closed
 - **AND** status reports the unmigrated source reference
+
+### Requirement: Decision briefs support optional burn-on-read sensitive attachments
+A decision brief MAY reference sensitive context through an opaque burn-on-read token. The board document, compiled goal/decision payload, and presentation APIs SHALL contain only the reference and non-sensitive lifecycle metadata and SHALL never contain the sensitive value.
+
+#### Scenario: Sensitive attachment is rendered on the board
+- **WHEN** a decision brief has a sensitive attachment
+- **THEN** the board exposes an opaque retrieval reference and non-sensitive state
+- **AND** no sensitive value appears in the board document or presentation payload
+
+### Requirement: Sensitive attachment is delivered at most once
+The first authorized retrieval SHALL atomically deliver the sensitive value once, destroy the retrievable value, and record consumed state. Concurrent or subsequent retrievals SHALL NOT receive the value and SHALL return only consumed state identifying the consumer and consumption time.
+
+#### Scenario: First authorized retrieval succeeds
+- **WHEN** an authorized reader retrieves an unread, unexpired attachment
+- **THEN** the sensitive value is delivered exactly once
+- **AND** the retrievable value is destroyed
+- **AND** consumer identity and consumption time become durably queryable
+
+#### Scenario: Later reader uses the same reference
+- **WHEN** any reader retrieves an already consumed reference
+- **THEN** no sensitive value is returned
+- **AND** consumed state reports who consumed it and when
+
+#### Scenario: Readers race for one attachment
+- **WHEN** two authorized readers concurrently retrieve the same unread reference
+- **THEN** at most one receives the sensitive value
+- **AND** every other reader receives only the resulting consumed state
+
+### Requirement: Unread sensitive attachments expire
+Every burn-on-read token SHALL have a mandatory expiry. When an unread token expires, the system SHALL destroy the retrievable value and retain an auditable expired state without the value.
+
+#### Scenario: Token expires before retrieval
+- **WHEN** an unread token reaches its expiry
+- **THEN** its sensitive value is destroyed without delivery
+- **AND** later retrieval returns expired state and expiry time, never the value
+
+### Requirement: Burn-on-read implementation remains a planning choice
+Implementation planning SHALL evaluate both an existing burn-on-read service and a minimal product-owned implementation against the same invariants. This design SHALL NOT select build or adopt; the operator delegates that choice to product implementation planning.
+
+#### Scenario: Implementation option is selected
+- **WHEN** product implementation planning chooses build or adopt
+- **THEN** the selected option demonstrates single delivery, consumed-state auditability, board-value exclusion, and unread expiry before implementation approval

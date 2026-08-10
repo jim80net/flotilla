@@ -102,6 +102,14 @@ The YAML-to-JSON compiler preserves this metadata without changing completion se
 
 Legacy goals with no presentation metadata default to `staged`. Automated ranking may suggest changes later, but it cannot silently overwrite coordinator-authored judgment.
 
+### Sensitive brief attachments
+
+A decision brief may include a reference to sensitive context, but the board document and compiled goal/decision payload contain only an opaque burn-on-read token reference and non-sensitive lifecycle metadata—never the sensitive value. The first authorized retrieval returns the value exactly once and destroys the retrievable value atomically. Later retrievals return only consumed state identifying who consumed it and when. An unread token has a mandatory expiry; expiry destroys the retrievable value and leaves an auditable expired state.
+
+Authorization, first-read delivery, destruction, and consumed-state recording are one atomic operation: concurrent readers cannot both receive the value, and a failed delivery cannot be falsely recorded as consumed. Board and drill-in readers never dereference tokens automatically or include token values in logs, caches, analytics, exports, or API documents.
+
+Implementation planning retains two open options: adopt an existing burn-on-read paste service that satisfies these invariants, or build a minimal product-owned implementation. The operator has delegated that build-versus-adopt choice to product implementation planning; this design intentionally does not select one.
+
 ## Area 6 — message identity, provenance, and truthful receipts
 
 ### Envelope
