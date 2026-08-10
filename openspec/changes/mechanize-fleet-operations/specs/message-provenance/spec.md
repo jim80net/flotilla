@@ -14,11 +14,12 @@ The system SHALL assign an immutable message identity before the first delivery 
 - **AND** content similarity is not reported as proven identity
 
 ### Requirement: Operator origin provenance is immutable and replyable
-An operator-message envelope SHALL record its origin surface and origin channel/address at composition. Every relay SHALL preserve that origin. A reply SHALL target the recorded origin and SHALL NOT silently fall back to the current pane, relay hop, or default channel.
+An operator-message envelope SHALL record at composition its typed origin surface (`chat_relay`, `pane`, or `dash`), origin channel/address, and the authenticated operator identity consumed by that channel. Every relay SHALL preserve that origin and append itself only as a hop. A reply SHALL use the recorded origin channel and authenticated identity and SHALL NOT silently fall back to the current pane, relay hop, or default channel.
 
 #### Scenario: Operator message crosses a relay
 - **WHEN** an operator composes a message on one supported surface and it reaches a desk through one or more relays
 - **THEN** the desk's reply is delivered to the original surface and channel/address
+- **AND** the origin channel authorizes the reply against the operator identity recorded at composition
 
 #### Scenario: Origin transport is unavailable
 - **WHEN** a reply cannot currently reach its recorded origin

@@ -6,6 +6,8 @@ Flotilla's operating model already depends on limits and distinctions that are e
 
 Two operator requirements anchor the change. For decision load: **“Anyhow, the rule of three applies to me, too.”** For message provenance: **“if I send you a message from discord, I want a response in discord. If the product doesn't disambiguate the source of where i'm sending you messages, that's a product gap. Lets get provenance right.”** The latter is the strongest requirement class in this change: operator-origin provenance and reply-to-origin behavior cannot be weakened by convenience routing.
 
+Deployments bridge this gap today with manual discipline: an operator message received through a chat relay gets a reply through that relay, while operator input typed directly in a pane gets an in-pane reply. The product graduates that convention into envelope and routing semantics so correctness no longer depends on a coordinator remembering which surface was used.
+
 This change graduates six manual practices into generic product capabilities without encoding any deployment's topology, paths, identities, channels, or incidents. It is design-only; implementation begins only after independent review and separate build sequencing.
 
 ## What changes

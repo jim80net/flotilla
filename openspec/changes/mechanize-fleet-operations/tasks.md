@@ -4,7 +4,7 @@
 
 ## 1. Message identity, provenance, and truthful receipts (strongest requirement)
 
-- [ ] 1.1 Define typed composition envelope, immutable message identity, operator origin provenance, hop identity, routing class, and recipient class; define explicit legacy/unattributed decoding.
+- [ ] 1.1 Define typed composition envelope, immutable message identity, typed operator origin surface/channel, channel-consumed authenticated operator identity, hop identity, routing class, and recipient class; define explicit legacy/unattributed decoding.
 - [ ] 1.2 Assign identity and provenance at every composition ingress and preserve them through durable queueing, relays, retries, and transport serialization.
 - [ ] 1.3 Route operator replies to the recorded origin surface/channel, with pending/failure behavior and no silent fallback to another surface.
 - [ ] 1.4 Unify dispatch-footer eligibility and receipt-registry eligibility so every emitted acknowledgement instruction is satisfiable, including coordinator recipients.

@@ -14,7 +14,7 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 - Every accepted topology has a monotonically distinguishable generation. Readers pin one generation for a complete operation.
 - A standing-charge edge has an explicit kind: `line` or `standing_redispatch`. An `adjutant` edge is routing metadata, not a standing charge. Transient report-and-exit execution is not persisted as a standing edge.
 - Every composed message receives an immutable message ID before the first transport attempt. Attempts and relay hops receive their own IDs and reference the message ID.
-- Operator messages also receive immutable origin provenance: origin surface, origin channel/address, and any surface-scoped conversation reference needed to reply. Relays append hop metadata but cannot replace origin.
+- Operator messages also receive immutable origin provenance: a typed origin surface (`chat_relay`, `pane`, or `dash`), origin channel/address, the authenticated operator identity consumed by that channel, and any surface-scoped conversation reference needed to reply. A relay is recorded as a hop, not substituted as the origin; relays append hop metadata but cannot replace origin.
 
 ## Area 1 — span computation
 
@@ -71,13 +71,13 @@ Legacy goals with no presentation metadata default to `staged`. Automated rankin
 
 ### Envelope
 
-At composition, the product creates a message envelope containing immutable `message_id`, sender identity, intended recipient identity/class, composition time, routing class, and—when sourced from an operator—origin surface plus origin channel/address. Each relay carries the original envelope and appends a hop/attempt record. Re-serialization, retries, durable queueing, and nonce assignment cannot create a new message identity.
+At composition, the product creates a message envelope containing immutable `message_id`, sender identity, intended recipient identity/class, composition time, routing class, and—when sourced from an operator—typed origin surface, origin channel/address, and the operator identity authenticated by that channel. Each relay carries the original envelope and appends a hop/attempt record. Re-serialization, retries, durable queueing, and nonce assignment cannot create a new message identity.
 
 Nonce is an attempt or dispatch correlation token, not message identity. A receiver deduplicates by message ID and records duplicate attempts without re-consuming the logical message. A legacy nonce-less or identity-less arrival is accepted under an explicit legacy path and reported as unattributed; content hashing may aid investigation but is not promoted to proven identity.
 
 ### Reply to origin
 
-Replies to operator-originated messages resolve their destination from immutable origin provenance. A relay hop, current pane, or default channel cannot override it. If the origin transport is temporarily unavailable, the reply remains pending for that origin and the operator receives a visible failure/pending state on an available control surface; the product does not silently redirect the reply elsewhere.
+Replies to operator-originated messages resolve their destination and authorization context from immutable origin provenance. The origin channel consumes the recorded authenticated operator identity; a relay hop, current pane, or default channel cannot override either identity or destination. If the origin transport is temporarily unavailable, the reply remains pending for that origin and the operator receives a visible failure/pending state on an available control surface; the product does not silently redirect the reply elsewhere.
 
 ### Receipt state machine
 
