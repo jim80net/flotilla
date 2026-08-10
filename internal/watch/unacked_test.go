@@ -122,7 +122,7 @@ func TestUnackedBackstop_RetryPreservesLogicalDeliveryIdentity(t *testing.T) {
 	st := unackedState{}
 	u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now)
 	u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now.Add(5*time.Minute))
-	if len(ids) != 2 || ids[0] != "unacked:C1:message-100" || ids[1] != ids[0] {
+	if len(ids) != 2 || ids[0] != deliveryIdentity("unacked", "C1", "message-100") || ids[1] != ids[0] {
 		t.Fatalf("logical delivery identity changed across retry: %v", ids)
 	}
 }

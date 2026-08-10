@@ -312,7 +312,7 @@ func cmdWatch(args []string) error {
 	}
 	legacySend := func(send watch.IdentifiedSendFunc) watch.SendFunc {
 		return func(agent, message string) error {
-			return send(agent, message, fmt.Sprintf("direct:%d", time.Now().UnixNano()))
+			return send(agent, message, watch.NewDirectDeliveryIdentity())
 		}
 	}
 	plainSend := mkSend(confirm.SubmitDelivery)

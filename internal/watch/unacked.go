@@ -224,7 +224,7 @@ func (u *UnackedBackstop) tryCoordinatorWake(cfg *roster.Config, b roster.Channe
 	body := fmt.Sprintf("[flotilla unacked-backstop] Operator message on %s (%s) has no fleet acknowledgment (%s, age %s; checked channel replies and exact turn-final marker):\n  id=%s\n  %q\nReview channel history and act — the alert above is the persistent backstop.",
 		channelLabel(b), b.ChannelID, f.Reason, f.Age.Round(time.Minute), f.MessageID, f.Snippet)
 	if u.identifiedWake != nil {
-		return u.identifiedWake(agent, body, "unacked:"+b.ChannelID+":"+f.MessageID)
+		return u.identifiedWake(agent, body, deliveryIdentity("unacked", b.ChannelID, f.MessageID))
 	}
 	return u.wake(agent, body)
 }

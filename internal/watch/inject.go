@@ -630,10 +630,10 @@ func ensureDeliveryID(j *Job) {
 		return
 	}
 	if j.MessageID != "" {
-		j.DeliveryID = fmt.Sprintf("%s:%s:%s", j.Kind, j.Sender, j.MessageID)
+		j.DeliveryID = deliveryIdentity("job", string(j.Kind), j.Sender, j.MessageID)
 		return
 	}
-	j.DeliveryID = fmt.Sprintf("watch:%d", deliverySequence.Add(1))
+	j.DeliveryID = deliveryIdentity("watch-sequence", fmt.Sprint(deliverySequence.Add(1)))
 }
 
 // HasPendingRelayFor reports whether a KindRelay for agent is queued or in-flight (#523).
