@@ -68,8 +68,11 @@ func TestAuthorizeSendStructuredAdjutantLane(t *testing.T) {
 		{"child to adjutant", "desk", "adjutant", false, true, false},
 		{"adjutant to foreign desk blocked", "adjutant", "foreign-desk", false, false, false},
 		{"adjutant foreign override audited", "adjutant", "foreign-desk", true, true, true},
+		{"foreign desk to adjutant blocked", "foreign-desk", "adjutant", false, false, false},
+		{"foreign desk to adjutant override audited", "foreign-desk", "adjutant", true, true, true},
 		{"desk to foreign desk blocked", "desk", "foreign-desk", false, false, false},
 		{"coordinator to foreign desk unaffected", "xo", "foreign-desk", false, true, false},
+		{"coordinator to adjutant unaffected", "foreign-xo", "adjutant", false, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,8 +130,14 @@ nodes:
 	if foreign := authorizeSend(cfg, "adjutant", "foreign-desk", false); foreign.Allowed {
 		t.Fatalf("org-file adjutant foreign decision = %+v, want blocked", foreign)
 	}
+	if reverse := authorizeSend(cfg, "foreign-desk", "adjutant", false); reverse.Allowed {
+		t.Fatalf("org-file foreign-to-adjutant decision = %+v, want blocked", reverse)
+	}
 	if override := authorizeSend(cfg, "adjutant", "foreign-desk", true); !override.Allowed || !override.Audit {
 		t.Fatalf("org-file adjutant override = %+v, want allowed+audit", override)
+	}
+	if reverseOverride := authorizeSend(cfg, "foreign-desk", "adjutant", true); !reverseOverride.Allowed || !reverseOverride.Audit {
+		t.Fatalf("org-file foreign-to-adjutant override = %+v, want allowed+audit", reverseOverride)
 	}
 }
 

@@ -46,6 +46,16 @@ func authorizeSend(cfg *roster.Config, from, to string, crossVenture bool) sendD
 	if rosterCoordinator(cfg, fromNode) {
 		return sendDecision{Allowed: true}
 	}
+	if toNode.Kind == org.KindAdjutant {
+		if adjutantLaneTarget(dag, to, from) {
+			return sendDecision{Allowed: true}
+		}
+		reason := fmt.Sprintf("send blocked: sender %q is outside adjutant %q's lane; that org edge forbids unaudited tasking into the adjutant lane (use --cross-venture for an audited override)", from, to)
+		if crossVenture {
+			return sendDecision{Allowed: true, Audit: true, Reason: reason}
+		}
+		return sendDecision{Reason: reason}
+	}
 	if !rosterDesk(cfg, fromNode) || !rosterDesk(cfg, toNode) {
 		return sendDecision{Allowed: true}
 	}
