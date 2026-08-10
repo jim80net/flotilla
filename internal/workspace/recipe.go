@@ -161,13 +161,10 @@ func WriteActiveOverlay(agent string, ov ActiveOverlay) error {
 	return nil
 }
 
-// ReconcileActiveOverlay records the harness a successful relaunch actually selected.
-// Primary is represented by an absent overlay; fallback slots retain switch-owned metadata
-// while replacing the routing fields. Callers invoke this only after launch confirmation.
+// ReconcileActiveOverlay records the harness observed after a successful relaunch.
+// An explicit primary overlay is valid here: unlike ordinary primary selection, this
+// write preserves a successful observation instead of falling back to roster intent.
 func ReconcileActiveOverlay(agent, slot, surface string) error {
-	if slot == SlotPrimary {
-		return ClearActiveOverlay(agent)
-	}
 	if slot == "" || surface == "" {
 		return fmt.Errorf("reconcile active-harness overlay: slot and surface are required")
 	}

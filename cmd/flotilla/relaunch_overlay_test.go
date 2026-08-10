@@ -18,12 +18,12 @@ func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T
 				if target != "%1" {
 					t.Fatalf("pane command target = %q", target)
 				}
-				return "claude", nil
+				return "codex", nil
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if ov, ok, err := workspace.ReadActiveOverlay("desk"); err != nil || ok {
-				t.Fatalf("selected grok/live claude overlay = (%+v, %v, %v), want cleared", ov, ok, err)
+			if ov, ok, err := workspace.ReadActiveOverlay("desk"); err != nil || !ok || ov.Surface != "codex" {
+				t.Fatalf("selected grok/live codex overlay = (%+v, %v, %v), want observed codex", ov, ok, err)
 			}
 		})
 	}
@@ -54,5 +54,20 @@ func TestReconcileRelaunchOverlayUnreadablePaneClears(t *testing.T) {
 	}
 	if ov, ok, err := workspace.ReadActiveOverlay("desk"); err != nil || ok {
 		t.Fatalf("unreadable live pane overlay = (%+v, %v, %v), want cleared", ov, ok, err)
+	}
+}
+
+func TestReconcileRelaunchOverlayUnmappedPaneClears(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	if err := workspace.WriteActiveOverlay("desk", workspace.ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileRelaunchOverlay("desk", "%4", "fallback-0", "grok", workspace.ActiveOverlay{}, func(string) (string, error) {
+		return "unknown-harness", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ov, ok, err := workspace.ReadActiveOverlay("desk"); err != nil || ok {
+		t.Fatalf("unmapped live pane overlay = (%+v, %v, %v), want cleared", ov, ok, err)
 	}
 }

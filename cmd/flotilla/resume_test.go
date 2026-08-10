@@ -173,8 +173,8 @@ func TestRunResumePrimaryClearsOverlayOnlyAfterConfirmedLaunch(t *testing.T) {
 	if !rec.respawned {
 		t.Fatal("resume did not relaunch")
 	}
-	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || ok {
-		t.Fatalf("overlay after confirmed primary relaunch = (%+v, %v, %v), want absent", ov, ok, err)
+	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("overlay after confirmed primary relaunch = (%+v, %v, %v), want observed primary", ov, ok, err)
 	}
 }
 

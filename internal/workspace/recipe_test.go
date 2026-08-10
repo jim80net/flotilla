@@ -148,7 +148,7 @@ func TestWriteActiveOverlayRoundTrips(t *testing.T) {
 	}
 }
 
-func TestReconcileActiveOverlayPrimaryClearsStaleOverlay(t *testing.T) {
+func TestReconcileActiveOverlayPrimaryPersistsObservedSurface(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())
 	if err := WriteActiveOverlay("backend", ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
 		t.Fatal(err)
@@ -156,8 +156,8 @@ func TestReconcileActiveOverlayPrimaryClearsStaleOverlay(t *testing.T) {
 	if err := ReconcileActiveOverlay("backend", SlotPrimary, "claude-code"); err != nil {
 		t.Fatal(err)
 	}
-	if ov, ok, err := ReadActiveOverlay("backend"); err != nil || ok {
-		t.Fatalf("ReadActiveOverlay after primary reconcile = (%+v, %v, %v), want absent", ov, ok, err)
+	if ov, ok, err := ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("ReadActiveOverlay after primary reconcile = (%+v, %v, %v), want observed primary", ov, ok, err)
 	}
 }
 

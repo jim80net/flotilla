@@ -189,8 +189,8 @@ func TestRunRecycleReconcilesStaleOverlayAfterConfirmedRelaunch(t *testing.T) {
 	if !r.respawned || !r.stamped {
 		t.Fatal("recycle did not reach confirmed relaunch")
 	}
-	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || ok {
-		t.Fatalf("overlay after recycle primary relaunch = (%+v, %v, %v), want absent", ov, ok, err)
+	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("overlay after recycle primary relaunch = (%+v, %v, %v), want observed primary", ov, ok, err)
 	}
 }
 
