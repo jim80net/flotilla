@@ -63,7 +63,7 @@ type recycleOps struct {
 	readMarker   func(target string) (string, error)                // deliver.ReadMarker
 	stampGen     func(target, token string) error                   // deliver.StampRecycleGen
 	readGen      func(target string) (string, error)                // deliver.ReadRecycleGen
-	reconcile    func(agent, slot, surface string) error            // workspace.ReconcileActiveOverlay
+	reconcile    func(agent, target, slot, surface string) error    // post-launch pane observation → active overlay
 	lock         func(target string) (release func(), err error)    // AcquirePaneTxn → Release
 	sleep        func(time.Duration)
 	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
@@ -279,7 +279,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		return "", wtNote, fmt.Errorf("phase 3: stamping the recycle generation for %q failed: %w", p.agent, err)
 	}
 	if ops.reconcile != nil {
-		if err := ops.reconcile(p.agent, p.slot, p.selectedSurface); err != nil {
+		if err := ops.reconcile(p.agent, target, p.slot, p.selectedSurface); err != nil {
 			return "", wtNote, fmt.Errorf("phase 3: %q relaunched successfully but active-harness reconciliation failed: %w", p.agent, err)
 		}
 	}
@@ -619,7 +619,9 @@ func cmdRecycle(args []string) error {
 		readMarker:   deliver.ReadMarker,
 		stampGen:     deliver.StampRecycleGen,
 		readGen:      deliver.ReadRecycleGen,
-		reconcile:    workspace.ReconcileActiveOverlay,
+		reconcile: func(agent, target, slot, selectedSurface string) error {
+			return reconcileRelaunchOverlay(agent, target, slot, selectedSurface, workspace.ActiveOverlay{}, deliver.PaneCommand)
+		},
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {

@@ -76,7 +76,7 @@ type switchOps struct {
 	// writeOverlay writes active-harness.json (workspace.WriteActiveOverlay) — called ONLY
 	// after a confirmed Phase-3 relaunch + marker read-back, so the overlay can never name a
 	// slot the pane is not actually running.
-	writeOverlay func() error
+	writeOverlay func(target string) error
 	// writeBundle writes the continuity bundle at the frozen desk-scoped neutral path,
 	// durability-gated like the handoff, before Phase 4. NO consumer (Layer 2 / P4).
 	writeBundle func() error
@@ -328,7 +328,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	// until --repair reconciles (group 4). We DO NOT abort the switch on an overlay-write
 	// failure — the desk has already taken the irreversible step and is live on the TO
 	// harness; aborting would not undo that. Surface the half-switch with the repair path.
-	if err := ops.writeOverlay(); err != nil {
+	if err := ops.writeOverlay(target); err != nil {
 		return "", fmt.Errorf("phase 3b: relaunched %q on the %s harness but writing the active-harness overlay failed: %w — the desk IS live on the TO harness; routing falls back to the roster surface until you reconcile with: flotilla switch %s --repair", p.agent, p.toSurface, err, p.agent)
 	}
 
@@ -909,16 +909,14 @@ func cmdSwitch(args []string) error {
 			return txn.Release, nil
 		},
 		recordPhase: recordPhase,
-		writeOverlay: func() error {
-			return workspace.WriteActiveOverlay(agentName, workspace.ActiveOverlay{
-				Slot:           toSlot.Name,
-				Surface:        toSurface,
+		writeOverlay: func(target string) error {
+			return reconcileRelaunchOverlay(agentName, target, toSlot.Name, toSurface, workspace.ActiveOverlay{
 				Provider:       toSlot.Provider,
 				SubscriptionID: toSlot.SubscriptionID,
 				SwitchedAt:     time.Now().UTC().Format(time.RFC3339),
 				SwitchToken:    token,
 				Reason:         reason,
-			})
+			}, deliver.PaneCommand)
 		},
 		writeBundle: func() error {
 			return writeContinuityBundle(bundlePath, continuityBundle{

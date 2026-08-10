@@ -129,7 +129,7 @@ func fakeSwitchOps(r *swRec) switchOps {
 			r.events = append(r.events, phase)
 			return nil
 		},
-		writeOverlay: func() error {
+		writeOverlay: func(string) error {
 			if r.overlayErr != nil {
 				return r.overlayErr
 			}

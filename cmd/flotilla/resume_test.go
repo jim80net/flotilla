@@ -164,7 +164,9 @@ func TestRunResumePrimaryClearsOverlayOnlyAfterConfirmedLaunch(t *testing.T) {
 	}
 	rec := &resumeRec{}
 	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
-	ops.reconcile = workspace.ReconcileActiveOverlay
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, slot, selectedSurface, workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
+	}
 	if _, err := runResume(ops, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +187,9 @@ func TestRunResumeFallbackOverlayMatchesLiveHarnessAfterConfirmedLaunch(t *testi
 	}
 	rec := &resumeRec{}
 	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
-	ops.reconcile = workspace.ReconcileActiveOverlay
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, slot, selectedSurface, workspace.ActiveOverlay{}, func(string) (string, error) { return "grok", nil })
+	}
 	if _, err := runResume(ops, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +209,7 @@ func TestRunResumeFailedLaunchDoesNotReconcileOverlay(t *testing.T) {
 	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
 	ops.respawn = func(string, string, string) error { return errors.New("launch failed") }
 	called := false
-	ops.reconcile = func(string, string, string) error { called = true; return nil }
+	ops.reconcile = func(string, string, string, string) error { called = true; return nil }
 	if _, err := runResume(ops, plan); err == nil {
 		t.Fatal("failed relaunch = nil error")
 	}

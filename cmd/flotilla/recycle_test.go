@@ -177,7 +177,9 @@ func TestRunRecycleReconcilesStaleOverlayAfterConfirmedRelaunch(t *testing.T) {
 	}
 	r := happyRec()
 	ops := fakeRecycleOps(r)
-	ops.reconcile = workspace.ReconcileActiveOverlay
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, slot, selectedSurface, workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
+	}
 	plan := testPlan()
 	plan.slot = workspace.SlotPrimary
 	plan.selectedSurface = "claude-code"
@@ -197,7 +199,7 @@ func TestRunRecycleMarkerMismatchDoesNotReconcileOverlay(t *testing.T) {
 	r.markerGot = "another-desk"
 	ops := fakeRecycleOps(r)
 	called := false
-	ops.reconcile = func(string, string, string) error { called = true; return nil }
+	ops.reconcile = func(string, string, string, string) error { called = true; return nil }
 	plan := testPlan()
 	plan.slot = workspace.SlotPrimary
 	plan.selectedSurface = "claude-code"

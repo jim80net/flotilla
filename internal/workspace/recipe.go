@@ -166,14 +166,7 @@ func WriteActiveOverlay(agent string, ov ActiveOverlay) error {
 // while replacing the routing fields. Callers invoke this only after launch confirmation.
 func ReconcileActiveOverlay(agent, slot, surface string) error {
 	if slot == SlotPrimary {
-		dir, err := Dir(agent)
-		if err != nil {
-			return err
-		}
-		if err := os.Remove(filepath.Join(dir, ActiveHarnessFileName)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("clear the primary active-harness overlay: %w", err)
-		}
-		return nil
+		return ClearActiveOverlay(agent)
 	}
 	if slot == "" || surface == "" {
 		return fmt.Errorf("reconcile active-harness overlay: slot and surface are required")
@@ -185,6 +178,20 @@ func ReconcileActiveOverlay(agent, slot, surface string) error {
 	ov.Slot = slot
 	ov.Surface = surface
 	return WriteActiveOverlay(agent, ov)
+}
+
+// ClearActiveOverlay restores the documented primary/fail-safe representation:
+// no overlay. It is also used when post-launch observation cannot prove which
+// harness is live.
+func ClearActiveOverlay(agent string) error {
+	dir, err := Dir(agent)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dir, ActiveHarnessFileName)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear the active-harness overlay: %w", err)
+	}
+	return nil
 }
 
 // ResolveHarness resolves the desk's LIVE harness slot: it (1) resolves the recipe
