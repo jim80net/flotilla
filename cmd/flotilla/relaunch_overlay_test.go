@@ -5,34 +5,71 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 func TestReconcileRelaunchOverlayUsesObservedPaneForEveryLaunchPath(t *testing.T) {
-	for _, path := range []string{"switch", "recycle", "resume"} {
-		t.Run(path, func(t *testing.T) {
-			t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
-			chain := launch.Recipe{
-				Cwd:       "/work/desk",
-				Primary:   &launch.HarnessSlot{Surface: "codex", Launch: "codex"},
-				Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok"}},
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	chain := launch.Recipe{
+		Cwd:       "/work/desk",
+		Primary:   &launch.HarnessSlot{Surface: "codex", Launch: "codex"},
+		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok"}},
+	}
+	paths := []struct {
+		name string
+		run  func(agent string) error
+	}{
+		{name: "switch", run: func(agent string) error {
+			r := happySwitch()
+			ops := fakeSwitchOps(r)
+			ops.writeOverlay = func(target string) error {
+				return reconcileRelaunchOverlay(agent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{SwitchToken: "token"}, func(string) (string, error) { return "codex", nil })
 			}
-			if err := workspace.WriteActiveOverlay("desk", workspace.ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
+			plan := testSwitchPlan()
+			plan.agent = agent
+			_, err := runSwitch(ops, plan)
+			return err
+		}},
+		{name: "recycle", run: func(agent string) error {
+			r := happyRec()
+			ops := fakeRecycleOps(r)
+			ops.reconcile = func(relaunchAgent, target, _, _ string) error {
+				return reconcileRelaunchOverlay(relaunchAgent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{}, func(string) (string, error) { return "codex", nil })
+			}
+			plan := testPlan()
+			plan.agent = agent
+			plan.slot = "fallback-0"
+			plan.selectedSurface = "grok"
+			_, _, err := runRecycle(ops, plan)
+			return err
+		}},
+		{name: "resume", run: func(agent string) error {
+			plan := resumePlan{agent: agent, key: agent, cwd: "/work/desk", launch: "grok", session: "flotilla", window: agent, slot: "fallback-0", selectedSurface: "grok"}
+			rec := &resumeRec{}
+			ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, agent, false)
+			ops.reconcile = func(relaunchAgent, target, _, _ string) error {
+				return reconcileRelaunchOverlay(relaunchAgent, target, "fallback-0", chain, "codex", workspace.ActiveOverlay{}, func(string) (string, error) { return "codex", nil })
+			}
+			_, err := runResume(ops, plan)
+			return err
+		}},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			agent := "desk-" + path.name
+			if err := workspace.WriteActiveOverlay(agent, workspace.ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := reconcileRelaunchOverlay("desk", "%1", "fallback-0", chain, "codex", workspace.ActiveOverlay{}, func(target string) (string, error) {
-				if target != "%1" {
-					t.Fatalf("pane command target = %q", target)
-				}
-				return "codex", nil
-			}); err != nil {
+			if err := path.run(agent); err != nil {
 				t.Fatal(err)
 			}
-			if ov, ok, err := workspace.ReadActiveOverlay("desk"); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "codex" {
+			if ov, ok, err := workspace.ReadActiveOverlay(agent); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "codex" {
 				t.Fatalf("selected grok/live codex overlay = (%+v, %v, %v), want observed codex", ov, ok, err)
 			}
-			selection, err := workspace.ResolveResumeSelection("desk", &launch.Config{Agents: map[string]launch.Recipe{"desk": chain}}, "codex")
+			selection, err := workspace.ResolveResumeSelection(agent, &launch.Config{Agents: map[string]launch.Recipe{agent: chain}}, "codex")
 			if err != nil || selection.Slot != workspace.SlotPrimary || selection.Surface != "codex" {
 				t.Fatalf("ResolveResumeSelection = (%+v, %v), want coherent observed codex", selection, err)
 			}
