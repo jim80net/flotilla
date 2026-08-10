@@ -43,10 +43,23 @@ func TestCmdCancelAdvancesOutboxPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cmdCancel([]string{id, "--roster", rosterPath}); err != nil {
+	sibling, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "sibling task")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := outbox.ListAll(dir); len(got) != 0 {
+	var cancelErr error
+	stdout, _ := captureStdoutStderr(t, func() {
+		cancelErr = cmdCancel([]string{id, "--roster", rosterPath})
+	})
+	if cancelErr != nil {
+		t.Fatal(cancelErr)
+	}
+	for _, want := range []string{id, "alpha-desk → alpha-xo", "1 sibling send(s) re-stamped to epoch 2, still pending"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("cancel output = %q, want %q", stdout, want)
+		}
+	}
+	if got := outbox.ListAll(dir); len(got) != 1 || got[0].ID != sibling {
 		t.Fatalf("pending after cancel = %+v", got)
 	}
 }

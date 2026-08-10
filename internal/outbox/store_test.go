@@ -236,7 +236,7 @@ func TestListAllMultipleSenders(t *testing.T) {
 	}
 }
 
-func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
+func TestCancelRemovesOnlyIDAndRestampsSiblings(t *testing.T) {
 	dir := t.TempDir()
 	first, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "first queued task")
 	if err != nil {
@@ -255,7 +255,7 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 1 || result.Epoch != 2 {
+	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 1 || result.Restamped != 1 || result.Epoch != 2 {
 		t.Fatalf("cancel result = %+v", result)
 	}
 	remaining := NewStore(mustPath(t, dir, "alpha-desk")).Load()

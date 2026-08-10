@@ -57,6 +57,6 @@ func cmdCancel(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("flotilla cancel: stood down %d queued send(s) on %s → %s; epoch advanced to %d\n", result.Canceled, result.Sender, result.Recipient, result.Epoch)
+	fmt.Printf("flotilla cancel: canceled send %s (%s → %s); %d sibling send(s) re-stamped to epoch %d, still pending\n", opts.id, result.Sender, result.Recipient, result.Restamped, result.Epoch)
 	return nil
 }

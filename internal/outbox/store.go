@@ -43,6 +43,7 @@ type CancelResult struct {
 	Sender    string
 	Recipient string
 	Canceled  int
+	Restamped int
 	Epoch     uint64
 }
 
@@ -206,6 +207,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 			}
 			if p.Recipient == result.Recipient && effectiveEpoch(p.Epoch) == current {
 				p.Epoch = result.Epoch
+				result.Restamped++
 			}
 			next = append(next, p)
 		}
