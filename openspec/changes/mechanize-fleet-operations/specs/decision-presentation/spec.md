@@ -23,3 +23,11 @@ The primary decisions view SHALL present at most three unresolved decisions, ord
 #### Scenario: Completed decision is ranked primary
 - **WHEN** a primary-ranked decision becomes complete
 - **THEN** it leaves unresolved primary and drill-in populations according to existing completion semantics
+
+### Requirement: Decision population uses explicit blocked reason
+Only unresolved work explicitly classified `operator_decision` SHALL enter the operator decisions population. Review gates, external dependencies, and execution blockers SHALL remain visible in their respective status populations and SHALL NOT be inferred to require operator judgment merely because they are blocked.
+
+#### Scenario: Blocked review awaits an independent gate
+- **WHEN** unresolved work is classified `review_gate`
+- **THEN** it remains visible as a gate
+- **AND** it does not consume one of the three primary operator-decision positions

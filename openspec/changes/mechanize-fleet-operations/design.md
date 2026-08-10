@@ -1,5 +1,10 @@
 # Design — mechanize fleet operations
 
+## Sources
+
+- Mechanization tasking and operator requirements.
+- The 2026-08-03 stage-2 schema-audit artifact, `state/schema-audit-findings-20260803.md`. This design absorbs its in-scope identity, nonce, blocked-reason, and status-contract findings in generic product terms; the audit's other dispositions remain independently sequenced.
+
 ## Design principles
 
 The roster graph is the canonical source for durable topology. Derived state—span counts, overload findings, routing destinations, status projections, and detector census—must come from one accepted graph generation. No consumer may combine generations or infer ownership from display names or channel layout.
@@ -10,7 +15,7 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 
 ## Shared identity and generation model
 
-- Durable topology relationships reference immutable seat identifiers. Display names remain presentation metadata.
+- Durable topology relationships, message envelopes, and receipt records reference immutable seat identifiers. Display names remain presentation metadata and SHALL NOT be used as durable joins.
 - Every accepted topology has a monotonically distinguishable generation. Readers pin one generation for a complete operation.
 - A standing-charge edge has an explicit kind: `line` or `standing_redispatch`. An `adjutant` edge is routing metadata, not a standing charge. Transient report-and-exit execution is not persisted as a standing edge.
 - Every composed message receives an immutable message ID before the first transport attempt. Attempts and relay hops receive their own IDs and reference the message ID.
@@ -18,7 +23,7 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 
 ## Area 1 — span computation
 
-Span is a projection over the accepted roster generation, not a separately authored counter. For a seat, count its direct `line` children plus active `standing_redispatch` relationships. Exclude adjutant edges and transient report-and-exit subagents. Status exposes the count, the contributing relationships, and the topology generation so operators can explain the number.
+Span is a projection over the accepted roster generation, not a separately authored counter. For a seat, count its direct `line` children plus active `standing_redispatch` relationships. Exclude adjutant edges and transient report-and-exit subagents. Status exposes the immutable `seat_id`, current display name, count, contributing relationship seat IDs, and topology generation so clients can join and explain the number across renames.
 
 Invalid or unresolved relationship targets fail topology validation; status must not guess. During migration, legacy parent edges map to `line`. No legacy representation is interpreted as `standing_redispatch` without an explicit declaration.
 
@@ -39,7 +44,7 @@ Every coordination message has a routing class:
 | `routine` | periodic status, progress roll-ups, non-blocking updates | may route through the configured adjutant for compression |
 | `gate_escalation` | review requests/results, merge readiness, blockers, operator decisions | direct to the accountable destination; never compressed |
 
-Unknown or absent classification defaults to `gate_escalation`, the safer non-compressing path. The route decision and any adjutant hop are auditable against message ID and topology generation.
+Unknown or absent classification defaults to `gate_escalation`, the safer non-compressing path. Blocked state carries an explicit reason class: `operator_decision`, `review_gate`, `external_dependency`, or `execution_blocker`; it is not synonymous with an operator ask. Only `operator_decision` is routed as an operator decision, while every blocked class still bypasses routine compression. The route decision and any adjutant hop are auditable against message ID and topology generation.
 
 ## Area 4 — atomic topology apply
 
@@ -63,6 +68,8 @@ Decision truth and presentation are separate. An unresolved decision remains an 
 - the authoring coordinator and update time;
 - an optional short rationale about stakes and staleness.
 
+Presentation consumes explicit blocked-reason semantics rather than interpreting every blocked marker as an operator decision. Only unresolved items classified `operator_decision` enter the operator decisions population; review gates, external dependencies, and execution blockers remain visible in their own status populations.
+
 The YAML-to-JSON compiler preserves this metadata without changing completion semantics. The primary decisions view renders at most three unresolved decisions, ordered by explicit coordinator rank with a deterministic stable tie-break. Drill-in renders all unresolved decisions, including staged and primary items. Overflow primary designations remain visible on drill-in and are reported as a presentation warning; nothing is dropped or silently reclassified.
 
 Legacy goals with no presentation metadata default to `staged`. Automated ranking may suggest changes later, but it cannot silently overwrite coordinator-authored judgment.
@@ -71,9 +78,9 @@ Legacy goals with no presentation metadata default to `staged`. Automated rankin
 
 ### Envelope
 
-At composition, the product creates a message envelope containing immutable `message_id`, sender identity, intended recipient identity/class, composition time, routing class, and—when sourced from an operator—typed origin surface, origin channel/address, and the operator identity authenticated by that channel. Each relay carries the original envelope and appends a hop/attempt record. Re-serialization, retries, durable queueing, and nonce assignment cannot create a new message identity.
+At composition, the product creates a message envelope containing immutable `message_id`, immutable sender and intended-recipient seat IDs, recipient class, composition time, routing class, and—when sourced from an operator—typed origin surface, origin channel/address, and the operator identity authenticated by that channel. Display names may accompany the envelope for presentation but never define identity. Each relay carries the original envelope and appends a hop/attempt record. Re-serialization, retries, durable queueing, and nonce assignment cannot create a new message identity.
 
-Nonce is an attempt or dispatch correlation token, not message identity. A receiver deduplicates by message ID and records duplicate attempts without re-consuming the logical message. A legacy nonce-less or identity-less arrival is accepted under an explicit legacy path and reported as unattributed; content hashing may aid investigation but is not promoted to proven identity.
+Nonce is an attempt or dispatch correlation token, not message identity. Newly generated message IDs and nonces use the full configured cryptographic random value rather than a truncated display prefix. Registry operations bind a nonce to message ID and intended recipient; a nonce match alone cannot consume or acknowledge a different message after a collision. A receiver deduplicates by message ID and records duplicate attempts without re-consuming the logical message. A legacy nonce-less or identity-less arrival is accepted under an explicit legacy path and reported as unattributed; content hashing may aid investigation but is not promoted to proven identity.
 
 ### Reply to origin
 

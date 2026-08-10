@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Logical message identity is assigned at composition
-The system SHALL assign an immutable message identity before the first delivery attempt and SHALL preserve it through durable queueing, retries, relays, nonce assignment, and serialization. Attempt and hop identities SHALL be subordinate to the logical message identity.
+The system SHALL assign an immutable message identity before the first delivery attempt and SHALL preserve it through durable queueing, retries, relays, nonce assignment, and serialization. Sender, recipient, message, and receipt identity SHALL use immutable seat IDs; display names SHALL be presentation-only. Attempt and hop identities SHALL be subordinate to the logical message identity.
 
 #### Scenario: One message is relayed under multiple nonces
 - **WHEN** the same composed message arrives through multiple attempts with different dispatch nonces
@@ -12,6 +12,18 @@ The system SHALL assign an immutable message identity before the first delivery 
 - **WHEN** a nonce-less or identity-less legacy message arrives
 - **THEN** it follows an explicit legacy/unattributed path
 - **AND** content similarity is not reported as proven identity
+
+#### Scenario: Seat display name changes during delivery
+- **WHEN** a sender or recipient is renamed after composition
+- **THEN** queued delivery and receipt history remain attached to the same immutable seat IDs
+
+### Requirement: Correlation tokens resist and detect collisions
+New message IDs and dispatch nonces SHALL use the full configured cryptographic random value rather than a truncated display prefix. Registry acknowledgement and consumption SHALL verify nonce, message ID, and intended recipient together; a nonce match alone SHALL NOT settle a different message.
+
+#### Scenario: Two registry records present the same nonce
+- **WHEN** a nonce collision is observed across distinct message identities
+- **THEN** the system refuses nonce-only acknowledgement or consumption
+- **AND** preserves both records for explicit disambiguation and audit
 
 ### Requirement: Operator origin provenance is immutable and replyable
 An operator-message envelope SHALL record at composition its typed origin surface (`chat_relay`, `pane`, or `dash`), origin channel/address, and the authenticated operator identity consumed by that channel. Every relay SHALL preserve that origin and append itself only as a hop. A reply SHALL use the recorded origin channel and authenticated identity and SHALL NOT silently fall back to the current pane, relay hop, or default channel.

@@ -24,3 +24,15 @@ Coordination messages SHALL declare either `routine` or `gate_escalation`. Routi
 - **WHEN** a message has no recognized routing class
 - **THEN** the system treats it as `gate_escalation`
 - **AND** it does not route through an adjutant
+
+### Requirement: Blocked reason is explicit and not synonymous with operator decision
+Blocked work SHALL declare one of `operator_decision`, `review_gate`, `external_dependency`, or `execution_blocker`. All blocked work SHALL bypass routine compression, but only `operator_decision` SHALL be routed as an operator decision.
+
+#### Scenario: External dependency blocks work
+- **WHEN** work is blocked on an external dependency
+- **THEN** its coordination signal routes directly as gate/escalation traffic
+- **AND** it is not presented as a request for an operator decision
+
+#### Scenario: Operator judgment is required
+- **WHEN** blocked work declares `operator_decision`
+- **THEN** the decision routes directly to the accountable operator-facing destination
