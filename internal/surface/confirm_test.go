@@ -459,19 +459,40 @@ func TestConfirmSubmitGatePendingHoldUsesFirstObservationAndExpires(t *testing.T
 			ComposerCleared, ComposerCleared,
 		},
 	}
-	if err := c.Submit(d, "0:0.0", "same delivery"); !errors.Is(err, ErrBusy) {
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("fresh pending err = %v, want ErrBusy", err)
 	}
 	now = now.Add(pendingDraftHold - time.Second)
-	if err := c.Submit(d, "0:0.0", "same delivery"); !errors.Is(err, ErrBusy) {
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("pre-bound pending err = %v, want ErrBusy", err)
 	}
 	now = now.Add(time.Second)
-	if err := c.Submit(d, "0:0.0", "same delivery"); err != nil {
+	if err := c.SubmitDelivery(d, "0:0.0", "same body", "delivery-a"); err != nil {
 		t.Fatalf("pending at hold bound: %v", err)
 	}
 	if d.submitCalls != 1 || enter != 0 {
 		t.Fatalf("Submit=%d Enter=%d, want one delivery after bounded hold", d.submitCalls, enter)
+	}
+}
+
+func TestConfirmSubmitGateDistinctSameBodyDeliveryGetsFreshHold(t *testing.T) {
+	enter := 0
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	c := newConfirm(&enter)
+	c.Now = func() time.Time { return now }
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerPending},
+	}
+	if err := c.SubmitDelivery(d, "0:0.0", "identical body", "delivery-a"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("delivery A err = %v, want ErrBusy", err)
+	}
+	now = now.Add(pendingDraftHold)
+	if err := c.SubmitDelivery(d, "0:0.0", "identical body", "delivery-b"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("fresh delivery B inherited A clock: err=%v, want ErrBusy", err)
+	}
+	if d.submitCalls != 0 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, fresh same-body delivery bypassed hold", d.submitCalls, enter)
 	}
 }
 
@@ -484,11 +505,11 @@ func TestConfirmSubmitGatePendingClearsBeforeBoundThenDelivers(t *testing.T) {
 		assessSeq: []State{StateIdle},
 		stateSeq:  []ComposerDisposition{ComposerPending, ComposerCleared, ComposerCleared, ComposerCleared},
 	}
-	if err := c.Submit(d, "0:0.0", "clearing delivery"); !errors.Is(err, ErrBusy) {
+	if err := c.SubmitDelivery(d, "0:0.0", "clearing body", "delivery-clear"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("fresh pending err = %v, want ErrBusy", err)
 	}
 	now = now.Add(time.Minute)
-	if err := c.Submit(d, "0:0.0", "clearing delivery"); err != nil {
+	if err := c.SubmitDelivery(d, "0:0.0", "clearing body", "delivery-clear"); err != nil {
 		t.Fatalf("cleared before bound: %v", err)
 	}
 	if d.submitCalls != 1 || enter != 0 {

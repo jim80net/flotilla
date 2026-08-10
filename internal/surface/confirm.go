@@ -1,12 +1,12 @@
 package surface
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -83,8 +83,8 @@ const (
 )
 
 type pendingDraftKey struct {
-	pane string
-	body [sha256.Size]byte
+	pane       string
+	deliveryID string
 }
 
 type pendingDraftTracker struct {
@@ -93,6 +93,7 @@ type pendingDraftTracker struct {
 }
 
 var processPendingDrafts = pendingDraftTracker{since: make(map[pendingDraftKey]time.Time)}
+var unkeyedDeliverySequence atomic.Uint64
 
 func (p *pendingDraftTracker) observe(key pendingDraftKey, now time.Time) time.Time {
 	p.mu.Lock()
@@ -154,7 +155,7 @@ type Confirm struct {
 	// Now is injectable for the bounded idle-composer draft hold. Production defaults to time.Now.
 	Now func() time.Time
 	// pendingDrafts is test-injectable; production shares the process tracker so the first-observed
-	// time survives the watch injector's retries of the same pane+delivery body.
+	// time survives the watch injector's retries of the same pane+delivery identity.
 	pendingDrafts *pendingDraftTracker
 	// SendCtrlC is the OPTIONAL self-heal primitive (deliver.SendCtrlC): a Ctrl-C that escapes a
 	// focus-stealing agents-panel overlay back to the main composer. When nil, self-heal is DISABLED
@@ -204,7 +205,13 @@ const (
 // retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
 // read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, false)
+	return c.SubmitDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
+}
+
+// SubmitDelivery is Submit with a stable identity that must be retained across retries of the
+// same queued delivery. Distinct deliveries must carry distinct IDs even when their bodies match.
+func (c Confirm) SubmitDelivery(d Driver, pane, text, deliveryID string) error {
+	return c.submit(d, pane, text, deliveryID, false)
 }
 
 // SubmitInterrupt delivers a verified operator message even while the target is Working.
@@ -212,10 +219,15 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 // A Working pane must expose a positively cleared main composer; queued/pending/overlay or
 // undetermined composers fail closed before paste. Confirmation after paste is identical to Submit.
 func (c Confirm) SubmitInterrupt(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, true)
+	return c.SubmitInterruptDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
 }
 
-func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) (resultErr error) {
+// SubmitInterruptDelivery is SubmitInterrupt with a stable queued-delivery identity.
+func (c Confirm) SubmitInterruptDelivery(d Driver, pane, text, deliveryID string) error {
+	return c.submit(d, pane, text, deliveryID, true)
+}
+
+func (c Confirm) submit(d Driver, pane, text, deliveryID string, allowWorking bool) (resultErr error) {
 	// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
 	state := d.Assess(pane)
 	switch state {
@@ -252,7 +264,7 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) (resultE
 	}
 	if sp != nil {
 		composer := sp.ComposerState(pane)
-		pendingKey := pendingDraftKey{pane: pane, body: sha256.Sum256([]byte(text))}
+		pendingKey := pendingDraftKey{pane: pane, deliveryID: deliveryID}
 		switch composer {
 		case ComposerSubAgent:
 			logPanelBlocked(pane, "gate:sub-composer")
@@ -428,6 +440,11 @@ func composerBlockReason(d Driver, pane string) string {
 // every path, so a body that "just submitted (cleared)" can never be mistaken for "recovered → re-
 // send" — a double-deliver is impossible by construction.
 func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
+	return c.SubmitWithSelfHealDelivery(d, pane, text, fmt.Sprintf("unkeyed-%d", unkeyedDeliverySequence.Add(1)))
+}
+
+// SubmitWithSelfHealDelivery is SubmitWithSelfHeal with a stable queued-delivery identity.
+func (c Confirm) SubmitWithSelfHealDelivery(d Driver, pane, text, deliveryID string) error {
 	if c.SendCtrlC != nil {
 		if sp, ok := d.(ComposerStateProbe); ok && d.Assess(pane) == StateIdle {
 			if st := sp.ComposerState(pane); st == ComposerSubAgent || st == ComposerListNav {
@@ -435,7 +452,7 @@ func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
 			}
 		}
 	}
-	return c.Submit(d, pane, text)
+	return c.SubmitDelivery(d, pane, text, deliveryID)
 }
 
 // Heal runs the bounded overlay self-heal WITHOUT submitting anything — the heal-only entry point

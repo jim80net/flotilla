@@ -292,8 +292,8 @@ func cmdWatch(args []string) error {
 	// TRANSACTION lock spans the WHOLE confirmed-delivery sequence so no other transaction (the
 	// detector's /clear rotate, a `flotilla send`, a dash control action) interleaves between the
 	// submit and its Enter-only retry / self-heal.
-	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
-		return func(agent, message string) error {
+	mkSend := func(submit func(surface.Driver, string, string, string) error) watch.IdentifiedSendFunc {
+		return func(agent, message, deliveryID string) error {
 			drv, ok := surface.Get(agentSurface(cfg, agent))
 			if !ok {
 				return fmt.Errorf("unknown surface for agent %q", agent)
@@ -307,10 +307,17 @@ func cmdWatch(args []string) error {
 				return err
 			}
 			defer txn.Release()
-			return submit(drv, pane, message)
+			return submit(drv, pane, message, deliveryID)
 		}
 	}
-	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
+	legacySend := func(send watch.IdentifiedSendFunc) watch.SendFunc {
+		return func(agent, message string) error {
+			return send(agent, message, fmt.Sprintf("direct:%d", time.Now().UnixNano()))
+		}
+	}
+	plainSend := mkSend(confirm.SubmitDelivery)
+	injector := watch.NewInjector(legacySend(plainSend), 16)
+	injector.SetIdentifiedSend(plainSend)
 	injector.SetCoordinatorIngress(watch.NewCoordinatorIngressDynamic(currentRoster))
 	arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
 	injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
@@ -322,8 +329,12 @@ func cmdWatch(args []string) error {
 	}
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
 	// plain submit (a tick must never fire an unsolicited Ctrl-C — #156 H2). Inert when self-heal off.
-	injector.SetRelaySend(mkSend(confirm.SubmitWithSelfHeal))
-	injector.SetOperatorInterruptSend(mkSend(confirm.SubmitInterrupt))
+	relaySend := mkSend(confirm.SubmitWithSelfHealDelivery)
+	injector.SetRelaySend(legacySend(relaySend))
+	injector.SetIdentifiedRelaySend(relaySend)
+	interruptSend := mkSend(confirm.SubmitInterruptDelivery)
+	injector.SetOperatorInterruptSend(legacySend(interruptSend))
+	injector.SetIdentifiedOperatorInterruptSend(interruptSend)
 	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
 	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
 	injector.SetEscalate(alert)
@@ -1246,7 +1257,7 @@ func cmdWatch(args []string) error {
 			}
 			dests := transportDestinations(tr, channelIDs)
 			reader := &transportRecentReader{cap: hist, dest: destByChannel(dests, channelIDs)}
-			backstop, err := watch.NewUnackedBackstopDynamicWithTiming(currentRoster, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil, timing)
+			backstop, err := watch.NewUnackedBackstopDynamicWithTiming(currentRoster, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, legacySend(plainSend), nil, timing)
 			if err != nil {
 				return err
 			}
