@@ -20,6 +20,24 @@ func TestAppendDispatchNonce_Idempotent(t *testing.T) {
 	}
 }
 
+func TestNewNonceFullWidthRoundTripsGrammarAndLegacyStillParses(t *testing.T) {
+	nonce, err := NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hex := strings.TrimPrefix(nonce, "flotilla-dispatch-")
+	if len(hex) != 16 {
+		t.Fatalf("nonce = %q, hex width = %d, want 16", nonce, len(hex))
+	}
+	if got := ParseDispatchNonce("dispatch " + nonce); got != nonce {
+		t.Fatalf("full-width round trip = %q, want %q", got, nonce)
+	}
+	legacy := "flotilla-dispatch-a1b2c3d4"
+	if got := ParseDispatchNonce("legacy " + legacy); got != legacy {
+		t.Fatalf("legacy round trip = %q, want %q", got, legacy)
+	}
+}
+
 func TestStripDispatchFooter_RemovesAckBlock(t *testing.T) {
 	base := "deploy complete"
 	stamped, nonce, err := AppendDispatchNonce(base)

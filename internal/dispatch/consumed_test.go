@@ -1,8 +1,11 @@
 package dispatch
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +44,7 @@ func TestConsumeIdempotent_SameNonce(t *testing.T) {
 	}
 }
 
-func TestIsConsumed_NonceAuthoritative(t *testing.T) {
+func TestIsConsumed_NonceCollisionRequiresCompatiblePayloadHash(t *testing.T) {
 	dir := t.TempDir()
 	reg := NewRegistry(dir)
 	_, err := reg.Consume(ConsumedEntry{
@@ -50,8 +53,26 @@ func TestIsConsumed_NonceAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reg.IsConsumed("flotilla-dispatch-11223344", "totally-different-hash") {
-		t.Fatal("nonce match must suppress even when payload hash differs")
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalOutput)
+		log.SetFlags(originalFlags)
+	})
+	if reg.IsConsumed("flotilla-dispatch-11223344", "totally-different-hash") {
+		t.Fatal("nonce collision with different payload hashes must remain unsettled")
+	}
+	if !strings.Contains(logs.String(), "NONCE COLLISION") || !strings.Contains(logs.String(), "refusing to settle") {
+		t.Fatalf("collision log = %q, want loud refusal", logs.String())
+	}
+	if !reg.IsConsumed("flotilla-dispatch-11223344", "aaa") {
+		t.Fatal("nonce plus matching payload hash must settle")
+	}
+	if !reg.IsConsumed("flotilla-dispatch-11223344", "") {
+		t.Fatal("legacy nonce-only query must settle")
 	}
 	if reg.IsConsumed("flotilla-dispatch-99999999", "aaa") {
 		t.Fatal("different nonce must not match on hash alone when query has a nonce")

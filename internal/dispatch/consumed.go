@@ -67,9 +67,10 @@ func NewRegistry(rosterDir string) *Registry {
 }
 
 // IsConsumed reports whether (nonce, payloadHash) was already settled.
-// Match rules (any):
-//   - non-empty nonce equals a registry entry's nonce (nonce is authoritative)
-//   - both nonce and hash match (hash collision safety when nonce empty on one side)
+// Match rules:
+//   - a non-empty nonce match settles unless both sides carry different payload hashes;
+//     that is a detected nonce collision and remains unsettled
+//   - a nonce match with matching or absent hash settles for legacy compatibility
 //   - nonce empty on query: hash-only match
 func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 	if r == nil || r.path == "" {
@@ -82,8 +83,10 @@ func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 	}
 	for _, e := range r.Load() {
 		if nonce != "" && e.Nonce == nonce {
-			// Nonce match is decisive — same dispatch id must not reinject even if
-			// a later stamp changed incidental whitespace in the body hash.
+			if payloadHash != "" && e.PayloadHash != "" && payloadHash != e.PayloadHash {
+				log.Printf("flotilla dispatch: NONCE COLLISION detected for %q: payload hashes differ; refusing to settle", nonce)
+				continue
+			}
 			return true
 		}
 		if nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash {
