@@ -21,9 +21,10 @@ This change graduates six manual practices into generic product capabilities wit
 
 ## Impact
 
-- **New capability deltas:** `span-computation`, `drowning-detection`, `adjutant-routing`, `topology-apply`, `decision-presentation`, and `message-provenance`.
+- **Six mechanization-area deltas:** `span-computation`, `drowning-detection`, `adjutant-routing`, `topology-apply`, `decision-presentation`, and `message-provenance`.
+- **Cross-cutting audit deltas:** `seat-identity` makes durable goal and launch attachments rename-safe, and `constitutional-skillset` defines versioned ownership for whole-file doctrine assets.
 - **Likely affected product areas:** roster graph and validation, watch detectors and reload state, status and decisions read models, goals compilation, send/inbound/dispatch registries, transport envelopes, reply routing, CLI inspection, and durable audit storage.
-- **Compatibility:** existing rosters and goals remain readable through explicit defaults and migration rules. Legacy messages without composition identity or origin provenance remain observable as legacy/unattributable; the product must not invent provenance or claim acknowledgements it cannot prove.
+- **Compatibility:** existing rosters, goals, launch recipes, and doctrine installations remain readable through explicit defaults and migration rules. Legacy messages without composition identity or origin provenance remain observable as legacy/unattributable; the product must not invent provenance or claim acknowledgements it cannot prove.
 - **Build boundary:** this change includes implementation tasks but executes none of them. Each area can be built and reviewed independently after the design gate, with message provenance and truthful receipts sequenced first because they carry the strongest operator requirement.
 
 ## Out of scope

@@ -21,6 +21,26 @@ Operator source-channel provenance outranks fallback convenience. Identity and o
 - Every composed message receives an immutable message ID before the first transport attempt. Attempts and relay hops receive their own IDs and reference the message ID.
 - Operator messages also receive immutable origin provenance: a typed origin surface (`chat_relay`, `pane`, or `dash`), origin channel/address, the authenticated operator identity consumed by that channel, and any surface-scoped conversation reference needed to reply. A relay is recorded as a hop, not substituted as the origin; relays append hop metadata but cannot replace origin.
 
+## Explicit audit decisions
+
+### Goal attachments key on immutable seats
+
+**Decision:** goal ownership, conversation routing, and work-item desk attachments are durable seat relationships. Their stored key is `seat_id`; APIs may additionally project the current display name. Legacy name-valued attachments migrate only when the roster resolves the name to exactly one seat, otherwise compilation fails with an actionable ambiguity.
+
+**Rationale:** these relationships drive accountability, routing, and history across a goal's lifetime. Making them rename-fragile would let a presentation edit orphan durable work or silently attach it to a later seat reusing a name. A soft display hint is still useful, but it is a projection, not identity.
+
+### Launch recipes key on immutable seats
+
+**Decision:** per-seat launch recipes are keyed by `seat_id` and carry the current display name only as optional presentation metadata. Legacy name-keyed recipes migrate through the same unique roster resolution and fail closed on missing or ambiguous names.
+
+**Rationale:** launch recipes encode how a standing seat is recovered. A display-name change must not orphan its harness, failover policy, or recovery path, and requiring manual recipe surgery for every rename defeats immutable roster identity.
+
+### Whole-file doctrine assets are product-managed and versioned
+
+**Decision:** packaged whole-file doctrine assets remain product-managed safety assets after installation; they do not silently become permanent operator-owned forks. Each installed asset records packaged version and digest. An unmodified prior version upgrades atomically. A locally modified asset is never overwritten: refresh stages the new packaged candidate, reports drift/conflict, and requires an explicit keep-local, accept-packaged, or merge resolution whose result and provenance are recorded.
+
+**Rationale:** treating first install as an irrevocable fork prevents shipped safety corrections from reaching existing fleets, while unconditional replacement destroys legitimate local doctrine. Version/digest-aware refresh preserves both product responsibility and operator edits, and turns the ambiguity into an inspectable lifecycle rather than an implicit ownership transfer.
+
 ## Area 1 — span computation
 
 Span is a projection over the accepted roster generation, not a separately authored counter. For a seat, count its direct `line` children plus active `standing_redispatch` relationships. Exclude adjutant edges and transient report-and-exit subagents. Status exposes the immutable `seat_id`, current display name, count, contributing relationship seat IDs, and topology generation so clients can join and explain the number across renames.
@@ -106,4 +126,4 @@ and terminal alternatives `dropped` or `canceled`. Delivery attempts and duplica
 
 ## Sequencing
 
-The implementation is divided by capability. Message identity/provenance/receipts builds first because operator reply correctness is the strongest requirement. Atomic topology apply precedes detectors that depend on reload census. Span computation precedes drowning detection. Decision presentation can build independently. Each phase requires independent review and its own positive, negative-control, migration, and failure-path tests.
+The implementation is divided by capability. Message identity/provenance/receipts builds first because operator reply correctness is the strongest requirement. Atomic topology apply precedes detectors that depend on reload census. Span computation precedes drowning detection. Decision presentation, durable seat attachments, and doctrine refresh can build independently. Each phase requires independent review and its own positive, negative-control, migration, and failure-path tests.

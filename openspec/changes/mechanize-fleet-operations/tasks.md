@@ -51,9 +51,23 @@
 - [ ] 6.5 Test compiler preservation, legacy defaults, top-three bounds, stable ties, overflow, and completed-decision exclusion.
 - [ ] 6.6 Populate operator decisions only from explicit `operator_decision` reasons; retain other blocked classes in separate visible status populations.
 
-## 7. Integration and release gate
+## 7. Durable seat attachments
 
-- [ ] 7.1 Add cross-area tests proving topology generations consistently drive spans, detector census, adjutant routing, and status output.
-- [ ] 7.2 Document schema migrations, compatibility posture, operator inspection commands, and rollback behavior for each independently shippable phase.
-- [ ] 7.3 Run OpenSpec validation, repository tests for each touched area, and the private-boundary tracked-tree phase; treat unrelated repository-wide open-issue scan failures as known external noise.
-- [ ] 7.4 Obtain independent design and implementation review; do not combine design approval with author self-review.
+- [ ] 7.1 Change goal owner, conversation-agent, and work-item agent attachments to immutable seat IDs with current display-name projections.
+- [ ] 7.2 Change launch-recipe keys to immutable seat IDs with optional display-name metadata.
+- [ ] 7.3 Add fail-closed, unique-resolution migrations for legacy name-valued goal attachments and name-keyed launch recipes.
+- [ ] 7.4 Test rename survival plus missing, ambiguous, and reused-name negative controls for goals and launch recovery.
+
+## 8. Versioned whole-file doctrine assets
+
+- [ ] 8.1 Add packaged version/digest metadata and installed-origin records for whole-file doctrine assets.
+- [ ] 8.2 Atomically refresh an unmodified prior packaged asset to a newer version.
+- [ ] 8.3 Detect local edits, stage the packaged candidate, and implement explicit keep-local, accept-packaged, and merge resolutions without silent overwrite.
+- [ ] 8.4 Persist resolution provenance and surface continuing drift; test unmodified refresh, all three conflict choices, interrupted writes, and repeated upgrades.
+
+## 9. Integration and release gate
+
+- [ ] 9.1 Add cross-area tests proving topology generations consistently drive spans, detector census, adjutant routing, and status output.
+- [ ] 9.2 Document schema migrations, compatibility posture, operator inspection commands, and rollback behavior for each independently shippable phase.
+- [ ] 9.3 Run OpenSpec validation, repository tests for each touched area, and the private-boundary tracked-tree phase; treat unrelated repository-wide open-issue scan failures as known external noise.
+- [ ] 9.4 Obtain independent design and implementation review; do not combine design approval with author self-review.
