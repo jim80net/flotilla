@@ -144,10 +144,25 @@ func parseCursorSnapshotOutput(out string) (cursorX, cursorY int, visible, inMod
 // Claude Code renders the anchored spinner.
 func ParseBusy(captured string) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if claudeComposer.MatchString(lines[i]) {
-			return i > 0 && workingSpinner.MatchString(lines[i-1])
-		}
+	composer := len(lines) - 1
+	for composer >= 0 && strings.TrimSpace(lines[composer]) == "" {
+		composer--
 	}
-	return false
+	// The text-only compatibility path accepts only a bottom-most composer row.
+	// A prompt followed by conversation content is historical, not live chrome.
+	if composer < 0 || !claudeComposer.MatchString(lines[composer]) {
+		return false
+	}
+	return composer > 0 && workingSpinner.MatchString(lines[composer-1])
+}
+
+// ParseBusyAt uses the terminal cursor as provenance for the live composer.
+// A historical spinner+prompt pair elsewhere in the capture cannot classify
+// Working because the terminal does not vouch for that prompt row.
+func ParseBusyAt(captured string, cursorY int) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY <= 0 || cursorY >= len(lines) || !claudeComposer.MatchString(lines[cursorY]) {
+		return false
+	}
+	return workingSpinner.MatchString(lines[cursorY-1])
 }
