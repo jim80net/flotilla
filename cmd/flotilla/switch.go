@@ -910,7 +910,7 @@ func cmdSwitch(args []string) error {
 		},
 		recordPhase: recordPhase,
 		writeOverlay: func(target string) error {
-			return reconcileRelaunchOverlay(agentName, target, toSlot.Name, toSurface, workspace.ActiveOverlay{
+			return reconcileRelaunchOverlay(agentName, target, chain, agent.Surface, workspace.ActiveOverlay{
 				Provider:       toSlot.Provider,
 				SubscriptionID: toSlot.SubscriptionID,
 				SwitchedAt:     time.Now().UTC().Format(time.RFC3339),

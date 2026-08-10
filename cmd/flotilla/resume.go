@@ -137,8 +137,8 @@ func cmdResume(args []string) error {
 		newSession: deliver.NewSession,
 		newWindow:  deliver.NewWindow,
 		tag:        deliver.TagPane,
-		reconcile: func(agent, target, slot, selectedSurface string) error {
-			return reconcileRelaunchOverlay(agent, target, slot, selectedSurface, workspace.ActiveOverlay{}, deliver.PaneCommand)
+		reconcile: func(relaunchAgent, target, slot, selectedSurface string) error {
+			return reconcileRelaunchOverlay(relaunchAgent, target, selection.Recipe, agent.Surface, workspace.ActiveOverlay{}, deliver.PaneCommand)
 		},
 	}
 	// Pre-seed codex directory trust for the desk cwd (worktree-aware) before
