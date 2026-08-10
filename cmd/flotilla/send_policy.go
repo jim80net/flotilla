@@ -33,7 +33,17 @@ func authorizeSend(cfg *roster.Config, from, to string, crossVenture bool) sendD
 		}
 		return sendDecision{Reason: fmt.Sprintf("send blocked: sender %q is absent from the compiled org DAG (operator-direct sends use --from me)", from)}
 	}
-	if rosterCoordinator(cfg, fromNode) || fromNode.Kind == org.KindAdjutant {
+	if fromNode.Kind == org.KindAdjutant {
+		if adjutantLaneTarget(dag, from, to) {
+			return sendDecision{Allowed: true}
+		}
+		reason := fmt.Sprintf("send blocked: adjutant %q may task only its owning coordinator %q or its own reporting subtree; recipient %q is outside that lane (use --cross-venture for an audited override)", from, dag.PrimaryParent(from), to)
+		if crossVenture {
+			return sendDecision{Allowed: true, Audit: true, Reason: reason}
+		}
+		return sendDecision{Reason: reason}
+	}
+	if rosterCoordinator(cfg, fromNode) {
 		return sendDecision{Allowed: true}
 	}
 	if !rosterDesk(cfg, fromNode) || !rosterDesk(cfg, toNode) {
@@ -52,6 +62,30 @@ func authorizeSend(cfg *roster.Config, from, to string, crossVenture bool) sendD
 		return sendDecision{Allowed: true, Audit: true, Reason: reason}
 	}
 	return sendDecision{Reason: reason}
+}
+
+func adjutantLaneTarget(dag *org.DAG, adjutant, target string) bool {
+	if dag == nil || adjutant == "" || target == "" {
+		return false
+	}
+	if target == adjutant || target == dag.PrimaryParent(adjutant) {
+		return true
+	}
+	seen := map[string]bool{adjutant: true}
+	queue := append([]string(nil), dag.Children[adjutant]...)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if current == target {
+			return true
+		}
+		if seen[current] {
+			continue
+		}
+		seen[current] = true
+		queue = append(queue, dag.Children[current]...)
+	}
+	return false
 }
 
 func rosterDesk(cfg *roster.Config, n org.Node) bool {

@@ -47,6 +47,27 @@ func TestStructuredRosterRoundTripAndAbsentFieldCompatibility942(t *testing.T) {
 	}
 }
 
+func TestStructuredRosterCompilesAdjutantKindWithCoordinatorPrecedence(t *testing.T) {
+	cfg, err := Load(writeRoster(t, `{
+  "xo_agent":"xo",
+  "agents":[
+    {"seat_id":"0102030405060708","name":"xo","coordinator":true},
+    {"seat_id":"1112131415161718","parent":"0102030405060708","name":"adjutant","adjutant_for":"xo"},
+    {"seat_id":"2122232425262728","parent":"0102030405060708","name":"other-xo","coordinator":true},
+    {"seat_id":"3132333435363738","parent":"0102030405060708","name":"coordinator-adjutant","coordinator":true,"adjutant_for":"other-xo"}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Org().Nodes["adjutant"].Kind; got != "adjutant" {
+		t.Fatalf("adjutant kind = %q, want adjutant", got)
+	}
+	if got := cfg.Org().Nodes["coordinator-adjutant"].Kind; got != "coordinator" {
+		t.Fatalf("coordinator+adjutant kind = %q, want coordinator precedence", got)
+	}
+}
+
 func TestStructuredRosterRetiresInterimOrgFile942(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
