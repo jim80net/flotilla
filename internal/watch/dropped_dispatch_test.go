@@ -209,6 +209,39 @@ func TestDroppedDispatch_QueuedOutboxAckSuppressesReinject(t *testing.T) {
 	}
 }
 
+func TestDroppedDispatch_SupersededQueuedAckDoesNotSuppressReinject(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("work still requiring a current acknowledgement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "pending-stale-ack", Sender: "xo", Recipient: "desk", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outboxPath, err := outbox.Path(dir, "desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"epochs":{"xo":2},"pending":[`+
+		`{"id":"stale-ack","sender":"desk","recipient":"xo","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live-other","sender":"desk","recipient":"xo","message":"unrelated current work","epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, "Completed and acknowledged: "+nonce)
+	if err := os.WriteFile(outboxPath, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var reinjected []Job
+	hook := DroppedDispatchFinishHook(dir, func(string) (string, bool, error) {
+		return "turn-final without acknowledgement", true, nil
+	}, func(job Job) { reinjected = append(reinjected, job) }, nil)
+	hook("desk")
+	if len(reinjected) != 1 {
+		t.Fatalf("superseded queued ack suppressed live supervision: %+v", reinjected)
+	}
+}
+
 func TestDroppedDispatch_ForeignQueuedNonceDoesNotSuppress(t *testing.T) {
 	dir := t.TempDir()
 	msg, nonce, err := inbound.AppendDispatchNonce("implement work whose ack must come from its recipient")

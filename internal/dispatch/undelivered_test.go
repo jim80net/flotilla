@@ -213,9 +213,39 @@ func TestLookupNonceAndRecipientQueueShareCurrentPopulation(t *testing.T) {
 		for _, queued := range queue {
 			inQueue = inQueue || queued.ID == entry.ID
 		}
-		if inQueue != recipientQueueMember(dir, entry, "recipient") {
-			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, recipientQueueMember(dir, entry, "recipient"))
+		if inQueue != RecipientQueueMember(dir, entry, "recipient") {
+			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, RecipientQueueMember(dir, entry, "recipient"))
 		}
+	}
+}
+
+func TestScanUndeliveredOutboxExcludesSupersededPopulation(t *testing.T) {
+	dir := t.TempDir()
+	staleMessage, _, err := inbound.AppendDispatchNonce("superseded aged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveMessage, liveNonce, err := inbound.AppendDispatchNonce("current aged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := fmt.Sprintf(`{"epochs":{"recipient":2},"pending":[`+
+		`{"id":"stale","sender":"sender","recipient":"recipient","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live","sender":"sender","recipient":"recipient","message":%q,"epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, staleMessage, liveMessage)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reports := ScanUndeliveredOutbox(dir, time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC), 15*time.Minute)
+	if len(reports) != 1 || reports[0].ID != "live" || reports[0].Nonce != liveNonce {
+		t.Fatalf("undelivered reports = %+v, want only current epoch-2 entry", reports)
+	}
+	if reports[0].Message == "" || strings.Contains(reports[0].Message, "stale") {
+		t.Fatalf("undelivered report leaked superseded entry: %+v", reports[0])
 	}
 }
 

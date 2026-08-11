@@ -85,7 +85,7 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		st.Recipient = e.Recipient
 		st.ID = e.ID
 		st.PayloadHash = PayloadHash(e.Message)
-		if !recipientQueueMember(rosterDir, e, e.Recipient) {
+		if !RecipientQueueMember(rosterDir, e, e.Recipient) {
 			st.Disposition = DispositionSuperseded
 			st.Detail = fmt.Sprintf("superseded at epoch %d; not a member of the current recipient FIFO", statusEpoch(e.Epoch))
 			return st
@@ -126,17 +126,17 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 func recipientQueue(rosterDir string, pending []outbox.Entry, recipient string) []outbox.Entry {
 	queue := make([]outbox.Entry, 0)
 	for _, entry := range pending {
-		if recipientQueueMember(rosterDir, entry, recipient) {
+		if RecipientQueueMember(rosterDir, entry, recipient) {
 			queue = append(queue, entry)
 		}
 	}
 	return queue
 }
 
-// recipientQueueMember is the single population rule for both nonce lookup and
-// FIFO telemetry. A status row cannot claim a queue position unless this same
+// RecipientQueueMember is the single current-population rule for outbox status
+// consumers. A reader cannot claim a queued/undelivered entry unless this same
 // predicate includes it in the recipient queue.
-func recipientQueueMember(rosterDir string, entry outbox.Entry, recipient string) bool {
+func RecipientQueueMember(rosterDir string, entry outbox.Entry, recipient string) bool {
 	return entry.Recipient == recipient && outbox.Current(rosterDir, entry)
 }
 

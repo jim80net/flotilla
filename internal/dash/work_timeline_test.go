@@ -3,6 +3,7 @@ package dash
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +14,24 @@ import (
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
 )
+
+func TestBuildDispatchTimelineExcludesSupersededOutboxRows(t *testing.T) {
+	dir := t.TempDir()
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"epochs":{"recipient":2},"pending":[`+
+		`{"id":"stale","sender":"sender","recipient":"recipient","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live","sender":"sender","recipient":"recipient","message":%q,"epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, "tracked-ref stale", "tracked-ref live")
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := buildDispatchTimeline(dir, []string{"tracked-ref"})
+	if len(events) != 1 || events[0].SourceID != "live" || events[0].State != "queued" {
+		t.Fatalf("timeline events=%+v, want only current outbox row", events)
+	}
+}
 
 func TestBuildWorkTimelineDocDeterministicCursorPagination(t *testing.T) {
 	var events []WorkTimelineEvent
