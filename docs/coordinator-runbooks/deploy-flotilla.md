@@ -99,5 +99,7 @@ Proceed-unless-vetoed, not wait-for-approval (Principle 3).
 gh workflow run "Deploy landing page (GitHub Pages)" -R <owner>/flotilla
 ```
 
-Public surfaces: run `scripts/check-private-boundary.sh` before publishing
-deployment-derived content.
+Public surfaces: from a complete clone, run
+`scripts/check-private-boundary.sh --history` before publishing or mirroring
+deployment-derived content. A clean tip-only scan is not publication clearance;
+the Pages workflow enforces the history gate before upload and deploy.

@@ -44,6 +44,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Full-history publication boundary gate
+        env:
+          FLOTILLA_PRIVATE_DENYLIST_SECRET: ${{ secrets.FLOTILLA_PRIVATE_DENYLIST }}
+        run: |
+          if [ -n "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" ]; then
+            mkdir -p .flotilla
+            printf '%s\n' "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" > .flotilla/private-denylist
+          fi
+          bash scripts/check-private-boundary.sh --history
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

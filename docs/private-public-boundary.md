@@ -56,8 +56,9 @@ paths, and must never be copied into a public artifact.)
 ## The guard
 
 `scripts/check-private-boundary.sh` greps for leaks across the tracked tree (and,
-with `--issues`, open issues + PRs; with `--file <path>`, one file's contents — the
-mode the pre-commit / pre-push hooks and the conformance test use). It **fails on a
+with `--issues`, open issues + PRs; with `--history`, every commit reachable from
+every local ref; with `--file <path>`, one file's contents — the mode the pre-commit /
+pre-push hooks and the conformance test use). It **fails on a
 fail-closed hit** and runs in CI on every push and PR (`.github/workflows/ci.yml`,
 the `private-boundary` job). It has two fail-closed layers plus an advisory third:
 
@@ -93,6 +94,31 @@ the `private-boundary` job). It has two fail-closed layers plus an advisory thir
 3. **Your deployment warnlist (advisory)** — your domain *vocabulary*, loaded the
    same gitignored way but **never a failure**: a hit prints a `WARN` section and
    exits 0. See "The advisory WARN tier" below.
+
+### Full-history publication gate
+
+A clean tip scan is **not publication clearance**. A deleted carrier remains in a
+clone, mirror, or public fork while any ref reaches its commit. Before publishing or
+mirroring a repository, run from a complete, non-shallow clone:
+
+```bash
+git fetch --all --tags
+scripts/check-private-boundary.sh --history
+```
+
+The history mode checks two independent axes across `git log --all`: content uses
+the same built-in plus deployment denylist as the tip scan, while tracked path
+classes catch state carriers even when their text contains no known token. Generic
+`.flotilla/handoffs/`, `.flotilla/state/`, and `.flotilla/switch/` classes ship with
+the product. Add deployment-specific PCRE path classes in the gitignored
+`.flotilla/private-history-paths` file or `FLOTILLA_PRIVATE_HISTORY_PATHS`; never
+commit the private path vocabulary itself.
+
+Any hit reports only commit and path, never matching content. A shallow/unreadable
+history or invalid pattern fails closed. Ignore coverage is deliberately irrelevant:
+`git check-ignore` is never clearance, because ignore rules do not untrack a path
+that already exists in history. The Pages publication workflow runs this mode before
+upload or deploy.
 
 ## Two egresses, one partition: the static guard AND the runtime firewall
 
@@ -159,6 +185,7 @@ The same static guard runs at three points (additive; none weakens another):
 | **pre-commit** (`scripts/hooks/pre-commit`) | Before a commit is created | **Staged** added lines (`git diff --cached`) | Local backstop (`--no-verify` bypasses) |
 | **pre-push** (`scripts/hooks/pre-push`) | Before push leaves the clone | Added lines in the **push range** (+ gofmt/vet) | Local backstop (`--no-verify` bypasses) |
 | **CI** (`private-boundary` job) | Every push and PR | Tracked tree (+ open issues/PRs with denylist secret) | **Enforcing gate of record** |
+| **publication** (`--history`; Pages workflow) | Before a repository/artifact becomes public or is mirrored | Every commit reachable from all local refs, content + tracked path classes | **Fail-closed publication gate** |
 
 Install local hooks with `scripts/install-hooks.sh` (sets `core.hooksPath` →
 `scripts/hooks` for this clone only). Pre-commit catches a leak at commit time so
