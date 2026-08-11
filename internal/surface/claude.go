@@ -40,18 +40,46 @@ type claudeCode struct {
 }
 
 func newClaudeCode() claudeCode {
+	c := newClaudeObservationDriver(
+		deliver.PaneCommand,
+		deliver.IsShell,
+		deliver.CapturePane,
+		deliver.ParseBusyAt,
+		deliver.CursorState,
+	)
+	c.send = deliver.Send
+	c.clear = deliver.ClearContext
+	c.slashKeys = deliver.InjectSlash
+	c.latestTurnText = claudestore.LatestTurnText
+	c.replyAfter = claudestore.ReplyAfter
+	return c
+}
+
+func newClaudeObservationDriver(
+	paneCommand func(string) (string, error),
+	isShell func(string) bool,
+	capturePane func(string) (string, error),
+	parseBusyAt func(string, int) bool,
+	cursorState func(string) (int, bool, error),
+) claudeCode {
 	return claudeCode{
-		paneCommand:    deliver.PaneCommand,
-		isShell:        deliver.IsShell,
-		capturePane:    deliver.CapturePane,
-		parseBusyAt:    deliver.ParseBusyAt,
-		send:           deliver.Send,
-		clear:          deliver.ClearContext,
-		slashKeys:      deliver.InjectSlash,
-		latestTurnText: claudestore.LatestTurnText,
-		replyAfter:     claudestore.ReplyAfter,
-		cursorState:    deliver.CursorState,
+		paneCommand: paneCommand,
+		isShell:     isShell, capturePane: capturePane,
+		parseBusyAt: parseBusyAt, cursorState: cursorState,
 	}
+}
+
+// NewClaudeObservationDriver constructs the same observation/classification core used by
+// the production Claude driver while allowing tests to replace only terminal leaf reads.
+// Submit/rotate/close are intentionally unavailable on this observation-only instance.
+func NewClaudeObservationDriver(
+	paneCommand func(string) (string, error),
+	isShell func(string) bool,
+	capturePane func(string) (string, error),
+	parseBusyAt func(string, int) bool,
+	cursorState func(string) (int, bool, error),
+) Driver {
+	return newClaudeObservationDriver(paneCommand, isShell, capturePane, parseBusyAt, cursorState)
 }
 
 func (claudeCode) Name() string { return "claude-code" }

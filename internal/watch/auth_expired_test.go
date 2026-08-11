@@ -4,13 +4,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
 func TestAuthExpiredAlarmEdgesAndRecovery(t *testing.T) {
-	r := newRig(surface.ErrAuthExpired)
-	r.in.ObserveAuthState("desk", surface.AuthExpired)
-	r.in.ObserveAuthState("desk", surface.AuthExpired)
+	r := newRig(nil)
+	frame := "prior conversation\nLogin expired - Please run /login\nfooter"
+	driver := surface.NewClaudeObservationDriver(
+		func(string) (string, error) { return "node", nil },
+		func(string) bool { return false },
+		func(string) (string, error) { return frame, nil },
+		deliver.ParseBusyAt,
+		func(string) (int, bool, error) { return 1, false, nil },
+	)
+	assessor := NewAuthStateAssessor(r.in)
+	assessor.Assess("desk", driver, "pane")
+	assessor.Assess("desk", driver, "pane")
 	if len(r.alerts) != 1 {
 		t.Fatalf("first auth-expired episode alerts = %d, want 1", len(r.alerts))
 	}
@@ -20,8 +30,10 @@ func TestAuthExpiredAlarmEdgesAndRecovery(t *testing.T) {
 		}
 	}
 
-	r.in.ObserveAuthState("desk", surface.AuthRecovered)
-	r.in.ObserveAuthState("desk", surface.AuthExpired)
+	frame = "prior conversation\n❯ \nfooter"
+	assessor.Assess("desk", driver, "pane")
+	frame = "prior conversation\nLogin expired - Please run /login\nfooter"
+	assessor.Assess("desk", driver, "pane")
 	if len(r.alerts) != 2 {
 		t.Fatalf("post-login auth-expired episode alerts = %d, want rearmed second alert", len(r.alerts))
 	}

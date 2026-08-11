@@ -52,28 +52,6 @@ func TestAuthExpiredStateLabel(t *testing.T) {
 	}
 }
 
-func TestClaudeAuthClassificationDrivesProductionObservation(t *testing.T) {
-	const frame = "prior conversation\nLogin expired - Please run /login\nfooter"
-	c := claudeCode{
-		paneCommand: func(string) (string, error) { return "node", nil },
-		isShell:     func(string) bool { return false },
-		capturePane: func(string) (string, error) { return frame, nil },
-		parseBusyAt: deliver.ParseBusyAt,
-		cursorState: func(string) (int, bool, error) { return 1, false, nil },
-	}
-	alarms := 0
-	state := AssessForFleetAuth(c, "pane", func(observation AuthObservation) bool {
-		if observation == AuthExpired {
-			alarms++
-			return true
-		}
-		return false
-	})
-	if state != StateAuthExpired || alarms != 1 {
-		t.Fatalf("classification pipeline = (%v, alarms=%d), want auth-expired and one alarm", state, alarms)
-	}
-}
-
 func TestClaudeAuthRecoveryRequiresCursorVouchedClearedComposer(t *testing.T) {
 	const expired = "prior conversation\nLogin expired - Please run /login\nfooter"
 	c := claudeCode{

@@ -771,6 +771,7 @@ func cmdWatch(args []string) error {
 		if !xoRotate.AllowsIdleEdgeRotate() {
 			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
 		}
+		authAssessor := watch.NewAuthStateAssessor(injector)
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
@@ -795,9 +796,7 @@ func cmdWatch(args []string) error {
 				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
 				// list-nav / queued) elevates so status does not claim plain idle when
 				// recycle's idle∧cleared gate would refuse (#557).
-				return surface.AssessForFleetAuth(drv, pane, func(auth surface.AuthObservation) bool {
-					return injector.ObserveAuthState(agent, auth)
-				})
+				return authAssessor.Assess(agent, drv, pane)
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			Usage:             usageObservation(cfg, flatLaunch),
