@@ -90,6 +90,11 @@ func TestParseCodexState(t *testing.T) {
 			want: StateIdle,
 		},
 		{
+			name:     "quoted working marker adjacent to composer → Idle",
+			captured: "  The runbook says esc to interrupt when a task is active.\n  › \n  / for commands",
+			want:     StateIdle,
+		},
+		{
 			name:     "idle empty composer → Idle (default)",
 			captured: "  Turn done.\n  › \n  / for commands",
 			want:     StateIdle,

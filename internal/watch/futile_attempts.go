@@ -12,6 +12,7 @@ import (
 const (
 	futileAttemptThreshold = 60
 	futileAttemptWindow    = 5 * time.Minute
+	zeroAttemptHeadAge     = outbox.StaleMaxAge
 )
 
 type futileAttemptState struct {
@@ -61,7 +62,7 @@ func (in *Injector) ObserveQueuedHead(entry outbox.Entry) {
 	}
 	now := in.clock()
 	age := now.Sub(entry.EnqueuedAt)
-	if age < outbox.StaleMaxAge {
+	if age < zeroAttemptHeadAge {
 		return
 	}
 	in.futileMu.Lock()

@@ -175,12 +175,7 @@ var codexApprovalMarkers = []string{
 }
 
 // Working-turn chrome (binary-sourced footer/status — revalidate post-auth).
-var codexWorkingMarkers = []string{
-	" to interrupt",                   // footer hint (leading key glyph varies)
-	"while a task is in progress",     // disabled-action suffix
-	"Waiting for background terminal", // background exec in-turn
-	"a turn is running",               // mode-switch guard
-}
+var codexWorkingSpinnerRE = regexp.MustCompile(`^\s*[◦•]\s+.+\([^)]*(?:esc\s+)?to interrupt\)\s*$`)
 
 // Rate-limit overlay markers are INFERRED from the event report and the shared
 // selector rendering, pending an exact live capture under #690. Safety does not
@@ -225,7 +220,10 @@ func codexWorkingAtCursor(captured string, cursorY int) bool {
 		if line == "" {
 			continue
 		}
-		return containsAny(line, codexWorkingMarkers)
+		return codexWorkingSpinnerRE.MatchString(line) || line == "esc to interrupt" ||
+			strings.Contains(line, "while a task is in progress") ||
+			strings.Contains(line, "Waiting for background terminal") ||
+			strings.Contains(line, "a turn is running")
 	}
 	return false
 }
