@@ -69,11 +69,11 @@ func (c codex) Assess(pane string) State {
 	if c.isShell(cmd) {
 		return StateShell
 	}
+	_, cy, inMode, cursorErr := c.cursorPosition(pane)
 	captured, err := c.capturePane(pane)
 	if err != nil {
 		return StateUnknown
 	}
-	_, cy, inMode, cursorErr := c.cursorPosition(pane)
 	return c.classify(captured, cy, cursorErr == nil && !inMode)
 }
 
