@@ -142,7 +142,7 @@ func TestOutboxNonceJoinsRejectQuotedHistoricalText(t *testing.T) {
 	}
 }
 
-func TestLookupNonceReportsRecipientFIFOPosition(t *testing.T) {
+func TestLookupNonceReportsSenderRecipientFIFOPosition(t *testing.T) {
 	dir := t.TempDir()
 	var nonces []string
 	for _, body := range []string{"first queued work", "second queued work", "third queued work"} {
@@ -160,14 +160,44 @@ func TestLookupNonceReportsRecipientFIFOPosition(t *testing.T) {
 	if st.Disposition != DispositionQueued || st.Position != 2 || st.QueueDepth != 3 || st.HeadID != entries[0].ID {
 		t.Fatalf("follower status = %+v, want position 2/3 behind %s", st, entries[0].ID)
 	}
-	if st.Detail != "recipient FIFO follower; position 2 behind head "+entries[0].ID {
+	if st.Detail != "sender-recipient FIFO follower; position 2 behind lane head "+entries[0].ID {
 		t.Fatalf("follower detail = %q", st.Detail)
 	}
 	formatted := FormatStatus(st)
-	for _, want := range []string{"queue_position=2/3", "head_id=" + entries[0].ID, "deferrals=0", "recipient FIFO follower"} {
+	for _, want := range []string{"queue_position=2/3", "head_id=" + entries[0].ID, "deferrals=0", "sender-recipient FIFO follower"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("formatted status %q missing %q", formatted, want)
 		}
+	}
+}
+
+func TestLookupNonceQueuePositionIsPerSenderRecipientLane(t *testing.T) {
+	dir := t.TempDir()
+	alphaMessage, alphaNonce, err := inbound.AppendDispatchNonce("alpha wedged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaMessage, betaNonce, err := inbound.AppendDispatchNonce("beta independent work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaID, _, err := outbox.Enqueue(dir, "alpha", "recipient", alphaMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaID, _, err := outbox.Enqueue(dir, "beta", "recipient", betaMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Add(time.Hour)
+	alpha := LookupNonce(dir, alphaNonce, now)
+	beta := LookupNonce(dir, betaNonce, now)
+	if alpha.Position != 1 || alpha.QueueDepth != 1 || alpha.HeadID != alphaID {
+		t.Fatalf("alpha lane status = %+v, want independent position 1/1 at %s", alpha, alphaID)
+	}
+	if beta.Position != 1 || beta.QueueDepth != 1 || beta.HeadID != betaID {
+		t.Fatalf("beta lane status = %+v, want independent position 1/1 at %s", beta, betaID)
 	}
 }
 
@@ -207,8 +237,8 @@ func TestLookupNonceAndRecipientQueueShareCurrentPopulation(t *testing.T) {
 	}
 
 	entries := outbox.ListAll(dir)
-	queue := recipientQueue(dir, entries, "recipient")
 	for _, entry := range entries {
+		queue := senderRecipientQueue(dir, entries, entry.Sender, "recipient")
 		inQueue := false
 		for _, queued := range queue {
 			inQueue = inQueue || queued.ID == entry.ID

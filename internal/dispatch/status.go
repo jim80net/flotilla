@@ -90,7 +90,7 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 			st.Detail = fmt.Sprintf("superseded at epoch %d; not a member of the current recipient FIFO", statusEpoch(e.Epoch))
 			return st
 		}
-		queue := recipientQueue(rosterDir, pending, e.Recipient)
+		queue := senderRecipientQueue(rosterDir, pending, e.Sender, e.Recipient)
 		st.QueueDepth = len(queue)
 		st.Deferrals = e.Deferrals
 		for i, queued := range queue {
@@ -107,7 +107,7 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		}
 		if st.Position > 1 {
 			st.Disposition = DispositionQueued
-			st.Detail = fmt.Sprintf("recipient FIFO follower; position %d behind head %s", st.Position, emptyDash(st.HeadID))
+			st.Detail = fmt.Sprintf("sender-recipient FIFO follower; position %d behind lane head %s", st.Position, emptyDash(st.HeadID))
 			return st
 		}
 		if st.Age >= UndeliveredOutboxAge && e.LastStaleEscalation.IsZero() {
@@ -116,17 +116,17 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 			return st
 		}
 		st.Disposition = DispositionQueued
-		st.Detail = "recipient FIFO head; eligible for delivery attempt"
+		st.Detail = "sender-recipient FIFO head; eligible for delivery attempt"
 		return st
 	}
 	st.Detail = "nonce not found in consumed, inbound, or outbox"
 	return st
 }
 
-func recipientQueue(rosterDir string, pending []outbox.Entry, recipient string) []outbox.Entry {
+func senderRecipientQueue(rosterDir string, pending []outbox.Entry, sender, recipient string) []outbox.Entry {
 	queue := make([]outbox.Entry, 0)
 	for _, entry := range pending {
-		if RecipientQueueMember(rosterDir, entry, recipient) {
+		if entry.Sender == sender && RecipientQueueMember(rosterDir, entry, recipient) {
 			queue = append(queue, entry)
 		}
 	}
