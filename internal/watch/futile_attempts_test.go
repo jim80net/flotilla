@@ -128,3 +128,17 @@ func TestQueuedHeadAgeIgnoresYoungOrAttemptedEntries(t *testing.T) {
 		t.Fatalf("non-wedge heads raised %d alarms", alarms)
 	}
 }
+
+func TestAttemptedHeadDoesNotHideAgedZeroAttemptOtherLane(t *testing.T) {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.now = func() time.Time { return base.Add(outbox.StaleMaxAge + time.Minute) }
+	var alarms []string
+	in.SetEscalate(func(message string) { alarms = append(alarms, message) })
+
+	in.ObserveQueuedHead(outbox.Entry{ID: "attempted-alpha", Sender: "alpha", Recipient: "desk", EnqueuedAt: base, Deferrals: 12})
+	in.ObserveQueuedHead(outbox.Entry{ID: "starved-beta", Sender: "beta", Recipient: "desk", EnqueuedAt: base, Deferrals: 0})
+	if len(alarms) != 1 || !strings.Contains(alarms[0], "starved-beta") {
+		t.Fatalf("alarms=%v, want one for aged zero-attempt beta lane", alarms)
+	}
+}

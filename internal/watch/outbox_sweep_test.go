@@ -72,7 +72,7 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	}
 }
 
-func TestOutboxSweeperObservesOnlyRecipientHead(t *testing.T) {
+func TestOutboxSweeperObservesEverySenderPairHead(t *testing.T) {
 	dir := t.TempDir()
 	first, _, err := outbox.Enqueue(dir, "alpha", "desk", "first")
 	if err != nil {
@@ -85,8 +85,8 @@ func TestOutboxSweeperObservesOnlyRecipientHead(t *testing.T) {
 	s := NewOutboxSweeper(dir, func(Job) {})
 	s.SetHeadObserver(func(entry outbox.Entry) { observed = append(observed, entry.ID) })
 	s.SweepAll()
-	if len(observed) != 1 || observed[0] != first {
-		t.Fatalf("observed heads = %v, want [%s]", observed, first)
+	if len(observed) != 2 || observed[0] != first {
+		t.Fatalf("observed heads = %v, want both sender-pair heads beginning with %s", observed, first)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestCancelOneOfNLeavesNMinusOneDeliverable(t *testing.T) {
 	}
 }
 
-func TestSweepAdmitsOnlyRecipientHeadUntilCompleted(t *testing.T) {
+func TestSweepKeepsSameSenderPairStrictlyOrdered(t *testing.T) {
 	dir := t.TempDir()
 	first, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "first")
 	if err != nil {
@@ -184,6 +184,45 @@ func TestSweepAdmitsOnlyRecipientHeadUntilCompleted(t *testing.T) {
 	s.Release("alpha-desk", first)
 	if s.SweepAll() != 1 || len(ids) != 2 || ids[1] != second {
 		t.Fatalf("after head completion = %v, want [%s %s]", ids, first, second)
+	}
+}
+
+func TestSweepDifferentSenderLaneDeliversPastBusyHead(t *testing.T) {
+	dir := t.TempDir()
+	alpha, _, err := outbox.Enqueue(dir, "alpha", "desk", "alpha blocked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, _, err := outbox.Enqueue(dir, "beta", "desk", "beta deliverable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []Job
+	sweeper := NewOutboxSweeper(dir, func(job Job) { jobs = append(jobs, job) })
+	if got := sweeper.SweepAll(); got != 2 || len(jobs) != 2 {
+		t.Fatalf("admitted=%d jobs=%v, want both sender-pair heads", got, jobs)
+	}
+	var delivered []string
+	in := NewInjector(func(_ string, message string) error {
+		if message == "alpha blocked" {
+			return surface.ErrBusy
+		}
+		delivered = append(delivered, message)
+		return nil
+	}, 2)
+	in.SetRosterDir(dir)
+	in.SetOutboxDone(sweeper.Release)
+	in.reEnqueue = func(Job, time.Duration) {}
+	in.deliver(jobs[0])
+	in.deliver(jobs[1])
+	if len(delivered) != 1 || delivered[0] != "beta deliverable" {
+		t.Fatalf("delivered=%v, want beta lane past busy alpha", delivered)
+	}
+	if !outbox.Current(dir, outbox.Entry{ID: alpha, Sender: "alpha", Recipient: "desk", Epoch: 1}) {
+		t.Fatal("busy alpha lane head must remain pending")
+	}
+	if outbox.Current(dir, outbox.Entry{ID: beta, Sender: "beta", Recipient: "desk", Epoch: 1}) {
+		t.Fatal("confirmed beta lane head must be removed")
 	}
 }
 

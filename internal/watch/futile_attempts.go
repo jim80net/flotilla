@@ -52,8 +52,8 @@ func (in *Injector) resetFutileAttempts(recipient string) {
 	delete(in.futileAttempts, recipient)
 }
 
-// ObserveQueuedHead lets the outbox sweep feed the zero-attempt age arm into
-// the same per-recipient, edge-triggered alarm used by futile delivery attempts.
+// ObserveQueuedHead lets each sender→recipient lane head feed the zero-attempt
+// age arm into the same per-recipient, edge-triggered alarm used by futile attempts.
 // Thirty minutes matches the existing stale-send age horizon: ordinary turns
 // stay quiet, while a head that has never reached delivery cannot hide forever.
 func (in *Injector) ObserveQueuedHead(entry outbox.Entry) {
