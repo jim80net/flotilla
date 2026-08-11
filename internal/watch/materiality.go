@@ -25,7 +25,8 @@ import (
 func actionableEntry(s surface.State) bool {
 	switch s {
 	case surface.StateShell, surface.StateErrored,
-		surface.StateAwaitingApproval, surface.StateAwaitingInput:
+		surface.StateAwaitingApproval, surface.StateAwaitingInput,
+		surface.StateAuthExpired:
 		return true
 	default:
 		return false

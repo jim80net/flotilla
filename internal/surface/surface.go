@@ -19,6 +19,7 @@ const (
 	StateAwaitingInput          // blocked on a prompt for input (reserved; per-surface)
 	StateAwaitingApproval       // blocked on a tool/permission approval (reserved; per-surface)
 	StateErrored                // surfaced an error state (reserved; per-surface)
+	StateAuthExpired            // login expired; human re-authentication is required
 )
 
 // String renders a State as a short lowercase label for logs and the
@@ -35,6 +36,8 @@ func (s State) String() string {
 		return "awaiting-input"
 	case StateAwaitingApproval:
 		return "awaiting-approval"
+	case StateAuthExpired:
+		return "auth-expired"
 	case StateErrored:
 		return "errored"
 	default:

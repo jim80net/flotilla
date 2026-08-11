@@ -105,6 +105,9 @@ func (c claudeCode) Assess(pane string) State {
 	busy := false
 	if c.cursorState != nil && c.parseBusyAt != nil {
 		if cursorY, inMode, cursorErr := c.cursorState(pane); cursorErr == nil && !inMode {
+			if claudeAuthExpiredAt(captured, cursorY) {
+				return StateAuthExpired
+			}
 			busy = c.parseBusyAt(captured, cursorY)
 		}
 	}
@@ -118,6 +121,14 @@ func (c claudeCode) Assess(pane string) State {
 		return StateAwaitingInput
 	}
 	return StateIdle
+}
+
+func claudeAuthExpiredAt(captured string, cursorY int) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY < 0 || cursorY >= len(lines) {
+		return false
+	}
+	return strings.TrimSpace(lines[cursorY]) == "Login expired - Please run /login"
 }
 
 // Rotate resets context by injecting Claude Code's /clear (verified literal

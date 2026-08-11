@@ -39,3 +39,28 @@ func (in *Injector) noteFutileAttempt(recipient string) {
 func (in *Injector) resetFutileAttempts(recipient string) {
 	delete(in.futileAttempts, recipient)
 }
+
+// ObserveAuthExpired edge-triggers the human-required authentication alarm.
+// Detector assessments call it even when no delivery is queued; the delivery
+// path calls it as defense in depth. A non-expired observation rearms the edge.
+func (in *Injector) ObserveAuthExpired(recipient string, expired bool) {
+	if recipient == "" {
+		return
+	}
+	in.authExpiredMu.Lock()
+	if !expired {
+		delete(in.authExpiredAlarmed, recipient)
+		in.authExpiredMu.Unlock()
+		return
+	}
+	if in.authExpiredAlarmed == nil {
+		in.authExpiredAlarmed = make(map[string]bool)
+	}
+	if in.authExpiredAlarmed[recipient] {
+		in.authExpiredMu.Unlock()
+		return
+	}
+	in.authExpiredAlarmed[recipient] = true
+	in.authExpiredMu.Unlock()
+	in.raise("seat %q entered auth-expired: human login is required; deliveries remain durably held until authentication recovers", recipient)
+}

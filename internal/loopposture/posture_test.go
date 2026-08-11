@@ -69,6 +69,11 @@ func TestDerive_AwaitingAuthorityAndBlocked(t *testing.T) {
 		t.Fatalf("awaiting-approval pane → %q", got)
 	}
 	e = baseIdle()
+	e.Pane = surface.StateAuthExpired
+	if got := Derive(e); got != PostureBlocked {
+		t.Fatalf("auth-expired pane → %q, want blocked (never idle/available)", got)
+	}
+	e = baseIdle()
 	e.BlockedN = 2
 	e.UnblockedN = 0
 	if got := Derive(e); got != PostureBlocked {

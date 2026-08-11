@@ -795,7 +795,9 @@ func cmdWatch(args []string) error {
 				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
 				// list-nav / queued) elevates so status does not claim plain idle when
 				// recycle's idle∧cleared gate would refuse (#557).
-				return surface.AssessForFleet(drv, pane)
+				state := surface.AssessForFleet(drv, pane)
+				injector.ObserveAuthExpired(agent, state == surface.StateAuthExpired)
+				return state
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			Usage:             usageObservation(cfg, flatLaunch),

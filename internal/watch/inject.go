@@ -166,6 +166,8 @@ type Injector struct {
 	relayPendingMu        sync.Mutex
 	relayPending          map[string]int // in-flight KindRelay per agent (#523)
 	futileAttempts        map[string]futileAttemptState
+	authExpiredMu         sync.Mutex
+	authExpiredAlarmed    map[string]bool
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -307,6 +309,7 @@ func (in *Injector) deliver(j Job) {
 	switch {
 	case err == nil:
 		in.resetFutileAttempts(j.Agent)
+		in.ObserveAuthExpired(j.Agent, false)
 		in.noteRelayDone(j)
 		in.logDelivered(j)
 		if isRelay(j.Kind) && j.MessageID != "" {
@@ -332,7 +335,7 @@ func (in *Injector) deliver(j Job) {
 		if in.mirror != nil && isRelay(j.Kind) {
 			in.mirror(j) // audit only operator relays that actually landed
 		}
-	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
+	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient), errors.Is(err, surface.ErrAuthExpired):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
 		in.handleBusy(j, err)
 	case errors.Is(err, surface.ErrPanelBlocked):
@@ -424,7 +427,11 @@ func intendedRecipient(j Job) string {
 // and swept inter-agent sends are never dropped: short transient re-assess, then durable
 // disk-backed retry at the busy cadence until deliverable (#286, #475).
 func (in *Injector) handleBusy(j Job, cause error) {
-	in.noteFutileAttempt(j.Agent)
+	if errors.Is(cause, surface.ErrAuthExpired) {
+		in.ObserveAuthExpired(j.Agent, true)
+	} else {
+		in.noteFutileAttempt(j.Agent)
+	}
 	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		in.abortDetectorClaim(j)
