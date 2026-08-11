@@ -8,6 +8,11 @@
 # --issues, into open issues + PRs). It is the executable form of
 # docs/private-public-boundary.md.
 #
+# Written is not readable, present is not reachable. Publication clearance is
+# therefore a remote-reachability question: --history scans every commit
+# fetchable from every ref advertised by origin, not merely the working tree,
+# current tip, or refs already present in this clone.
+#
 # TWO layers of protection:
 #   1. BUILT-IN, deployment-AGNOSTIC patterns (below) — leaks that are private for
 #      ANYONE: absolute home paths revealing a username, chat webhook URLs, common
@@ -35,7 +40,7 @@
 # Usage:
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
-#   scripts/check-private-boundary.sh --history  # scan every commit reachable from ALL refs
+#   scripts/check-private-boundary.sh --history  # fetch + scan every commit reachable from ALL origin refs
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
 #                                                  # pre-commit + pre-push hooks and the
 #                                                  # conformance test use this; no `git
@@ -251,26 +256,87 @@ scan_issues() {
 }
 
 declare -A history_seen=()
+history_scan_namespace="refs/flotilla-boundary-scan"
+
+clear_history_scan_refs() {
+  local ref
+  while IFS= read -r ref; do
+    [ -z "$ref" ] || git -C "$repo_root" update-ref -d "$ref" >/dev/null 2>&1 || true
+  done < <(git -C "$repo_root" for-each-ref --format='%(refname)' "$history_scan_namespace" 2>/dev/null || true)
+}
+
+safe_history_location() {
+  local value="$1"
+  if printf '%s\n' "$value" | grep -qP "$full_alternation" 2>/dev/null; then
+    printf '<redacted-path>'
+  else
+    printf '%s' "$value"
+  fi
+}
+
+safe_history_ref() {
+  local value="$1"
+  if printf '%s\n' "$value" | grep -qP "$full_alternation" 2>/dev/null; then
+    printf '<redacted-ref>'
+  else
+    printf '%s' "$value"
+  fi
+}
+
+history_reachability() {
+  local commit="$1" scan_ref original family
+  local -a refs=()
+  declare -A families=()
+  while IFS= read -r scan_ref; do
+    [ -z "$scan_ref" ] && continue
+    if git -C "$repo_root" merge-base --is-ancestor "$commit" "$scan_ref" 2>/dev/null; then
+      original="refs/${scan_ref#"$history_scan_namespace"/}"
+      refs+=("$original")
+      family="${original#refs/}"
+      family="${family%%/*}/*"
+      families["$family"]=$(( ${families["$family"]:-0} + 1 ))
+    fi
+  done < <(git -C "$repo_root" for-each-ref --format='%(refname)' "$history_scan_namespace")
+
+  printf '  reachability: ref_count=%d families=' "${#refs[@]}"
+  local first=1
+  for family in "${!families[@]}"; do
+    [ "$first" -eq 1 ] || printf ','
+    printf '%s:%d' "$family" "${families[$family]}"
+    first=0
+  done
+  printf '\n'
+  for original in "${refs[@]}"; do
+    printf '  reachable-ref: %s\n' "$(safe_history_ref "$original")"
+  done
+}
 
 history_hit() {
   local commit="$1"
   local path="$2"
-	local key="$commit:$path"
+	local class="${3:-content-token}"
+	local key="$commit:$path:$class"
 	[ -n "${history_seen[$key]:-}" ] && return
 	history_seen[$key]=1
-  printf '%s %s\n' "$commit" "$path"
+  printf '%s location=%s class=%s\n' "$commit" "$(safe_history_location "$path")" "$class"
+  history_reachability "$commit"
   fail=1
 }
 
 scan_history() {
-  echo "== boundary guard: scanning full all-refs history =="
+  echo "== boundary guard: scanning full remote all-refs reachability =="
   if ! git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
     echo "boundary history scan error: not a git repository"
     fail=1
     return
   fi
   if [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
-    echo "boundary history scan error: repository history is shallow or unreadable; fetch all refs and full history before publication"
+    echo "boundary history scan error: repository history is shallow or unreadable; remote reachability cannot be proven"
+    fail=1
+    return
+  fi
+  if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    echo "boundary history scan error: origin remote is unavailable; remote fetchability cannot be established"
     fail=1
     return
   fi
@@ -294,9 +360,22 @@ scan_history() {
 		return
 	fi
 
-  local commits commit message paths path content_hits rc before
-  if ! commits="$(git -C "$repo_root" log --all --format='%H' 2>/dev/null)"; then
-    echo "boundary history scan error: could not enumerate all refs"
+  local advertised commits commit message paths path content_hits rc before
+  if ! advertised="$(git -C "$repo_root" ls-remote --refs origin 2>/dev/null)" || [ -z "$advertised" ]; then
+    echo "boundary history scan error: could not enumerate refs advertised by origin"
+    fail=1
+    return
+  fi
+  clear_history_scan_refs
+  if ! git -C "$repo_root" fetch --quiet --no-tags origin "+refs/*:$history_scan_namespace/*"; then
+    echo "boundary history scan error: could not fetch every ref advertised by origin"
+    clear_history_scan_refs
+    fail=1
+    return
+  fi
+  if ! commits="$(git -C "$repo_root" for-each-ref --format='%(objectname)' "$history_scan_namespace" | git -C "$repo_root" rev-list --stdin 2>/dev/null | sort -u)"; then
+    echo "boundary history scan error: could not enumerate commits reachable from fetched origin refs"
+    clear_history_scan_refs
     fail=1
     return
   fi
@@ -316,7 +395,7 @@ scan_history() {
     rc=$?
     set -e
     if [ "$rc" -eq 0 ]; then
-      history_hit "$commit" "<commit-message>"
+      history_hit "$commit" "<commit-message>" "content-token"
     elif [ "$rc" -gt 1 ]; then
       echo "boundary history scan error: token pattern evaluation failed at commit $commit"
       fail=1
@@ -331,9 +410,10 @@ scan_history() {
     fi
     while IFS= read -r path; do
       [ -z "$path" ] && continue
-      if printf '%s\n' "$path" | grep -qP "$history_path_alternation" 2>/dev/null ||
-         printf '%s\n' "$path" | grep -qP "$full_alternation" 2>/dev/null; then
-        history_hit "$commit" "$path"
+      if printf '%s\n' "$path" | grep -qP "$full_alternation" 2>/dev/null; then
+        history_hit "$commit" "$path" "content-token-in-path"
+      elif printf '%s\n' "$path" | grep -qP "$history_path_alternation" 2>/dev/null; then
+        history_hit "$commit" "$path" "state-carrier-path"
       fi
     done <<<"$paths"
 
@@ -347,13 +427,15 @@ scan_history() {
       while IFS= read -r path; do
         [ -z "$path" ] && continue
         path="${path#"$commit:"}"
-        history_hit "$commit" "$path"
+        history_hit "$commit" "$path" "content-token"
       done <<<"$content_hits"
     elif [ "$rc" -gt 1 ]; then
       echo "boundary history scan error: could not scan content at commit $commit"
       fail=1
     fi
   done <<<"$commits"
+
+  clear_history_scan_refs
 
   if [ "$fail" -eq "$before" ]; then
     echo "history clean."
@@ -364,8 +446,8 @@ scan_history() {
 
 # Dispatch. `--file F` scans one file (hook + conformance test); otherwise the tree
 # scan runs, with `--issues` adding open GitHub surfaces and `--history` adding
-# every commit reachable from every local ref. A tip-only pass is not publication
-# clearance.
+# every commit fetchable from every ref advertised by origin. A tip-only pass is
+# snapshot evidence, never publication clearance.
 if [ "${1:-}" = "--file" ]; then
   [ -n "${2:-}" ] || { echo "usage: $0 --file <path>"; exit 2; }
   scan_file "$2"
