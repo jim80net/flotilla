@@ -268,6 +268,129 @@
       : "";
   }
 
+  // buildRosterRailGroups is the #942 crowned projection. Reporting edges come
+  // only from topology.seats[].parent (a seat_id); channel ids remain routing
+  // metadata. A legacy roster never enters this path.
+  function buildRosterRailGroups(topology, status) {
+    var seats = Array.isArray(topology.seats) ? topology.seats : [];
+    var board = status || cache.status || {};
+    var stateByName = {};
+    ((board && board.agents) || []).forEach(function (agent) {
+      stateByName[agentKey(agent.name)] = agent;
+    });
+    var byID = {}, children = {};
+    seats.forEach(function (seat) {
+      if (!seat || !seat.seat_id || byID[seat.seat_id]) return;
+      byID[seat.seat_id] = seat;
+      children[seat.seat_id] = [];
+    });
+    seats.forEach(function (seat) {
+      if (seat && seat.seat_id && seat.parent && children[seat.parent]) children[seat.parent].push(seat.seat_id);
+    });
+
+    var rootID = String(topology.root_seat_id || "");
+    var reachable = {}, treeOrder = [];
+    function walk(id) {
+      if (!id || !byID[id] || reachable[id]) return;
+      reachable[id] = true;
+      treeOrder.push(id);
+      (children[id] || []).forEach(walk);
+    }
+    walk(rootID);
+
+    function depthOf(id) {
+      var depth = 0, seen = {};
+      while (id && byID[id] && byID[id].parent && !seen[id]) {
+        seen[id] = true;
+        id = byID[id].parent;
+        depth++;
+      }
+      return depth;
+    }
+    function roleFor(seat) {
+      if (!seat) return "member";
+      if (agentKey(seat.name) === agentKey(board.cos)) return "cos";
+      return seat.coordinator ? "xo" : "member";
+    }
+    function rowFor(seat) {
+      return { name: seat.name, role: roleFor(seat), channel_id: seat.channel_id || "", seat_id: seat.seat_id || "" };
+    }
+    function countsForSeats(groupSeats) {
+      var blocked = 0, waiting = 0;
+      groupSeats.forEach(function (seat) {
+        var agent = seat ? (stateByName[agentKey(seat.name)] || {}) : {};
+        var state = String(agent.state || "unknown");
+        var posture = String(agent.loop_posture || "");
+        var visual = operatorVisualState(state, posture);
+        if (visual === "blocked" || visual === "crashed" || visual === "errored") blocked++;
+        if (posture === "awaiting-authority") waiting++;
+      });
+      return { blocked: blocked, waiting: waiting };
+    }
+    function countsFor(ids) {
+      return countsForSeats(ids.map(function (id) { return byID[id]; }).filter(function (seat) { return !!seat; }));
+    }
+    function subtree(id) {
+      var out = [], seen = {};
+      function collect(next) {
+        if (!next || seen[next] || !byID[next]) return;
+        seen[next] = true;
+        out.push(next);
+        (children[next] || []).forEach(collect);
+      }
+      collect(id);
+      return out;
+    }
+
+    var groups = [], groupBySeat = {};
+    treeOrder.forEach(function (id) {
+      var seat = byID[id];
+      // A coordinator becomes a group only when it actually has a subtree. The
+      // fleet root retains one command section so its own seat stays reachable.
+      if (id !== rootID && (!seat.coordinator || !(children[id] || []).length)) return;
+      var counts = countsFor(subtree(id));
+      var group = {
+        channel_id: seat.channel_id || "",
+        role: id === rootID ? "fleet-command" : "project",
+        label: id === rootID ? "Fleet Command" : flotillaLabel(seat.name),
+        depth: id === rootID ? 0 : depthOf(id),
+        desks: [], blocked: counts.blocked, waiting: counts.waiting,
+      };
+      groupBySeat[id] = group;
+      groups.push(group);
+    });
+    if (rootID && byID[rootID] && !groupBySeat[rootID]) {
+      var rootCounts = countsFor([rootID]);
+      groupBySeat[rootID] = {
+        channel_id: byID[rootID].channel_id || "", role: "fleet-command", label: "Fleet Command", depth: 0,
+        desks: [], blocked: rootCounts.blocked, waiting: rootCounts.waiting,
+      };
+      groups.unshift(groupBySeat[rootID]);
+    }
+
+    treeOrder.forEach(function (id) {
+      var anchor = id;
+      while (anchor && !groupBySeat[anchor]) anchor = byID[anchor] ? byID[anchor].parent : "";
+      if (anchor && groupBySeat[anchor]) groupBySeat[anchor].desks.push(rowFor(byID[id]));
+    });
+
+    var unassignedIDs = [];
+    seats.forEach(function (seat) {
+      if (!seat || !seat.seat_id || !reachable[seat.seat_id]) unassignedIDs.push(seat && seat.seat_id || "");
+    });
+    if (unassignedIDs.length) {
+      var unassignedSeats = seats.filter(function (seat) {
+        return seat && (!seat.seat_id || !reachable[seat.seat_id]);
+      });
+      var unassignedCounts = countsForSeats(unassignedSeats);
+      groups.push({
+        channel_id: "", role: "unassigned", label: "Unassigned", depth: 0, defect: true,
+        desks: unassignedSeats.map(rowFor), blocked: unassignedCounts.blocked, waiting: unassignedCounts.waiting,
+      });
+    }
+    return groups;
+  }
+
   // buildRailGroups projects canonical org truth into an operator map:
   //   • coordinators appear exactly once in Fleet Command;
   //   • every container/flotilla appears once in org order;
@@ -275,6 +398,7 @@
   //   • seats without a usable org parent remain visible in one honest Desks group.
   // Historical/mirror channels remain available as routing metadata but never become groups.
   function buildRailGroups(topology, status) {
+    if (topology && topology.roster_hierarchy) return buildRosterRailGroups(topology, status);
     var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
     var orgNodes = (topology && Array.isArray(topology.org_nodes)) ? topology.org_nodes : [];
     var board = status || cache.status || {};
@@ -516,6 +640,10 @@
 
     rail.innerHTML = groups.map(function (grp) {
       var role = grp.role ? '<span class="chan-role">' + escapeHtml(grp.role) + "</span>" : "";
+      var rollups = '<span class="conv-group-rollups">' +
+        (grp.blocked ? ('<span class="conv-group-rollup blocked">' + escapeHtml(grp.blocked) + ' blocked</span>') : '') +
+        (grp.waiting ? ('<span class="conv-group-rollup waiting">' + escapeHtml(grp.waiting) + ' waiting</span>') : '') +
+        '</span>';
       var items = grp.desks.map(function (d) {
         var key = String(d.name).toLowerCase();
         var rowChannel = d.channel_id || grp.channel_id || "";
@@ -547,10 +675,11 @@
       }).join("");
       // Every #745 group has an operator-facing org label; the channel id remains only in
       // data-channel for routing/backlog context and never becomes a snowflake header.
-      var head = '<span class="chan-id ' + (grp.role === "desks" ? "chan-desks" : "chan-fleet-command") + '">' +
-        escapeHtml(grp.label || "Desks") + "</span>" + role;
+      var head = '<span class="chan-id ' + ((grp.role === "desks" || grp.role === "unassigned") ? "chan-desks" : "chan-fleet-command") + '">' +
+        escapeHtml(grp.label || "Desks") + "</span>" + role + rollups;
       var depthCls = grp.depth ? " conv-group-depth-" + Math.min(3, grp.depth) : "";
-      var extraCls = (grp.role === "fleet-command" ? " conv-group-fleet-command" : "") + depthCls;
+      var extraCls = (grp.role === "fleet-command" ? " conv-group-fleet-command" : "") +
+        (grp.role === "unassigned" ? " conv-group-unassigned" : "") + depthCls;
       return (
         '<div class="conv-group' + extraCls + '">' +
           '<div class="conv-group-head">' + head + "</div>" +

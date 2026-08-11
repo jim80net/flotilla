@@ -93,7 +93,11 @@
           </form>
         </aside>
         <header class="research-document-header">
-          <div class="research-document-meta"><span id="research-document-status" class="research-badge"></span><time id="research-updated"></time></div>
+          <div class="research-document-meta">
+            <span id="research-document-status" class="research-badge"></span>
+            <time id="research-updated"></time>
+            <a id="research-full-screen-header" class="research-full-screen-link" href="#" target="_blank" rel="noopener" hidden>Full screen ↗</a>
+          </div>
           <h1 id="research-title"></h1>
           <code id="research-path"></code>
         </header>
@@ -117,7 +121,13 @@
           <p id="research-reader-action"></p>
           <ul id="research-document-diagnostics"></ul>
         </aside>
-        <iframe id="research-presentation" class="research-presentation" title="Research presentation" sandbox="allow-scripts" allow="fullscreen" hidden></iframe>
+        <section id="research-presentation-stage" class="research-presentation-stage" aria-label="Presentation" hidden>
+          <div class="research-presentation-toolbar">
+            <span>Presentation</span>
+            <a id="research-full-screen-canvas" class="research-full-screen-link" href="#" target="_blank" rel="noopener" hidden>Full screen ↗</a>
+          </div>
+          <iframe id="research-presentation" class="research-presentation" title="Research presentation" sandbox="allow-scripts" allow="fullscreen" hidden></iframe>
+        </section>
         <div id="research-body" class="research-markdown"></div>
       </div>
     </article>

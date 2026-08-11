@@ -71,9 +71,12 @@ operator provenance.)*
 
 ## Harness allocation
 
-Role-based multi-model (Principle 10): firstmates orchestrate (dispatch, gate,
-review, merge, operator comms); secondmates take deep design; crewmates own
-bugfix vs feature lanes by harness fit. Surface + launch must agree.
+Role-based multi-model (Principle 10): Cos follows Fable 5 → Opus 5 (early quota)
+→ Grok 4.5 → Codex; Technical Writer seats use Opus 5 primary and stay
+human-facing, including in Cos communications. Other firstmates orchestrate;
+secondmates take deep design; crewmates own bugfix vs feature lanes by role fit.
+Surface + launch must agree; this public contract does not define private launch
+or deployment paths.
 
 **Firstmate IC-ing a multi-step build is double-billing.** At the 3rd+ inline tool
 call on build work, STOP and dispatch. Exception: seat runbooks/doctrine; gate

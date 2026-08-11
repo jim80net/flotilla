@@ -182,6 +182,36 @@ func TestParadeDeckRenderMarkers(t *testing.T) {
 	}
 }
 
+func TestParadeSpeakerNotesContractMarkers907(t *testing.T) {
+	now := time.Date(2026, 7, 30, 16, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/parade.js").Body.String()
+	html := doGet(t, srv, "/parade").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+
+	for _, marker := range []string{
+		"function parseSlideChunk(chunk)",
+		`trimmed === ":::notes"`,
+		"notesError",
+		"function renderNotes(par, slide)",
+		`renderMd(par.date, slide.notes)`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("parade.js missing speaker-notes contract marker %q", marker)
+		}
+	}
+	for _, marker := range []string{`id="pd-notes-toggle"`, `id="pd-notes"`, `id="pd-notes-close"`} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("parade HTML missing speaker-notes control %q", marker)
+		}
+	}
+	for _, marker := range []string{".pd-notes", ".pd-stage.has-open-notes", "#fff8ec"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css missing speaker-notes style %q", marker)
+		}
+	}
+}
+
 // TestParadeTableRenderMarkers locks the deck renderer's TABLE support (#427/#428): GFM
 // pipe-tables AND literal HTML <table> blocks both render as a real styled table, always
 // rebuilt through the escape-then-inline path (cell markup stripped to text, never passed

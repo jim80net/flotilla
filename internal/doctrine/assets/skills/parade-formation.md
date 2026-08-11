@@ -136,6 +136,13 @@ reviews at **`/parade`** (togglable slide deck).
 **One slide per project-XO** — each slide carries the full dimension canon (not
 one-liner synthesis). Optional fleet epilogue slide last only.
 
+Author each slide in three depths: the visible body is the skimmable outline, a
+closed `:::notes` … `:::` block holds the narrative, and Markdown links lead to
+evidence/raw detail. Notes fences occupy their own lines and belong after the
+outline; `---` inside the closed block is narrative, not a slide break. The
+viewer opens notes as a desktop sidebar or phone sheet. Decks without notes
+remain readable, but new authored slides should use the three-depth form.
+
 ```
 # Fleet Parade — YYYY-MM-DD
 
@@ -156,6 +163,11 @@ NEED:
 
 DEMO:
   • assets/alpha-options.png
+
+:::notes
+Explain the through-line behind alpha's outline here. Link the evidence the
+operator may want to inspect without crowding the slide.
+:::
 
 ---
 ## beta-xo

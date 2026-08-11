@@ -106,7 +106,7 @@ func (r *Relay) route(channelID, messageID, authorID string, binding roster.Chan
 	r.injector.Enqueue(Job{
 		Agent:          d.Agent,
 		Message:        d.Message,
-		Kind:           KindRelay,
+		Kind:           KindOperatorInterrupt,
 		OriginChannel:  channelID,
 		MessageID:      messageID,
 		OperatorUserID: authorID,

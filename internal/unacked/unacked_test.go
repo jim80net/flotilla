@@ -17,10 +17,10 @@ func TestScan_SkipsYoungMessages(t *testing.T) {
 	now := ts(0)
 	msgs := []Message{{
 		ID: "1", AuthorID: "op", Content: "Can you fix the dashboard?",
-		Timestamp: now.Add(-10 * time.Minute),
+		Timestamp: now.Add(-(DefaultMinAge - time.Second)),
 	}}
 	if got := Scan(msgs, "C1", now, cfg()); len(got) != 0 {
-		t.Fatalf("10m-old message must not alert (MinAge=30m); got %v", got)
+		t.Fatalf("message younger than MinAge=%s must not alert; got %v", DefaultMinAge, got)
 	}
 }
 

@@ -15,7 +15,7 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
-  var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
+  var PARADES = [], pIdx = 0, sIdx = 0, view = "list", notesPreference = null;
   var CONVERSATIONS = {}, conversationLoading = {};
   var CONVERSATION_META = { schema: 1, parades: {}, unanswered_operator: {} }, metaLoading = false;
   var pendingUnreadOpen = null;
@@ -135,7 +135,10 @@
       return escd
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        .replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/(?!\/))[^)\s]+)\)/g, function (_, label, href) {
+          var external = /^https?:\/\//i.test(href);
+          return '<a href="' + href + '"' + (external ? ' target="_blank" rel="noopener"' : "") + ">" + label + "</a>";
+        });
     }
     // renderTable emits a <table> from a header row (null for a headerless HTML table),
     // body rows, and per-column alignments. Each cell is escaped THEN inline-marked (the
@@ -226,6 +229,7 @@
       var h = /^(#{1,6})\s+(.*)$/.exec(e), li = /^\s*[-*]\s+(.*)$/.exec(e);
       if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
       else if (li) { flushQuote(); (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
+      else if (/^---\s*$/.test(ln)) { flush(); out.push('<hr class="pd-rule" />'); }
       else if (e.trim() === "") { flush(); }
       else { flush(); out.push("<p>" + inline(e) + "</p>"); }
     }
@@ -233,21 +237,61 @@
     return out.join("");
   }
 
-  // parseSlides splits slides.md on a line that is exactly "---"; each slide's FIRST non-empty
-  // line is its title (a leading # is stripped), the rest is the body.
+  function parseSlideChunk(chunk) {
+    var ls = chunk.trim().split("\n");
+    var first = (ls.shift() || "").trim();
+    if (first === ":::notes" || first === ":::") {
+      return { title: "Untitled slide", body: "", notes: "", notesError: true };
+    }
+    var title = first.replace(/^#+\s*/, "").trim();
+    // Directive-only lines are presentation structure, never operator copy.
+    // Filtering them independently of block validity keeps an exporter-spilled
+    // closing fence from falling through to renderMd as a visible paragraph.
+    function withoutNotesDirectives(lines) {
+      return lines.filter(function (line) {
+        var directive = line.trim();
+        return directive !== ":::notes" && directive !== ":::";
+      });
+    }
+    var notesStart = -1, notesEnd = -1, nested = false;
+    for (var i = 0; i < ls.length; i++) {
+      if (ls[i].trim() === ":::notes") {
+        if (notesStart !== -1) nested = true;
+        else notesStart = i;
+      } else if (ls[i].trim() === ":::" && notesStart !== -1 && notesEnd === -1) {
+        notesEnd = i;
+      }
+    }
+    if (notesStart === -1) {
+      return { title: title, body: withoutNotesDirectives(ls).join("\n").trim(), notes: "", notesError: false };
+    }
+    var malformed = nested || notesEnd === -1;
+    var outline = malformed
+      ? ls.slice(0, notesStart)
+      : ls.slice(0, notesStart).concat(ls.slice(notesEnd + 1));
+    return {
+      title: title || "Untitled slide",
+      body: withoutNotesDirectives(outline).join("\n").trim(),
+      notes: malformed ? "" : ls.slice(notesStart + 1, notesEnd).join("\n").trim(),
+      notesError: malformed
+    };
+  }
+
+  // parseSlides splits slides.md on a line that is exactly "---" outside a
+  // closed :::notes … ::: block. The first line is the outline title; notes
+  // are a separate narrative layer and can never become the slide title/body.
   function parseSlides(md) {
     var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
-    var chunks = [], cur = [];
+    var chunks = [], cur = [], inNotes = false;
     for (var i = 0; i < lines.length; i++) {
-      if (/^---\s*$/.test(lines[i])) { chunks.push(cur.join("\n")); cur = []; }
+      var trimmed = lines[i].trim();
+      if (trimmed === ":::notes" && !inNotes) inNotes = true;
+      else if (trimmed === ":::" && inNotes) inNotes = false;
+      if (/^---\s*$/.test(lines[i]) && !inNotes) { chunks.push(cur.join("\n")); cur = []; }
       else cur.push(lines[i]);
     }
     chunks.push(cur.join("\n"));
-    return chunks.map(function (c) { return c.trim(); }).filter(Boolean).map(function (chunk) {
-      var ls = chunk.split("\n");
-      var title = (ls.shift() || "").replace(/^#+\s*/, "").trim();
-      return { title: title, body: ls.join("\n").trim() };
-    });
+    return chunks.map(function (c) { return c.trim(); }).filter(Boolean).map(parseSlideChunk);
   }
 
   function curSlides() { return parseSlides((PARADES[pIdx] || {}).slides || ""); }
@@ -584,7 +628,11 @@
     el("pd-counter").textContent = "";
     el("pd-counter").hidden = true;
     el("pd-stage").classList.add("is-empty");
+    el("pd-stage").classList.remove("has-open-notes");
     el("pd-slide").classList.add("is-empty");
+    el("pd-notes").hidden = true;
+    el("pd-notes-toggle").hidden = true;
+    el("pd-notes-toggle").setAttribute("aria-expanded", "false");
     el("pd-slide").innerHTML =
       '<div class="pd-empty-state" aria-labelledby="pd-empty-title">' +
       '<p class="pd-empty-eyebrow">Parade collection</p>' +
@@ -597,6 +645,34 @@
     el("pd-list-view").hidden = true;
     view = "deck";
     el("pd-slide").focus({ preventScroll: true });
+  }
+
+  function setNotesOpen(open, focusClose) {
+    var notes = el("pd-notes");
+    var toggle = el("pd-notes-toggle");
+    notes.hidden = !open;
+    el("pd-stage").classList.toggle("has-open-notes", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.textContent = open ? "Hide notes" : "Speaker notes";
+    if (open && focusClose) el("pd-notes-close").focus({ preventScroll: true });
+  }
+
+  function renderNotes(par, slide) {
+    var notes = el("pd-notes");
+    var body = el("pd-notes-body");
+    el("pd-notes-toggle").hidden = false;
+    notes.classList.toggle("has-error", slide.notesError === true);
+    if (slide.notesError) {
+      body.innerHTML = '<div class="pd-notes-empty"><strong>Notes unavailable</strong>' +
+        "<p>Close the <code>:::notes</code> fence to restore this narrative layer. Notes text stays off the outline.</p></div>";
+    } else if (slide.notes) {
+      body.innerHTML = renderMd(par.date, slide.notes);
+    } else {
+      body.innerHTML = '<div class="pd-notes-empty"><strong>No speaker notes</strong>' +
+        "<p>This slide still works as an outline. Add a closed <code>:::notes</code> block when narrative is needed.</p></div>";
+    }
+    var defaultOpen = slide.notes && window.matchMedia("(min-width: 761px)").matches;
+    setNotesOpen(notesPreference === null ? !!defaultOpen : notesPreference, false);
   }
 
   function renderDeck() {
@@ -619,6 +695,7 @@
       (titleText ? '<h1 class="pd-slide-title">' + esc(titleText) + "</h1>" : "") +
       '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>" +
       '<div id="pd-conversation-host"></div>';
+    renderNotes(par, s);
     wirePresenterFallback(el("pd-slide"));
     renderConversationPane(false);
     loadConversations(par.date);
@@ -631,10 +708,11 @@
   }
   function next() { if (sIdx < curSlides().length - 1) { sIdx++; renderDeck(); } }
   function prev() { if (sIdx > 0) { sIdx--; renderDeck(); } }
-  function openDeck(i) { pIdx = i; sIdx = 0; renderDeck(); }
+  function openDeck(i) { pIdx = i; sIdx = 0; notesPreference = null; renderDeck(); }
 
   /* ── list view (the progression) ───────────────────────────────────────── */
   function showList() {
+    setNotesOpen(false, false);
     el("pd-deck").hidden = true;
     el("pd-list-view").hidden = false;
     view = "list";
@@ -658,6 +736,15 @@
     el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
     el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
     el("pd-close").addEventListener("click", showList);
+    el("pd-notes-toggle").addEventListener("click", function () {
+      notesPreference = el("pd-notes").hidden;
+      setNotesOpen(notesPreference, notesPreference);
+    });
+    el("pd-notes-close").addEventListener("click", function () {
+      notesPreference = false;
+      setNotesOpen(false, false);
+      el("pd-notes-toggle").focus({ preventScroll: true });
+    });
     el("pd-unread-jump").addEventListener("click", jumpToUnread);
     el("pd-list-unread-jump").addEventListener("click", jumpToUnread);
     // Pointer clicks and drag-release belong to the document. Only the explicit
@@ -681,6 +768,13 @@
     document.addEventListener("keydown", function (e) {
       if (e.target && e.target.closest("input, textarea, select, button, summary, [contenteditable=true]")) return;
       if (view === "deck") {
+        if (e.key === "Escape" && !el("pd-notes").hidden) {
+          e.preventDefault();
+          notesPreference = false;
+          setNotesOpen(false, false);
+          el("pd-notes-toggle").focus({ preventScroll: true });
+          return;
+        }
         if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); next(); }
         else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
         else if (e.key === "Escape") { e.preventDefault(); showList(); }

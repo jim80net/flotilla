@@ -62,6 +62,54 @@ Rendered acceptance must traverse every section forward and backward at 390px,
 then wheel-scroll to a middle section and assert the visible label, counter, and
 document title agree. Long sections must remain fully reachable.
 
+## Presentation depth and body contrast
+
+Decision and Learn presentations use three deliberate layers: the stage is the
+outline, speaker notes carry the narrative, and links carry evidence or raw
+detail. When notes render beside or beneath the stage, body colors belong to the
+surface they sit on. Do not reuse one brand hue as body copy across light and
+dark panels, and do not tune a single paragraph with a local color override.
+
+`docs/examples/research-showpiece-depth.css` is the semantic token reference.
+Copy its four body/surface tokens into a self-contained presentation package (or
+implement an equivalent palette) and consume them on both outline and notes
+body selectors. Normal body text must clear at least WCAG AA; the reference sets
+an enhanced 7:1 floor and intentionally uses neutral warm text on the dark panel
+so a numerically passing blue-green pair cannot become a chromatic clash. The
+companion HTML is a generic desktop/mobile fixture for rendered review.
+
+Rendered acceptance must inspect both the light outline and dark narrative at
+desktop and 390px, assert the computed foreground/background pairs, and include
+a seeing review. A green contrast calculation alone is not a visual-quality
+gate.
+
+## Presentation layer contract
+
+Parade and Learn presentations share one three-layer reader model:
+
+- **outline stage** — the concise highlights visible while skimming;
+- **speaker notes** — the narrative that teaches or explains those highlights;
+- **evidence links** — source material, details, and raw data.
+
+HTML5 showpieces express these layers with stable semantic hooks:
+
+```html
+<main data-presentation-outline><!-- section highlights --></main>
+<aside data-presentation-notes aria-label="Speaker notes"><!-- narrative --></aside>
+<nav data-presentation-evidence aria-label="Evidence"><!-- source links --></nav>
+```
+
+The showpiece may implement its own visual composition, but notes must remain a
+distinct sidebar/sheet rather than padding the outline with prose. Phone layouts
+use a full-width notes pane or drawer with one obvious Close action and no
+nested scrolling. Evidence links must stay within the guarded package or use
+explicit HTTP(S) sources. The outer R&D viewer remains sandboxed and does not
+infer or invent notes from `SOURCE.md`.
+
+Existing showpieces remain readable while craft adopts these hooks. A later
+publication-lint increment may make them mechanical only after the format is
+proven across more than one package.
+
 ## Publication directive
 
 Readiness measurement does not hide any existing file. Authors can add one

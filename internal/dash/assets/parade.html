@@ -21,12 +21,20 @@
       <span id="pd-deck-date" class="pd-deck-date"></span>
       <span id="pd-counter" class="pd-counter" aria-live="polite"></span>
       <button id="pd-unread-jump" class="pd-unread-jump" type="button" aria-label="Open next unread parade conversation" hidden><span aria-hidden="true">↪</span> unread <span class="pd-unread-dot" aria-hidden="true"></span></button>
+      <button id="pd-notes-toggle" class="pd-notes-toggle" type="button" aria-controls="pd-notes" aria-expanded="false">Speaker notes</button>
       <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme"><span data-theme-label>Theme</span></button>
       <button id="pd-close" class="pd-close" type="button" aria-label="All parades (Escape)">▦ all parades <span id="pd-global-unread" class="pd-unread-dot" aria-label="Unread parade replies" hidden></span></button>
     </div>
     <div id="pd-stage" class="pd-stage">
       <button id="pd-prev" class="pd-nav pd-prev" type="button" aria-label="Previous slide"><span class="pd-nav-glyph" aria-hidden="true">‹</span><span class="pd-nav-label">Previous</span></button>
       <article id="pd-slide" class="pd-slide" tabindex="0"></article>
+      <aside id="pd-notes" class="pd-notes" aria-labelledby="pd-notes-title" hidden>
+        <header class="pd-notes-header">
+          <div><span class="pd-notes-eyebrow">Narrative</span><h2 id="pd-notes-title">Speaker notes</h2></div>
+          <button id="pd-notes-close" class="pd-notes-close" type="button">Close</button>
+        </header>
+        <div id="pd-notes-body" class="pd-notes-body"></div>
+      </aside>
       <button id="pd-next" class="pd-nav pd-next" type="button" aria-label="Next slide"><span class="pd-nav-label">Next</span><span class="pd-nav-glyph" aria-hidden="true">›</span></button>
     </div>
   </section>

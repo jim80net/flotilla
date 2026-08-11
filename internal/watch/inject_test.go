@@ -119,6 +119,21 @@ func TestInjectorSurvivesSendError(t *testing.T) {
 	}
 }
 
+func TestOperatorInterruptUsesDistinctSendOnly(t *testing.T) {
+	var ordinary, relay, interrupt []string
+	in := NewInjector(func(agent, _ string) error { ordinary = append(ordinary, agent); return nil }, 8)
+	in.SetRelaySend(func(agent, _ string) error { relay = append(relay, agent); return nil })
+	in.SetOperatorInterruptSend(func(agent, _ string) error { interrupt = append(interrupt, agent); return nil })
+	in.Start()
+	in.Enqueue(Job{Agent: "operator", Kind: KindOperatorInterrupt})
+	in.Enqueue(Job{Agent: "send", Kind: KindSend})
+	in.Enqueue(Job{Agent: "detector", Kind: KindDetector})
+	in.Stop()
+	if fmt.Sprint(interrupt) != "[operator]" || fmt.Sprint(relay) != "[send]" || fmt.Sprint(ordinary) != "[detector]" {
+		t.Fatalf("interrupt=%v relay=%v ordinary=%v", interrupt, relay, ordinary)
+	}
+}
+
 func TestInjectorLogsSuccessfulDelivery(t *testing.T) {
 	// Each successful delivery must leave a terse, body-free journal trace so a
 	// live delivery is auditable from journalctl independent of the Discord
@@ -270,6 +285,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 	}{
 		{KindDefault, ""},
 		{KindRelay, "relay"},
+		{KindOperatorInterrupt, "operator-interrupt"},
 		{KindHeartbeat, "heartbeat"},
 		{KindDetector, "detector"},
 		{KindSend, "send"},
@@ -282,11 +298,12 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 
 	// isRelay: an empty Kind (a bare Job{}) and an explicit relay are relays; ticks are not.
 	for kind, want := range map[JobKind]bool{
-		KindDefault:   true,
-		KindRelay:     true,
-		KindSend:      false,
-		KindHeartbeat: false,
-		KindDetector:  false,
+		KindDefault:           true,
+		KindRelay:             true,
+		KindOperatorInterrupt: true,
+		KindSend:              false,
+		KindHeartbeat:         false,
+		KindDetector:          false,
 	} {
 		if got := isRelay(kind); got != want {
 			t.Errorf("isRelay(%q) = %v, want %v", string(kind), got, want)
@@ -294,11 +311,12 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 	}
 
 	for kind, want := range map[JobKind]bool{
-		KindDefault:   true,
-		KindRelay:     true,
-		KindSend:      true,
-		KindHeartbeat: false,
-		KindDetector:  false,
+		KindDefault:           true,
+		KindRelay:             true,
+		KindOperatorInterrupt: true,
+		KindSend:              true,
+		KindHeartbeat:         false,
+		KindDetector:          false,
 	} {
 		if got := isDeferredDelivery(kind); got != want {
 			t.Errorf("isDeferredDelivery(%q) = %v, want %v", string(kind), got, want)
@@ -307,11 +325,12 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 
 	// deliveryKind: the empty Kind reads as "relay" in the audit log; others read verbatim.
 	for kind, want := range map[JobKind]string{
-		KindDefault:   "relay",
-		KindRelay:     "relay",
-		KindSend:      "send",
-		KindHeartbeat: "heartbeat",
-		KindDetector:  "detector",
+		KindDefault:           "relay",
+		KindRelay:             "relay",
+		KindOperatorInterrupt: "operator-interrupt",
+		KindSend:              "send",
+		KindHeartbeat:         "heartbeat",
+		KindDetector:          "detector",
 	} {
 		if got := deliveryKind(kind); got != want {
 			t.Errorf("deliveryKind(%q) = %q, want %q", string(kind), got, want)

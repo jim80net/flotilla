@@ -137,7 +137,9 @@ allocation**, not a license to skip review.
 
 | Role | Fit | Default product mapping |
 |------|-----|-------------------------|
-| **Firstmate** (orchestration: CoS, adjutants, XOs in the coordination loop) | Fast interactive loop | **Grok-class** high-throughput interactive harness |
+| **Chief of Staff (Cos)** | Meta-coordination, judgment, and synthesis | **Fable 5 → Opus 5 (early quota) → Grok 4.5 → Codex**, in that order |
+| **Technical Writer** | Human-facing communication and presentation craft | **Opus 5 primary**; the seat remains a human-facing interface, including communications with Cos |
+| **Firstmate** (adjutants and XOs in the coordination loop) | Fast interactive loop | Role-fit interactive harness; do not override the explicit Cos chain above |
 | **Secondmate** (complex product/tech **design**, depth > latency) | Deep design | **Claude / design-class** (e.g. Fable when available) |
 | **Crewmate — bugfix** | Fast iterative fixes | **Grok-class** workhorse |
 | **Crewmate — feature development** | Implementation throughput | **Codex / gpt-class** when surface + launch recipe are real for that model; Grok-class fallback |
@@ -155,11 +157,16 @@ IC-ing builds on the coordination seat.
 
 1. **Harness matters** — the same model on the wrong harness is a miss; roster
    `surface` and the host launch recipe must agree.
-2. **Quota-aware fallbacks** for feature work (Codex primary → Claude Opus-class)
-   are allowed when product autoswitch is wired to this matrix.
-3. Do not put firstmates on slow high-depth models when the loop feels laggy.
-4. Do not put pure design secondmates on "fast fix only" if depth collapses.
-5. Gate stack remains the quality bar on every role.
+2. **Cos follows the explicit chain:** Fable 5, then Opus 5 while early quota is
+   available, then Grok 4.5, then Codex. This is a role-fit operating order, not
+   permission to invent a host launch or deployment path.
+3. **Technical Writer seats use Opus 5 primary** and always present a human-facing
+   interface, including when communicating with Cos. A fallback may change the
+   model, never the reader-facing responsibility.
+4. **Quota-aware fallbacks** for other roles are allowed when the product path is
+   wired to the role-fit matrix; do not flatten every seat onto one chain.
+5. Do not put pure design secondmates on "fast fix only" if depth collapses.
+6. Gate stack remains the quality bar on every role.
 
 **Defaults / provisioning:** `flotilla workspace init <agent> --repo <abs-path>`
 provisions a **git worktree** desk home and scaffolds a launch recipe — choose the

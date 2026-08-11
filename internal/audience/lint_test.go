@@ -112,6 +112,53 @@ Identifiers: PR #123
 	}
 }
 
+func TestLintParadeSpeakerNotesStayOffSpineAndKeepInnerDivider907(t *testing.T) {
+	src := `# Delivery is now bounded
+
+Requests now retain their evidence.
+
+:::notes
+PR #123 changed the outbox internals.
+---
+[Raw evidence](/research/evidence.md)
+:::
+
+---
+
+# PR #456
+
+The next slide remains visible.`
+	got := LintParade(src, DefaultJargon())
+	if !hasCode(got, "identifier-title") {
+		t.Fatalf("next slide must still be linted after closed notes, got %+v", got)
+	}
+	for _, finding := range got {
+		if finding.Line >= 6 && finding.Line <= 9 {
+			t.Fatalf("speaker-note narrative was linted as outline spine: %+v", got)
+		}
+	}
+}
+
+func TestLintParadeRejectsMalformedSpeakerNotes907(t *testing.T) {
+	tests := map[string]struct {
+		src  string
+		code string
+	}{
+		"unclosed":  {"# Claim\n\nNow visible.\n\n:::notes\nNarrative", "notes-unclosed"},
+		"nested":    {"# Claim\n\nNow visible.\n\n:::notes\n:::notes\n:::", "notes-nested"},
+		"orphan":    {"# Claim\n\nNow visible.\n\n:::", "notes-orphan-close"},
+		"duplicate": {"# Claim\n\nNow visible.\n\n:::notes\nOne\n:::\n:::notes\nTwo\n:::", "notes-duplicate"},
+		"before":    {":::notes\nNarrative\n:::", "notes-before-outline"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := LintParade(tc.src, DefaultJargon()); !hasCode(got, tc.code) {
+				t.Fatalf("missing %s in %+v", tc.code, got)
+			}
+		})
+	}
+}
+
 func TestLintOperatorPRPassesContract(t *testing.T) {
 	src := `## Operator summary
 

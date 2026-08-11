@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/roster"
 )
 
 // cmdRegister tags a tmux pane with the stable @flotilla_agent marker, so the
@@ -25,11 +24,7 @@ func cmdRegister(args []string) error {
 		return fmt.Errorf("no pane to tag: run inside the agent's tmux pane, or pass --pane <target> (e.g. %%4 or session:win.pane)")
 	}
 
-	cfg, err := roster.Load(rosterPath)
-	if err != nil {
-		return err
-	}
-	agent, err := cfg.Agent(agentName)
+	_, agent, err := provisionedRosterAgent(rosterPath, agentName)
 	if err != nil {
 		return err
 	}

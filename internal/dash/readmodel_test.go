@@ -403,6 +403,27 @@ func TestBuildTopology_Federated(t *testing.T) {
 	}
 }
 
+func TestBuildTopologyStructuredRosterSeats942(t *testing.T) {
+	cfg, err := loadInlineRoster(t, `{
+		"xo_agent":"lead",
+		"agents":[
+			{"name":"lead","seat_id":"0102030405060708","coordinator":true},
+			{"name":"builder","seat_id":"1112131415161718","parent":"0102030405060708"}
+		],
+		"channels":[{"channel_id":"C_BUILD","xo_agent":"lead","members":["builder"],"role":"project"}]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildTopology(cfg)
+	if !doc.RosterHierarchy || doc.RootSeatID != "0102030405060708" || doc.OrgSource != "roster" {
+		t.Fatalf("topology crown = %+v", doc)
+	}
+	if len(doc.Seats) != 2 || doc.Seats[1].Parent != "0102030405060708" || doc.Seats[1].ChannelID != "C_BUILD" {
+		t.Fatalf("topology seats = %+v", doc.Seats)
+	}
+}
+
 // TestBuildTopology_Coordinators: the coordinator set is primary XO + CoS + binding XOs with
 // span of control (#460); member-only desks and solo mirror-channel owners are excluded.
 func TestBuildTopology_Coordinators(t *testing.T) {

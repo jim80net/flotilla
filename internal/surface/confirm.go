@@ -164,10 +164,25 @@ const (
 // retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
 // read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
+	return c.submit(d, pane, text, false)
+}
+
+// SubmitInterrupt delivers a verified operator message even while the target is Working.
+// It is deliberately separate from Submit so ticks and inter-agent sends retain the idle gate.
+// A Working pane must expose a positively cleared main composer; queued/pending/overlay or
+// undetermined composers fail closed before paste. Confirmation after paste is identical to Submit.
+func (c Confirm) SubmitInterrupt(d Driver, pane, text string) error {
+	return c.submit(d, pane, text, true)
+}
+
+func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 	// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
-	switch d.Assess(pane) {
+	state := d.Assess(pane)
+	switch state {
 	case StateWorking:
-		return ErrBusy
+		if !allowWorking {
+			return ErrBusy
+		}
 	case StateShell:
 		return ErrCrashed
 	case StateIdle:
@@ -194,7 +209,8 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 		sp = p
 	}
 	if sp != nil {
-		switch sp.ComposerState(pane) {
+		composer := sp.ComposerState(pane)
+		switch composer {
 		case ComposerSubAgent:
 			logPanelBlocked(pane, "gate:sub-composer")
 			return ErrPanelBlocked
@@ -208,6 +224,12 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 			}
 			return ErrTransient
 		}
+		if state == StateWorking && composer != ComposerCleared {
+			logPanelBlocked(pane, "gate:working-composer-not-clear")
+			return ErrPanelBlocked
+		}
+	} else if state == StateWorking {
+		return ErrTransient
 	}
 
 	// 2. attempt 1 — full paste + Enter. Capture Submit's error: a paste that did NOT land

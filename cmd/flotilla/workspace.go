@@ -117,11 +117,7 @@ func cmdWorkspaceInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := roster.Load(opts.rosterPath)
-	if err != nil {
-		return err
-	}
-	a, err := cfg.Agent(opts.agent)
+	cfg, a, err := provisionedRosterAgent(opts.rosterPath, opts.agent)
 	if err != nil {
 		return err
 	}

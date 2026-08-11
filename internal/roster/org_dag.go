@@ -43,6 +43,54 @@ func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
 		return fmt.Errorf("derived org DAG: %w", err)
 	}
 
+	// The #942 crown: once an explicit parent exists or every seat has an ID,
+	// roster parent edges are canonical. Channels remain a validated
+	// routing/synthesis view; the interim org YAML is no longer read. A fully
+	// legacy or partially-ID-filled roster continues through the old derived/file
+	// path until its one-shot migration completes.
+	seatName := make(map[string]string, len(c.Agents))
+	for _, agent := range c.Agents {
+		if agent.SeatID != "" {
+			seatName[agent.SeatID] = agent.Name
+		}
+	}
+	if c.HasStructuredHierarchy() {
+		parents := make(map[string][]string, len(c.Agents))
+		children := make(map[string][]string, len(c.Agents))
+		for _, agent := range c.Agents {
+			if agent.Parent == "" {
+				continue
+			}
+			parent := seatName[agent.Parent]
+			parents[agent.Name] = []string{parent}
+			children[parent] = append(children[parent], agent.Name)
+			if channelParents := derived.Parents[agent.Name]; len(channelParents) > 0 && !containsString(channelParents, parent) {
+				return fmt.Errorf("roster parent/channel disagreement for agent %q: parent seat %q resolves to %q, channel view reports %v", agent.Name, agent.Parent, parent, channelParents)
+			}
+		}
+		rosterDAG := org.Snapshot(c.effectiveXOAgent(), org.SourceRoster, names,
+			func(name string) []string { return parents[name] },
+			func(name string) []string { return children[name] },
+		)
+		for _, agent := range c.Agents {
+			node := rosterDAG.Nodes[agent.Name]
+			if agent.Coordinator != nil && *agent.Coordinator {
+				node.Kind = org.KindCoordinator
+			} else {
+				node.Kind = org.KindDesk
+			}
+			if channelID, ok := c.ChannelForAgent(agent.Name); ok {
+				node.HomeChannelID = channelID
+			}
+			rosterDAG.Nodes[agent.Name] = node
+		}
+		if err := rosterDAG.ValidateStructural(); err != nil {
+			return fmt.Errorf("roster org DAG: %w", err)
+		}
+		c.orgDAG = rosterDAG
+		return nil
+	}
+
 	orgPath, required, err := org.ResolvePath(rosterPath, opts.OrgFile)
 	if err != nil {
 		return err
@@ -67,6 +115,15 @@ func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
 	}
 	c.orgDAG = fileDAG
 	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // nonFleetHomes maps agent → non-fleet-command channel ids they own as xo_agent.
