@@ -796,7 +796,13 @@ func cmdWatch(args []string) error {
 				// list-nav / queued) elevates so status does not claim plain idle when
 				// recycle's idle∧cleared gate would refuse (#557).
 				state := surface.AssessForFleet(drv, pane)
-				injector.ObserveAuthExpired(agent, state == surface.StateAuthExpired)
+				if state == surface.StateAuthExpired {
+					injector.ObserveAuthExpired(agent, true)
+				} else if state != surface.StateUnknown && state != surface.StateShell {
+					// Only a positively observed live harness rearms the alarm. A
+					// capture failure or dead process is not evidence of re-login.
+					injector.ObserveAuthExpired(agent, false)
+				}
 				return state
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
