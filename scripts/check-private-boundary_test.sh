@@ -217,4 +217,12 @@ set -e
 [[ "$RC" -eq 1 ]]
 require_contains 'PRIVATE TOKEN found in the tracked tree:'
 
+# The same tip carrier, once committed, is location-only in history mode.
+git -C "$HISTORY_REPO" commit -qm 'add tip fixture'
+TIP_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$TIP_COMMIT tip.txt"
+require_absent 'TEST_PRIVATE_TIP'
+
 echo "check-private-boundary object attribution: PASS"

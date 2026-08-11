@@ -35,7 +35,7 @@
 # Usage:
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
-#   scripts/check-private-boundary.sh --history  # scan TREE + every commit reachable from ALL refs
+#   scripts/check-private-boundary.sh --history  # scan every commit reachable from ALL refs
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
 #                                                  # pre-commit + pre-push hooks and the
 #                                                  # conformance test use this; no `git
@@ -370,11 +370,10 @@ if [ "${1:-}" = "--file" ]; then
   [ -n "${2:-}" ] || { echo "usage: $0 --file <path>"; exit 2; }
   scan_file "$2"
 else
-  scan_tree
   case "${1:-}" in
-    --issues) scan_issues ;;
+    --issues) scan_tree; scan_issues ;;
     --history) scan_history ;;
-    "") ;;
+    "") scan_tree ;;
     *) echo "usage: $0 [--issues|--history|--file <path>]"; exit 2 ;;
   esac
 fi
