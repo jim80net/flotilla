@@ -15,5 +15,17 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 
-bash "$repo_root/scripts/check-private-boundary.sh" --history
+population=union
+if [ "${1##*/}" = "git" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "push" ]; then
+      population=local
+      break
+    fi
+  done
+elif [ "${1##*/}" = "gh" ] && [ "${2:-}" = "repo" ] && [ "${3:-}" = "fork" ]; then
+  population=remote
+fi
+
+FLOTILLA_HISTORY_POPULATION="$population" bash "$repo_root/scripts/check-private-boundary.sh" --history
 exec "$@"

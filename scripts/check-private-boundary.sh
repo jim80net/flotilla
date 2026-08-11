@@ -9,9 +9,9 @@
 # docs/private-public-boundary.md.
 #
 # Written is not readable, present is not reachable. Publication clearance is
-# therefore a remote-reachability question: --history scans every commit
-# fetchable from every ref advertised by origin, not merely the working tree,
-# current tip, or refs already present in this clone.
+# therefore a reachability question over the population the publication command
+# will transport: local refs for pushes, remote refs for transfers, or their union
+# when the mode is unknown.
 #
 # TWO layers of protection:
 #   1. BUILT-IN, deployment-AGNOSTIC patterns (below) — leaks that are private for
@@ -40,7 +40,7 @@
 # Usage:
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
-#   scripts/check-private-boundary.sh --history  # fetch + scan every commit reachable from ALL origin refs
+#   scripts/check-private-boundary.sh --history  # scan the selected all-ref publication population
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
 #                                                  # pre-commit + pre-push hooks and the
 #                                                  # conformance test use this; no `git
@@ -257,6 +257,7 @@ scan_issues() {
 
 declare -A history_seen=()
 history_scan_namespace="refs/flotilla-boundary-scan"
+history_population="${FLOTILLA_HISTORY_POPULATION:-remote}"
 
 clear_history_scan_refs() {
   local ref
@@ -284,13 +285,19 @@ safe_history_ref() {
 }
 
 history_reachability() {
-  local commit="$1" scan_ref original family
+  local commit="$1" scan_ref original family relative
   local -a refs=()
   declare -A families=()
+  declare -A seen_refs=()
   while IFS= read -r scan_ref; do
     [ -z "$scan_ref" ] && continue
     if git -C "$repo_root" merge-base --is-ancestor "$commit" "$scan_ref" 2>/dev/null; then
-      original="refs/${scan_ref#"$history_scan_namespace"/}"
+      relative="${scan_ref#"$history_scan_namespace"/}"
+      relative="${relative#local/}"
+      relative="${relative#remote/}"
+      original="refs/$relative"
+      [ -z "${seen_refs[$original]:-}" ] || continue
+      seen_refs["$original"]=1
       refs+=("$original")
       family="${original#refs/}"
       family="${family%%/*}/*"
@@ -323,19 +330,50 @@ history_hit() {
   fail=1
 }
 
-scan_history() {
-  echo "== boundary guard: scanning full remote all-refs reachability =="
+prepare_history_population() {
+  local population="$1" ref object advertised
+  clear_history_scan_refs
+  case "$population" in
+    local|union)
+      while read -r object ref; do
+        [ -n "$object" ] && [ -n "$ref" ] || continue
+        case "$ref" in "$history_scan_namespace"/*) continue ;; esac
+        git -C "$repo_root" update-ref "$history_scan_namespace/local/${ref#refs/}" "$object"
+      done < <(git -C "$repo_root" for-each-ref --format='%(objectname) %(refname)' refs)
+      ;;
+  esac
+  case "$population" in
+    remote|union)
+      if ! advertised="$(git -C "$repo_root" ls-remote --refs origin 2>/dev/null)" || [ -z "$advertised" ]; then
+        echo "boundary history scan error: could not enumerate refs advertised by origin"
+        return 1
+      fi
+      if ! git -C "$repo_root" fetch --quiet --no-tags origin "+refs/*:$history_scan_namespace/remote/*"; then
+        echo "boundary history scan error: could not fetch every ref advertised by origin"
+        return 1
+      fi
+      ;;
+    local) ;;
+    *)
+      echo "boundary history scan error: unknown publication population $population"
+      return 1
+      ;;
+  esac
+}
+
+scan_history_raw() {
+  echo "== boundary guard: scanning full $history_population all-refs reachability =="
   if ! git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
     echo "boundary history scan error: not a git repository"
     fail=1
     return
   fi
-  if [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
+  if [ "$history_population" != "local" ] && [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
     echo "boundary history scan error: repository history is shallow or unreadable; remote reachability cannot be proven"
     fail=1
     return
   fi
-  if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+  if [ "$history_population" != "local" ] && ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
     echo "boundary history scan error: origin remote is unavailable; remote fetchability cannot be established"
     fail=1
     return
@@ -360,15 +398,8 @@ scan_history() {
 		return
 	fi
 
-  local advertised commits commit message paths path content_hits rc before
-  if ! advertised="$(git -C "$repo_root" ls-remote --refs origin 2>/dev/null)" || [ -z "$advertised" ]; then
-    echo "boundary history scan error: could not enumerate refs advertised by origin"
-    fail=1
-    return
-  fi
-  clear_history_scan_refs
-  if ! git -C "$repo_root" fetch --quiet --no-tags origin "+refs/*:$history_scan_namespace/*"; then
-    echo "boundary history scan error: could not fetch every ref advertised by origin"
+  local commits commit message paths path content_hits rc before
+  if ! prepare_history_population "$history_population"; then
     clear_history_scan_refs
     fail=1
     return
@@ -442,6 +473,20 @@ scan_history() {
   else
     echo "PRIVATE HISTORY CARRIER found at the commit/path locations listed above."
   fi
+}
+
+scan_history() {
+  local report line
+  report="$(mktemp)"
+  scan_history_raw >"$report"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if printf '%s\n' "$line" | grep -qP "$full_alternation" 2>/dev/null; then
+      echo "<redacted-report-line>"
+    else
+      printf '%s\n' "$line"
+    fi
+  done <"$report"
+  rm -f "$report"
 }
 
 # Dispatch. `--file F` scans one file (hook + conformance test); otherwise the tree

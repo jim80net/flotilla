@@ -190,6 +190,17 @@ require_contains 'reachability: ref_count=1 families=backup/*:1'
 require_contains 'reachable-ref: refs/backup/private'
 require_absent 'TEST_PRIVATE_REMOTE_ONLY'
 
+# Whole-report redaction covers every rendered field, including a token-bearing
+# top-level ref family summary rather than only the per-ref line.
+git -C "$REMOTE_ONLY_REPO" push -q origin HEAD:refs/TEST_PRIVATE_FAMILY/item
+HISTORY_SKIP_PUSH=1 run_history_guard
+[[ "$RC" -eq 1 ]]
+require_absent 'TEST_PRIVATE_FAMILY'
+if printf '%s\n' "$OUTPUT" | grep -qP 'TEST_PRIVATE_[A-Z]+'; then
+	echo "history report leaked a denylisted token" >&2
+	exit 1
+fi
+
 # A token committed and deleted from the tip is still refused. History output
 # reports location only and never repeats the sensitive content it found.
 printf '%s\n' 'TEST_PRIVATE_HISTORY' >"$HISTORY_REPO/notes.txt"
@@ -276,5 +287,28 @@ RC=$?
 set -e
 [[ "$RC" -eq 1 ]]
 [[ ! -e "$PUBLISH_MARK" ]]
+
+# Mirror publication scans the local ref population the command would push,
+# including refs that origin does not advertise yet.
+LOCAL_ONLY_BRANCH=local-only-publication-carrier
+git -C "$HISTORY_REPO" switch -qc "$LOCAL_ONLY_BRANCH"
+printf '%s\n' 'TEST_PRIVATE_LOCAL_ONLY' >"$HISTORY_REPO/local-only.txt"
+git -C "$HISTORY_REPO" add local-only.txt
+git -C "$HISTORY_REPO" commit -qm 'local-only publication carrier'
+LOCAL_ONLY_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+git -C "$HISTORY_REPO" switch -q "$HISTORY_BRANCH"
+MIRROR_DEST="$TMP/public-mirror.git"
+git init --bare -q "$MIRROR_DEST"
+set +e
+OUTPUT="$(cd "$HISTORY_REPO" && FLOTILLA_PRIVATE_DENYLIST='TEST_PRIVATE_[A-Z]+' \
+  bash scripts/take-public.sh -- git push --mirror "$MIRROR_DEST" 2>&1)"
+RC=$?
+set -e
+[[ "$RC" -eq 1 ]]
+require_contains "$LOCAL_ONLY_COMMIT location=local-only.txt"
+if git --git-dir="$MIRROR_DEST" show-ref --verify --quiet "refs/heads/$LOCAL_ONLY_BRANCH"; then
+	echo "mirror command ran despite local-only history carrier" >&2
+	exit 1
+fi
 
 echo "check-private-boundary object attribution: PASS"

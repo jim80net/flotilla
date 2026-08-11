@@ -109,11 +109,18 @@ scripts/take-public.sh -- git push --mirror <public-remote>
 ```
 
 The wrapper runs `scripts/check-private-boundary.sh --history` first and executes the
-requested command only after a clean result. History mode requires network access: it
-enumerates every ref advertised by `origin` with `git ls-remote`, fetches that complete
-ref set into an isolated scan namespace, and scans every commit reachable from those
-remote refs. Already-present local refs and branch-scoped path history are not the
-population authority.
+requested command only after a clean result. Its scan population matches the action:
+
+| Publication mode | Population scanned |
+| --- | --- |
+| `git push` / `git push --mirror` | Every local ref the push can transport |
+| transfer/fork from an existing remote | Every ref advertised by that remote |
+| unknown or ambiguous command | Union of local refs and every advertised remote ref |
+
+Remote and union modes require network access: the gate enumerates refs with
+`git ls-remote`, fetches them into an isolated scan namespace, and scans every reachable
+commit. Origin's current fetchability cannot clear a local-only ref that a mirror
+command is about to publish.
 
 The history mode checks two independent axes: content uses the same built-in plus
 deployment denylist as the tip scan, while tracked path classes catch state carriers
@@ -127,7 +134,8 @@ Any hit reports its commit, a safe/redacted location, pattern class, and remote-
 reachability: ref count, family summary, and the containing refs. That ref topology is
 the remediation discriminator — one topic ref is a commit-class cleanup; convergence
 across a backup family is a convergence-class operation. Matching body text, tokenized
-filenames, and tokenized ref names are never echoed. A shallow/unreadable history,
+filenames, ref families, and tokenized ref names are never echoed; a final whole-report
+redaction pass covers every current and future output field. A shallow/unreadable history,
 unavailable remote, failed fetch, or invalid pattern fails closed. Ignore coverage is deliberately irrelevant:
 `git check-ignore` is never clearance, because ignore rules do not untrack a path
 that already exists in history. The Pages publication workflow runs this mode before
