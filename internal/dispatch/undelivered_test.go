@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,35 @@ func TestOutboxNonceJoinsRejectQuotedHistoricalText(t *testing.T) {
 	}
 	if reports[0].Nonce != "" {
 		t.Fatalf("undelivered scan adopted quoted decoy nonce %q", reports[0].Nonce)
+	}
+}
+
+func TestLookupNonceReportsRecipientFIFOPosition(t *testing.T) {
+	dir := t.TempDir()
+	var nonces []string
+	for _, body := range []string{"first queued work", "second queued work", "third queued work"} {
+		message, nonce, err := inbound.AppendDispatchNonce(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonces = append(nonces, nonce)
+		if _, _, err := outbox.Enqueue(dir, "sender", "recipient", message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries := outbox.ListAll(dir)
+	st := LookupNonce(dir, nonces[1], time.Now().UTC().Add(time.Hour))
+	if st.Disposition != DispositionQueued || st.Position != 2 || st.QueueDepth != 3 || st.HeadID != entries[0].ID {
+		t.Fatalf("follower status = %+v, want position 2/3 behind %s", st, entries[0].ID)
+	}
+	if st.Detail != "recipient FIFO follower; position 2 behind head "+entries[0].ID {
+		t.Fatalf("follower detail = %q", st.Detail)
+	}
+	formatted := FormatStatus(st)
+	for _, want := range []string{"queue_position=2/3", "head_id=" + entries[0].ID, "deferrals=0", "recipient FIFO follower"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted status %q missing %q", formatted, want)
+		}
 	}
 }
 
