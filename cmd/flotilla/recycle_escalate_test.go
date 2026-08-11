@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,9 +96,9 @@ func TestDeliverRecycleAbortBusyQueuesDurablyAndDedupes(t *testing.T) {
 		enqueue: outbox.Enqueue,
 	}
 	for i := 0; i < 2; i++ {
-		queued, err := deliverRecycleAbort(ops, dir, "cos-adj", "cos", "recycle abort body")
-		if err != nil || !queued {
-			t.Fatalf("attempt %d = queued %t, err %v", i, queued, err)
+		delivery, err := deliverRecycleAbort(ops, dir, "cos-adj", "cos", "recycle abort body")
+		if err != nil || !delivery.queued || delivery.outboxID == "" {
+			t.Fatalf("attempt %d = delivery %+v, err %v", i, delivery, err)
 		}
 	}
 	path, err := outbox.Path(dir, "cos-adj")
@@ -130,8 +131,41 @@ func TestDeliverRecycleAbortDirectSuccessDoesNotQueue(t *testing.T) {
 			return "", false, nil
 		},
 	}
-	queued, err := deliverRecycleAbort(ops, t.TempDir(), "cos-adj", "cos", "abort")
-	if err != nil || queued || queuedCalls != 0 {
-		t.Fatalf("queued=%t calls=%d err=%v", queued, queuedCalls, err)
+	delivery, err := deliverRecycleAbort(ops, t.TempDir(), "cos-adj", "cos", "abort")
+	if err != nil || delivery.queued || queuedCalls != 0 {
+		t.Fatalf("delivery=%+v calls=%d err=%v", delivery, queuedCalls, err)
+	}
+}
+
+func TestRecycleAbortBusyRecordNamesDurableOutboxAndCanDrain(t *testing.T) {
+	dir := t.TempDir()
+	delivery, err := deliverRecycleAbort(recycleAbortEscalationOps{
+		submit:  func(string, string) error { return fmt.Errorf("coordinator busy") },
+		enqueue: outbox.Enqueue,
+	}, dir, "alpha-adj", "alpha-xo", "abort")
+	if err != nil || !delivery.queued {
+		t.Fatalf("delivery=%+v err=%v", delivery, err)
+	}
+	if err := writeRecycleAbortSidecar(dir, "alpha-desk", "abort", delivery); err != nil {
+		t.Fatal(err)
+	}
+	record, err := os.ReadFile(filepath.Join(dir, ".flotilla", "alpha-desk", "last-recycle-abort.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(record), "delivery=durable-outbox") || !strings.Contains(string(record), "outbox_id="+delivery.outboxID) {
+		t.Fatalf("abort record does not name durable route: %s", record)
+	}
+	path, _ := outbox.Path(dir, "alpha-adj")
+	store := outbox.NewStore(path)
+	entries := store.Load()
+	if len(entries) != 1 || entries[0].ID != delivery.outboxID {
+		t.Fatalf("queued abort = %+v", entries)
+	}
+	delivered := ""
+	delivered = entries[0].Message // idle sweep's confirmed-send success
+	store.Remove(entries[0].ID)
+	if delivered != "abort" || len(store.Load()) != 0 {
+		t.Fatalf("idle drain delivered=%q remaining=%+v", delivered, store.Load())
 	}
 }

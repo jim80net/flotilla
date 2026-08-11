@@ -130,6 +130,11 @@ type recycleAbortEscalationOps struct {
 	enqueue func(rosterDir, sender, owner, notice string) (string, bool, error)
 }
 
+type recycleAbortDelivery struct {
+	queued   bool
+	outboxID string
+}
+
 // recycleAbortRoute resolves both sides of the recovery hop. Coordinator self-recycles
 // deliberately route through the configured adjutant: the coordinator is the busy/wedged
 // recipient in exactly the incident this path must survive, so it cannot also be the sender.
@@ -162,17 +167,30 @@ func recycleAbortRoute(cfg *roster.Config, agent string) (sender, owner string, 
 // deliverRecycleAbort first attempts immediate confirmed delivery. Any failure becomes one
 // deduplicated durable outbox entry; busy, pane-uncertain, and missing-surface outcomes are
 // therefore delayed delivery states rather than dropped escalation attempts (#914).
-func deliverRecycleAbort(ops recycleAbortEscalationOps, rosterDir, sender, owner, notice string) (queued bool, err error) {
+func deliverRecycleAbort(ops recycleAbortEscalationOps, rosterDir, sender, owner, notice string) (recycleAbortDelivery, error) {
 	if err := ops.submit(owner, notice); err == nil {
-		return false, nil
+		return recycleAbortDelivery{}, nil
 	} else {
 		id, deduped, qerr := ops.enqueue(rosterDir, sender, owner, notice)
 		if qerr != nil {
-			return false, fmt.Errorf("direct delivery failed: %v; durable outbox enqueue also failed: %w", err, qerr)
+			return recycleAbortDelivery{}, fmt.Errorf("direct delivery failed: %v; durable outbox enqueue also failed: %w", err, qerr)
 		}
 		log.Printf("flotilla: recycle: abort delivery to %q deferred in %q outbox (id=%s deduped=%t): %v", owner, sender, id, deduped, err)
-		return true, nil
+		return recycleAbortDelivery{queued: true, outboxID: id}, nil
 	}
+}
+
+func writeRecycleAbortSidecar(home, agent, notice string, delivery recycleAbortDelivery) error {
+	dir := filepath.Join(home, ".flotilla", agent)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	status := "delivery=direct"
+	if delivery.queued {
+		status = "delivery=durable-outbox\noutbox_id=" + delivery.outboxID
+	}
+	body := fmt.Sprintf("%s\n%s\n---\n%s\n", time.Now().UTC().Format(time.RFC3339), status, notice)
+	return os.WriteFile(filepath.Join(dir, "last-recycle-abort.txt"), []byte(body), 0o600)
 }
 
 // escalateRecycleAbort surfaces a failed recycle to the owning coordinator's pane,
@@ -196,17 +214,6 @@ func escalateRecycleAbort(cfg *roster.Config, rosterPath, agent string, runErr e
 	notice := recycleAbortNotice(agent, phase, class, runErr, handoffPath)
 	log.Printf("flotilla: recycle: ESCALATE %s", notice)
 
-	// Durable sidecar next to last-recycle.json so a successor finds it without the log.
-	if home, err := os.UserHomeDir(); err == nil {
-		dir := filepath.Join(home, ".flotilla", agent)
-		_ = os.MkdirAll(dir, 0o700)
-		path := filepath.Join(dir, "last-recycle-abort.txt")
-		body := fmt.Sprintf("%s\n---\n%s\n", time.Now().UTC().Format(time.RFC3339), notice)
-		if werr := os.WriteFile(path, []byte(body), 0o600); werr != nil {
-			log.Printf("flotilla: recycle: abort sidecar write failed: %v", werr)
-		}
-	}
-
 	sender, owner, ok := recycleAbortRoute(cfg, agent)
 	if !ok {
 		log.Printf("flotilla: recycle: abort escalate: no distinct sender/coordinator route for %q", agent)
@@ -227,12 +234,17 @@ func escalateRecycleAbort(cfg *roster.Config, rosterPath, agent string, runErr e
 		},
 		enqueue: outbox.Enqueue,
 	}
-	queued, err := deliverRecycleAbort(ops, filepath.Dir(rosterPath), sender, owner, notice)
+	delivery, err := deliverRecycleAbort(ops, filepath.Dir(rosterPath), sender, owner, notice)
 	if err != nil {
 		log.Printf("flotilla: recycle: abort escalation for %q failed: %v", agent, err)
 		return
 	}
-	if queued {
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
+		if werr := writeRecycleAbortSidecar(home, agent, notice, delivery); werr != nil {
+			log.Printf("flotilla: recycle: abort sidecar write failed: %v", werr)
+		}
+	}
+	if delivery.queued {
 		return
 	}
 	log.Printf("flotilla: recycle: abort escalated directly to coordinator %q for desk %q", owner, agent)
