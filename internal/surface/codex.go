@@ -25,7 +25,7 @@ type codex struct {
 	paneCommand    func(string) (string, error)
 	isShell        func(string) bool
 	capturePane    func(string) (string, error)
-	classify       func(string) State
+	classify       func(string, int, bool) State
 	send           func(string, string) error
 	inject         func(string, string) error
 	paneCWD        func(string) (string, error)
@@ -73,7 +73,8 @@ func (c codex) Assess(pane string) State {
 	if err != nil {
 		return StateUnknown
 	}
-	return c.classify(captured)
+	_, cy, inMode, cursorErr := c.cursorPosition(pane)
+	return c.classify(captured, cy, cursorErr == nil && !inMode)
 }
 
 // Rotate resets context by injecting Codex's /clear (documented slash command — fresh chat).
@@ -190,7 +191,7 @@ var (
 	codexRateLimitChoiceRE  = regexp.MustCompile(`(?im)^\s*(?:›\s*)?\d+\.\s+switch to gpt-[^\s]*mini\b`)
 )
 
-func parseCodexState(captured string) State {
+func parseCodexState(captured string, cursorY int, cursorOK bool) State {
 	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
 	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return StateAwaitingInput
@@ -199,13 +200,34 @@ func parseCodexState(captured string) State {
 	if containsAny(tail, codexApprovalMarkers) {
 		return StateAwaitingApproval
 	}
-	if containsAny(tail, codexWorkingMarkers) {
+	if cursorOK && codexWorkingAtCursor(captured, cursorY) {
 		return StateWorking
 	}
 	if codexHasNonComposerSelector(tail) {
 		return StateAwaitingInput
 	}
 	return StateIdle
+}
+
+// codexWorkingAtCursor requires terminal-vouched render provenance for working
+// chrome. Codex renders the live status immediately above its composer; marker
+// text elsewhere in the tail is conversation history and must not wedge delivery.
+func codexWorkingAtCursor(captured string, cursorY int) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY <= 0 || cursorY >= len(lines) {
+		return false
+	}
+	if _, ok := strings.CutPrefix(trimSpace(lines[cursorY]), codexComposerPrompt); !ok {
+		return false
+	}
+	for i := cursorY - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		return containsAny(line, codexWorkingMarkers)
+	}
+	return false
 }
 
 func codexOverlayName(captured string) string {
