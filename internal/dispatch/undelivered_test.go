@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,6 +167,54 @@ func TestLookupNonceReportsRecipientFIFOPosition(t *testing.T) {
 	for _, want := range []string{"queue_position=2/3", "head_id=" + entries[0].ID, "deferrals=0", "recipient FIFO follower"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("formatted status %q missing %q", formatted, want)
+		}
+	}
+}
+
+func TestLookupNonceAndRecipientQueueShareCurrentPopulation(t *testing.T) {
+	dir := t.TempDir()
+	staleMessage, staleNonce, err := inbound.AppendDispatchNonce("superseded queued work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveMessage, liveNonce, err := inbound.AppendDispatchNonce("current queued work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := fmt.Sprintf(`{"epochs":{"recipient":2},"pending":[`+
+		`{"id":"stale","sender":"sender","recipient":"recipient","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live","sender":"sender","recipient":"recipient","message":%q,"epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, staleMessage, liveMessage)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 8, 1, 0, 2, 0, 0, time.UTC)
+	stale := LookupNonce(dir, staleNonce, now)
+	if stale.Disposition != DispositionSuperseded || stale.Position != 0 || stale.QueueDepth != 0 || stale.HeadID != "" {
+		t.Fatalf("stale status = %+v, want superseded outside recipient FIFO", stale)
+	}
+	if !strings.Contains(stale.Detail, "superseded at epoch 1") {
+		t.Fatalf("stale detail = %q", stale.Detail)
+	}
+
+	live := LookupNonce(dir, liveNonce, now)
+	if live.Disposition != DispositionQueued || live.Position != 1 || live.QueueDepth != 1 || live.HeadID != "live" {
+		t.Fatalf("live status = %+v, want sole current FIFO head", live)
+	}
+
+	entries := outbox.ListAll(dir)
+	queue := recipientQueue(dir, entries, "recipient")
+	for _, entry := range entries {
+		inQueue := false
+		for _, queued := range queue {
+			inQueue = inQueue || queued.ID == entry.ID
+		}
+		if inQueue != recipientQueueMember(dir, entry, "recipient") {
+			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, recipientQueueMember(dir, entry, "recipient"))
 		}
 	}
 }

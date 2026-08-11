@@ -18,6 +18,7 @@ const (
 	DispositionDelivered   Disposition = "delivered"   // inbound ledger pending ack
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
 	DispositionUndelivered Disposition = "undelivered" // queued past age bound
+	DispositionSuperseded  Disposition = "superseded"  // retained outbox row from a non-current epoch
 )
 
 // Status is the resolved view for `flotilla dispatch-status`.
@@ -84,6 +85,11 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		st.Recipient = e.Recipient
 		st.ID = e.ID
 		st.PayloadHash = PayloadHash(e.Message)
+		if !recipientQueueMember(rosterDir, e, e.Recipient) {
+			st.Disposition = DispositionSuperseded
+			st.Detail = fmt.Sprintf("superseded at epoch %d; not a member of the current recipient FIFO", statusEpoch(e.Epoch))
+			return st
+		}
 		queue := recipientQueue(rosterDir, pending, e.Recipient)
 		st.QueueDepth = len(queue)
 		st.Deferrals = e.Deferrals
@@ -120,11 +126,25 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 func recipientQueue(rosterDir string, pending []outbox.Entry, recipient string) []outbox.Entry {
 	queue := make([]outbox.Entry, 0)
 	for _, entry := range pending {
-		if entry.Recipient == recipient && outbox.Current(rosterDir, entry) {
+		if recipientQueueMember(rosterDir, entry, recipient) {
 			queue = append(queue, entry)
 		}
 	}
 	return queue
+}
+
+// recipientQueueMember is the single population rule for both nonce lookup and
+// FIFO telemetry. A status row cannot claim a queue position unless this same
+// predicate includes it in the recipient queue.
+func recipientQueueMember(rosterDir string, entry outbox.Entry, recipient string) bool {
+	return entry.Recipient == recipient && outbox.Current(rosterDir, entry)
+}
+
+func statusEpoch(epoch uint64) uint64 {
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }
 
 func lookupInboundNonce(rosterDir, nonce string, now time.Time) *Status {
