@@ -31,14 +31,15 @@ func validateHandoffPath(cwd, designatedPath string) error {
 
 // HandoffUntracked verifies that writing designatedPath cannot update content already
 // reachable from the repository index. Ignore coverage is insufficient: git continues to
-// track an ignored path that was committed previously.
+// track an ignored path that was committed previously. The proof is fail-closed: inability
+// to inspect the repository is not evidence that the path is untracked. Non-Git locations
+// are therefore refused because rev-parse cannot positively establish an index boundary.
 func HandoffUntracked(cwd, designatedPath string) (bool, error) {
 	if err := validateHandoffPath(cwd, designatedPath); err != nil {
 		return false, err
 	}
 	if err := exec.Command("git", "-C", cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
-		// A non-Git workspace has no index that can expose the handoff.
-		return true, nil
+		return false, fmt.Errorf("establish git worktree for handoff %q: %w", designatedPath, err)
 	}
 	rel, err := filepath.Rel(filepath.Clean(cwd), filepath.Clean(designatedPath))
 	if err != nil {

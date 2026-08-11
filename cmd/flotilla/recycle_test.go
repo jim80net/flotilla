@@ -183,6 +183,19 @@ func TestRunRecycleTrackedHandoffRefusesBeforeWriter(t *testing.T) {
 	}
 }
 
+func TestRunRecycleIndeterminateTrackingRefusesBeforeWriter(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.untracked = func(string, string) (bool, error) { return false, errors.New("git probe unavailable") }
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "tracked-status check") || !strings.Contains(err.Error(), "ABORT before writing") {
+		t.Fatalf("err=%v, want loud indeterminate-path refusal", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Fatalf("writer was invoked without positive untracked proof: %v", r.delivered)
+	}
+}
+
 // TestRunRecycleAbortRestoresRemainOnExit: a Phase-2 close that never confirms must STILL restore
 // remain-on-exit off (the defer), so an aborted recycle doesn't change the desk's crash behaviour.
 func TestRunRecycleAbortRestoresRemainOnExit(t *testing.T) {
