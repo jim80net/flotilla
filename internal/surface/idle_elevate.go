@@ -108,3 +108,35 @@ func AssessForFleet(d Driver, pane string) State {
 	// when both Assess and composer say so.
 	return st
 }
+
+// AuthObservation separates positive authentication evidence from a degraded
+// classification. In particular, StateIdle alone is not recovery evidence: a
+// cursor read failure can make an unchanged login-expired frame look idle.
+type AuthObservation int
+
+const (
+	AuthUndetermined AuthObservation = iota
+	AuthExpired
+	AuthRecovered
+)
+
+// AssessForFleetAuth is the single production classification→episode seam used
+// by watch. Recovery requires a cursor-vouched, cleared live composer; unknown,
+// shell, working, and unclassified idle frames do not end an existing episode.
+// The observer returns whether an expiry episode remains active, allowing a
+// degraded read to retain the dominant auth-expired state.
+func AssessForFleetAuth(d Driver, pane string, observe func(AuthObservation) bool) State {
+	state := AssessForFleet(d, pane)
+	observation := AuthUndetermined
+	if state == StateAuthExpired {
+		observation = AuthExpired
+	} else if state == StateIdle {
+		if probe, ok := d.(ComposerStateProbe); ok && probe.ComposerState(pane) == ComposerCleared {
+			observation = AuthRecovered
+		}
+	}
+	if observe != nil && observe(observation) {
+		return StateAuthExpired
+	}
+	return state
+}

@@ -89,6 +89,10 @@ var ErrCrashed = errors.New("surface: pane is a shell (agent crashed) — not de
 // bounded number of times rather than fire into the uncertainty or defer it as "busy".
 var ErrTransient = errors.New("surface: pane state is transiently uncertain — re-assess")
 
+// ErrAuthExpired means the harness is positively identified at a human-required
+// login-expired dialog. The caller holds durable delivery and escalates once.
+var ErrAuthExpired = errors.New("surface: authentication expired — human login required")
+
 // ErrUnconfirmed means the submit + bounded Enter-only retries never produced a confirmed
 // turn. A LOUD operator alert was already raised; the delivery is NOT successful.
 var ErrUnconfirmed = errors.New("surface: submit could not be confirmed — escalated, not delivered")
@@ -187,6 +191,8 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 		return ErrCrashed
 	case StateIdle:
 		// proceed
+	case StateAuthExpired:
+		return ErrAuthExpired
 	default: // Unknown, AwaitingInput, AwaitingApproval, Errored
 		if reason := composerBlockReason(d, pane); reason != "" {
 			logPanelBlocked(pane, "gate:"+reason)

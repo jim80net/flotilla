@@ -50,6 +50,7 @@ func TestConfirmSubmitGate(t *testing.T) {
 		wantErr error
 	}{
 		{"working → ErrBusy, no submit", StateWorking, ErrBusy},
+		{"auth-expired → ErrAuthExpired, no submit", StateAuthExpired, ErrAuthExpired},
 		{"shell → ErrCrashed, no submit", StateShell, ErrCrashed},
 		{"unknown → ErrTransient, no submit", StateUnknown, ErrTransient},
 		{"awaiting-approval → ErrTransient, no submit", StateAwaitingApproval, ErrTransient},

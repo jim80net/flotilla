@@ -19,6 +19,7 @@ func TestMaterialTransitions(t *testing.T) {
 		{"→errored", surface.StateIdle, surface.StateErrored, true},
 		{"→awaiting-approval", surface.StateWorking, surface.StateAwaitingApproval, true},
 		{"→awaiting-input", surface.StateIdle, surface.StateAwaitingInput, true},
+		{"→auth-expired", surface.StateIdle, surface.StateAuthExpired, true},
 		// NOT material:
 		{"resuming work idle→working", surface.StateIdle, surface.StateWorking, false},
 		{"starting from shell→working", surface.StateShell, surface.StateWorking, false},
