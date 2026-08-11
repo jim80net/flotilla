@@ -64,7 +64,7 @@ func TestParseCodexState(t *testing.T) {
 		},
 		{
 			name:     "footer interrupt hint (binary) → Working",
-			captured: "  streaming output above\n  esc to interrupt\n  /status",
+			captured: "  streaming output above\n  esc to interrupt\n  › draft",
 			want:     StateWorking,
 		},
 		{
@@ -75,13 +75,24 @@ func TestParseCodexState(t *testing.T) {
 		},
 		{
 			name:     "task in progress guard → Working",
-			captured: "  Ctrl+L is disabled while a task is in progress.\n  │ composer │",
+			captured: "  Ctrl+L is disabled while a task is in progress.\n  › draft",
 			want:     StateWorking,
 		},
 		{
 			name:     "waiting for background terminal → Working",
-			captured: "  Waiting for background terminal\n  job still running",
+			captured: "  Waiting for background terminal\n  › draft",
 			want:     StateWorking,
+		},
+		{
+			name: "quoted working marker inside live tail → Idle",
+			captured: "  A runbook may mention esc to interrupt in quoted prose.\n" +
+				manyLines(8) + "  completed result\n  › \n  / for commands",
+			want: StateIdle,
+		},
+		{
+			name:     "quoted working marker adjacent to composer → Idle",
+			captured: "  The runbook says esc to interrupt when a task is active.\n  › \n  / for commands",
+			want:     StateIdle,
 		},
 		{
 			name:     "idle empty composer → Idle (default)",
@@ -160,13 +171,20 @@ func TestParseCodexState(t *testing.T) {
 				"  codexTrustYesRow   = \"1. Yes, continue\"\n" +
 				"  codexUpdateBanner  = \"Update available!\"\n" +
 				"  codexUpdateSkipRow = \"3. Skip until next version\"\n" +
-				"  ◦ Working (3s • esc to interrupt)",
+				"  ◦ Working (3s • esc to interrupt)\n  › draft",
 			want: StateWorking,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := parseCodexState(tc.captured); got != tc.want {
+			lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
+			cursorY := len(lines) - 1
+			for i, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), codexComposerPrompt) {
+					cursorY = i
+				}
+			}
+			if got := parseCodexState(tc.captured, cursorY, true); got != tc.want {
 				t.Errorf("parseCodexState = %v, want %v", got, tc.want)
 			}
 		})
@@ -188,7 +206,7 @@ func TestCodexAssess(t *testing.T) {
 		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
 		{"capture error → unknown", "codex", nil, false, "", boom, StateUnknown},
 		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, StateAwaitingInput},
-		{"classifier routes: working", "codex", nil, false, "esc to interrupt", nil, StateWorking},
+		{"classifier routes: working", "codex", nil, false, "◦ Working (1s • esc to interrupt)\n› draft", nil, StateWorking},
 		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, StateIdle},
 	}
 	for _, tc := range cases {
@@ -198,11 +216,32 @@ func TestCodexAssess(t *testing.T) {
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
 				classify:    parseCodexState,
+				cursorPosition: func(string) (int, int, bool, error) {
+					lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
+					return 0, len(lines) - 1, false, nil
+				},
 			}
 			if got := c.Assess("0:0.0"); got != tc.want {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCodexAssessCursorFailureDoesNotTrustHistoricalWorkingText(t *testing.T) {
+	c := codex{
+		paneCommand: func(string) (string, error) { return "codex", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) {
+			return "  quoted instructions mention esc to interrupt\n  › \n  / for commands", nil
+		},
+		classify: parseCodexState,
+		cursorPosition: func(string) (int, int, bool, error) {
+			return 0, 0, false, errors.New("cursor unavailable")
+		},
+	}
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("Assess with unvouched marker = %v, want Idle", got)
 	}
 }
 

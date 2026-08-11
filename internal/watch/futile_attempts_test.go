@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -84,5 +85,60 @@ func TestFutileAttemptPrimitiveSharedAcrossTickAndSend(t *testing.T) {
 	}
 	if alarms != 1 {
 		t.Fatalf("combined tick/send futile attempts alarms = %d, want 1", alarms)
+	}
+}
+
+func TestQueuedHeadAgeWithZeroAttemptsEscalatesOnceAndRearmsOnDelivery(t *testing.T) {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	now := base.Add(outbox.StaleMaxAge + time.Minute)
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.now = func() time.Time { return now }
+	var alarms []string
+	in.SetEscalate(func(msg string) { alarms = append(alarms, msg) })
+	entry := outbox.Entry{ID: "head-1", Recipient: "alpha-desk", EnqueuedAt: base}
+
+	in.ObserveQueuedHead(entry)
+	in.ObserveQueuedHead(entry)
+	if len(alarms) != 1 {
+		t.Fatalf("aged zero-attempt head alarms = %d, want exactly 1: %v", len(alarms), alarms)
+	}
+	for _, want := range []string{"alpha-desk", "head-1", "zero attempts", base.Format(time.RFC3339)} {
+		if !strings.Contains(alarms[0], want) {
+			t.Fatalf("alarm %q missing %q", alarms[0], want)
+		}
+	}
+
+	in.deliver(Job{Agent: "alpha-desk", Kind: KindSend, Message: "confirmed"})
+	entry.ID = "head-2"
+	in.ObserveQueuedHead(entry)
+	if len(alarms) != 2 {
+		t.Fatalf("confirmed delivery did not rearm age alarm: %v", alarms)
+	}
+}
+
+func TestQueuedHeadAgeIgnoresYoungOrAttemptedEntries(t *testing.T) {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.now = func() time.Time { return base.Add(outbox.StaleMaxAge + time.Minute) }
+	var alarms int
+	in.SetEscalate(func(string) { alarms++ })
+	in.ObserveQueuedHead(outbox.Entry{ID: "attempted", Recipient: "alpha-desk", EnqueuedAt: base, Deferrals: 1})
+	in.ObserveQueuedHead(outbox.Entry{ID: "young", Recipient: "beta-desk", EnqueuedAt: base.Add(2 * time.Minute)})
+	if alarms != 0 {
+		t.Fatalf("non-wedge heads raised %d alarms", alarms)
+	}
+}
+
+func TestAttemptedHeadDoesNotHideAgedZeroAttemptOtherLane(t *testing.T) {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.now = func() time.Time { return base.Add(outbox.StaleMaxAge + time.Minute) }
+	var alarms []string
+	in.SetEscalate(func(message string) { alarms = append(alarms, message) })
+
+	in.ObserveQueuedHead(outbox.Entry{ID: "attempted-alpha", Sender: "alpha", Recipient: "desk", EnqueuedAt: base, Deferrals: 12})
+	in.ObserveQueuedHead(outbox.Entry{ID: "starved-beta", Sender: "beta", Recipient: "desk", EnqueuedAt: base, Deferrals: 0})
+	if len(alarms) != 1 || !strings.Contains(alarms[0], "starved-beta") {
+		t.Fatalf("alarms=%v, want one for aged zero-attempt beta lane", alarms)
 	}
 }

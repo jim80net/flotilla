@@ -9,9 +9,10 @@ import (
 
 // OutboxSweeper enqueues pending inter-agent sends from per-sender outbox files (#475).
 type OutboxSweeper struct {
-	rosterDir string
-	enqueue   func(Job)
-	inFlight  sync.Map // entry key sender/id → struct{}
+	rosterDir   string
+	enqueue     func(Job)
+	observeHead func(outbox.Entry)
+	inFlight    sync.Map // entry key sender/id → struct{}
 }
 
 // NewOutboxSweeper builds a sweeper that delivers via the injector enqueue hook.
@@ -19,7 +20,16 @@ func NewOutboxSweeper(rosterDir string, enqueue func(Job)) *OutboxSweeper {
 	return &OutboxSweeper{rosterDir: rosterDir, enqueue: enqueue}
 }
 
+// SetHeadObserver installs the sender→recipient lane-head observability hook. It
+// runs for every admitted lane head on each sweep, including while one is in flight.
+func (s *OutboxSweeper) SetHeadObserver(fn func(outbox.Entry)) { s.observeHead = fn }
+
 func entryKey(sender, id string) string { return sender + "/" + id }
+
+type outboxLane struct {
+	sender    string
+	recipient string
+}
 
 // SweepAll loads every pending outbox entry and enqueues KindSend jobs. Call once at watch
 // startup (before live traffic) and on each heartbeat tick.
@@ -29,7 +39,7 @@ func (s *OutboxSweeper) SweepAll() int {
 	}
 	pending := outbox.ListAll(s.rosterDir)
 	n := 0
-	seenRecipient := make(map[string]bool)
+	seenLane := make(map[outboxLane]bool)
 	for _, e := range pending {
 		if !outbox.Current(s.rosterDir, e) {
 			_, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
@@ -38,12 +48,17 @@ func (s *OutboxSweeper) SweepAll() int {
 			}
 			continue
 		}
-		// Admit only the oldest current order for each recipient. If that head is already
-		// in flight, its successors still wait; a busy-deferred head cannot be queue-jumped.
-		if seenRecipient[e.Recipient] {
+		// Admit only the oldest current order in each sender→recipient lane. A
+		// busy head keeps its own corrections/retractions ordered, but cannot
+		// starve another sender's lane to the same recipient.
+		lane := outboxLane{sender: e.Sender, recipient: e.Recipient}
+		if seenLane[lane] {
 			continue
 		}
-		seenRecipient[e.Recipient] = true
+		seenLane[lane] = true
+		if s.observeHead != nil {
+			s.observeHead(e)
+		}
 		key := entryKey(e.Sender, e.ID)
 		if _, loaded := s.inFlight.LoadOrStore(key, struct{}{}); loaded {
 			continue
