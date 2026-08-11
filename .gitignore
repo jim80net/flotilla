@@ -64,6 +64,10 @@ htmlcov/
 # public tree.
 /.flotilla/private-warnlist
 
+# Optional deployment-specific tracked path classes for the all-refs publication
+# gate. The committed example documents the shape; real path vocabulary stays local.
+/.flotilla/private-history-paths
+
 # flotilla-watch host paths: the per-host deploy/flotilla-watch.env is already
 # ignored by *.env above (desired — per-host layout). The test fixture also ends in
 # .env, so *.env would catch it — re-include it explicitly so CI can see it. (The

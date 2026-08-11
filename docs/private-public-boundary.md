@@ -56,8 +56,9 @@ paths, and must never be copied into a public artifact.)
 ## The guard
 
 `scripts/check-private-boundary.sh` greps for leaks across the tracked tree (and,
-with `--issues`, open issues + PRs; with `--file <path>`, one file's contents — the
-mode the pre-commit / pre-push hooks and the conformance test use). It **fails on a
+with `--issues`, open issues + PRs; with `--history`, every commit reachable from
+every local ref; with `--file <path>`, one file's contents — the mode the pre-commit /
+pre-push hooks and the conformance test use). It **fails on a
 fail-closed hit** and runs in CI on every push and PR (`.github/workflows/ci.yml`,
 the `private-boundary` job). It has two fail-closed layers plus an advisory third:
 
@@ -93,6 +94,52 @@ the `private-boundary` job). It has two fail-closed layers plus an advisory thir
 3. **Your deployment warnlist (advisory)** — your domain *vocabulary*, loaded the
    same gitignored way but **never a failure**: a hit prints a `WARN` section and
    exits 0. See "The advisory WARN tier" below.
+
+### Full-history publication gate
+
+**Written is not readable, present is not reachable.** Every presence question at
+publication time is a reachability question. A clean working-tree or tip scan answers
+only “is it in this snapshot?”, never “can it be fetched?”. A deleted carrier remains
+fetchable while any remote ref reaches its commit.
+
+Use the executable publication-decision path for a human publish or mirror operation:
+
+```bash
+scripts/take-public.sh -- git push --mirror <public-remote>
+```
+
+The wrapper runs `scripts/check-private-boundary.sh --history` first and executes the
+requested command only after a clean result. Its scan population matches the action:
+
+| Publication mode | Population scanned |
+| --- | --- |
+| `git push` / `git push --mirror` | Every local ref the push can transport |
+| transfer/fork from an existing remote | Every ref advertised by that remote |
+| unknown or ambiguous command | Union of local refs and every advertised remote ref |
+
+Remote and union modes require network access: the gate enumerates refs with
+`git ls-remote`, fetches them into an isolated scan namespace, and scans every reachable
+commit. Origin's current fetchability cannot clear a local-only ref that a mirror
+command is about to publish.
+
+The history mode checks two independent axes: content uses the same built-in plus
+deployment denylist as the tip scan, while tracked path classes catch state carriers
+even when their text contains no known token. Generic
+`.flotilla/handoffs/`, `.flotilla/state/`, and `.flotilla/switch/` classes ship with
+the product. Add deployment-specific PCRE path classes in the gitignored
+`.flotilla/private-history-paths` file or `FLOTILLA_PRIVATE_HISTORY_PATHS`; never
+commit the private path vocabulary itself.
+
+Any hit reports its commit, a safe/redacted location, pattern class, and remote-ref
+reachability: ref count, family summary, and the containing refs. That ref topology is
+the remediation discriminator — one topic ref is a commit-class cleanup; convergence
+across a backup family is a convergence-class operation. Matching body text, tokenized
+filenames, ref families, and tokenized ref names are never echoed; a final whole-report
+redaction pass covers every current and future output field. A shallow/unreadable history,
+unavailable remote, failed fetch, or invalid pattern fails closed. Ignore coverage is deliberately irrelevant:
+`git check-ignore` is never clearance, because ignore rules do not untrack a path
+that already exists in history. The Pages publication workflow runs this mode before
+upload or deploy.
 
 ## Two egresses, one partition: the static guard AND the runtime firewall
 
@@ -159,6 +206,7 @@ The same static guard runs at three points (additive; none weakens another):
 | **pre-commit** (`scripts/hooks/pre-commit`) | Before a commit is created | **Staged** added lines (`git diff --cached`) | Local backstop (`--no-verify` bypasses) |
 | **pre-push** (`scripts/hooks/pre-push`) | Before push leaves the clone | Added lines in the **push range** (+ gofmt/vet) | Local backstop (`--no-verify` bypasses) |
 | **CI** (`private-boundary` job) | Every push and PR | Tracked tree (+ open issues/PRs with denylist secret) | **Enforcing gate of record** |
+| **publication** (`scripts/take-public.sh`; `--history`; Pages workflow) | Before a repository/artifact becomes public or is mirrored | Every commit fetchable from every ref advertised by `origin`, content + tracked path classes | **Fail-closed publication gate** |
 
 Install local hooks with `scripts/install-hooks.sh` (sets `core.hooksPath` →
 `scripts/hooks` for this clone only). Pre-commit catches a leak at commit time so

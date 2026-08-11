@@ -23,7 +23,9 @@ The public/private partition is load-bearing
 ([`private-public-boundary.md`](../private-public-boundary.md)).
 
 1. **Scan:** `scripts/check-private-boundary.sh` (and `--issues` for open GitHub
-   artifacts). Exit 1 = fail-closed token found.
+   artifacts). Before any repository publication or mirror, use a complete clone and
+   run `scripts/check-private-boundary.sh --history`; a clean tip is not publication
+   clearance. Exit 1 = fail-closed carrier found.
 2. **Scrub** offending public content; re-scan until clean.
 3. **Adjudicate benign hits** only after you verified — document, don't blindly rewrite.
 4. **Layers:** notify egress firewall, boundary script, doctrine. Never disable the

@@ -1,0 +1,10 @@
+# flotilla private history path classes — TEMPLATE
+#
+# Copy to .flotilla/private-history-paths (gitignored). Add one PCRE path pattern
+# per line for deployment-specific state carriers that must never survive in any
+# commit reachable from a repository being published or mirrored.
+#
+# Generic .flotilla/handoffs, .flotilla/state, and .flotilla/switch classes are
+# built into scripts/check-private-boundary.sh and do not need repeating here.
+# Example deployment-local class (replace with your own genericized regex):
+# (^|/)private-state/exports(/|$)

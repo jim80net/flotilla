@@ -8,6 +8,11 @@
 # --issues, into open issues + PRs). It is the executable form of
 # docs/private-public-boundary.md.
 #
+# Written is not readable, present is not reachable. Publication clearance is
+# therefore a reachability question over the population the publication command
+# will transport: local refs for pushes, remote refs for transfers, or their union
+# when the mode is unknown.
+#
 # TWO layers of protection:
 #   1. BUILT-IN, deployment-AGNOSTIC patterns (below) — leaks that are private for
 #      ANYONE: absolute home paths revealing a username, chat webhook URLs, common
@@ -35,6 +40,7 @@
 # Usage:
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
+#   scripts/check-private-boundary.sh --history  # scan the selected all-ref publication population
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
 #                                                  # pre-commit + pre-push hooks and the
 #                                                  # conformance test use this; no `git
@@ -47,6 +53,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DENYLIST_FILE="${FLOTILLA_PRIVATE_DENYLIST_FILE:-$repo_root/.flotilla/private-denylist}"
 WARNLIST_FILE="${FLOTILLA_PRIVATE_WARNLIST_FILE:-$repo_root/.flotilla/private-warnlist}"
+HISTORY_PATHS_FILE="${FLOTILLA_PRIVATE_HISTORY_PATHS_FILE:-$repo_root/.flotilla/private-history-paths}"
 
 # --- 1. built-in, deployment-AGNOSTIC patterns --------------------------------
 # Private for ANY deployment, no configuration required. Kept high-signal so the
@@ -83,6 +90,25 @@ full_alternation="$(printf '%s|' "${GENERIC_PATTERNS[@]}")"
 full_alternation="${full_alternation%|}"
 [ -n "$deployment_alternation" ] && full_alternation="$full_alternation|$deployment_alternation"
 
+# History path classes are independent of content tokens: deployment state can
+# be private because of what the path represents even when the blob text happens
+# to contain no configured token. Generic carrier classes ship here; private
+# deployments extend them from a gitignored file or environment regex.
+GENERIC_HISTORY_PATH_PATTERNS=(
+  '(^|/)\.flotilla/handoffs(/|$)'
+  '(^|/)\.flotilla/state(/|$)'
+  '(^|/)\.flotilla/switch(/|$)'
+)
+deployment_history_paths=""
+if [ -n "${FLOTILLA_PRIVATE_HISTORY_PATHS:-}" ]; then
+  deployment_history_paths="$FLOTILLA_PRIVATE_HISTORY_PATHS"
+elif [ -f "$HISTORY_PATHS_FILE" ]; then
+  deployment_history_paths="$(grep -vE '^[[:space:]]*(#|$)' "$HISTORY_PATHS_FILE" | paste -sd '|' - || true)"
+fi
+history_path_alternation="$(printf '%s|' "${GENERIC_HISTORY_PATH_PATTERNS[@]}")"
+history_path_alternation="${history_path_alternation%|}"
+[ -n "$deployment_history_paths" ] && history_path_alternation="$history_path_alternation|$deployment_history_paths"
+
 # --- 3. YOUR deployment WARNLIST (advisory; from file or env; NEVER hard-coded) ---
 # Loaded EXACTLY like the denylist (the deployment vocabulary is never committed),
 # but a hit is ADVISORY: a WARN section + exit 0, never a failure. The runtime
@@ -102,6 +128,7 @@ SELF_EXCLUDE=(
   ':(exclude)docs/private-public-boundary.md'
   ':(exclude).flotilla/private-denylist.example'
   ':(exclude).flotilla/private-warnlist.example'
+  ':(exclude).flotilla/private-history-paths.example'
 )
 
 fail=0
@@ -228,14 +255,257 @@ scan_issues() {
 	fi
 }
 
+declare -A history_seen=()
+history_scan_namespace="refs/flotilla-boundary-scan"
+history_population="${FLOTILLA_HISTORY_POPULATION:-remote}"
+
+clear_history_scan_refs() {
+  local ref
+  while IFS= read -r ref; do
+    [ -z "$ref" ] || git -C "$repo_root" update-ref -d "$ref" >/dev/null 2>&1 || true
+  done < <(git -C "$repo_root" for-each-ref --format='%(refname)' "$history_scan_namespace" 2>/dev/null || true)
+}
+
+safe_history_location() {
+  local value="$1"
+  if printf '%s\n' "$value" | grep -qP "$full_alternation" 2>/dev/null; then
+    printf '<redacted-path>'
+  else
+    printf '%s' "$value"
+  fi
+}
+
+safe_history_ref() {
+  local value="$1"
+  if printf '%s\n' "$value" | grep -qP "$full_alternation" 2>/dev/null; then
+    printf '<redacted-ref>'
+  else
+    printf '%s' "$value"
+  fi
+}
+
+history_reachability() {
+  local commit="$1" scan_ref original family relative
+  local -a refs=()
+  declare -A families=()
+  declare -A seen_refs=()
+  while IFS= read -r scan_ref; do
+    [ -z "$scan_ref" ] && continue
+    if git -C "$repo_root" merge-base --is-ancestor "$commit" "$scan_ref" 2>/dev/null; then
+      relative="${scan_ref#"$history_scan_namespace"/}"
+      relative="${relative#local/}"
+      relative="${relative#remote/}"
+      original="refs/$relative"
+      [ -z "${seen_refs[$original]:-}" ] || continue
+      seen_refs["$original"]=1
+      refs+=("$original")
+      family="${original#refs/}"
+      family="${family%%/*}/*"
+      families["$family"]=$(( ${families["$family"]:-0} + 1 ))
+    fi
+  done < <(git -C "$repo_root" for-each-ref --format='%(refname)' "$history_scan_namespace")
+
+  printf '  reachability: ref_count=%d families=' "${#refs[@]}"
+  local first=1
+  for family in "${!families[@]}"; do
+    [ "$first" -eq 1 ] || printf ','
+    printf '%s:%d' "$family" "${families[$family]}"
+    first=0
+  done
+  printf '\n'
+  for original in "${refs[@]}"; do
+    printf '  reachable-ref: %s\n' "$(safe_history_ref "$original")"
+  done
+}
+
+history_hit() {
+  local commit="$1"
+  local path="$2"
+	local class="${3:-content-token}"
+	local key="$commit:$path:$class"
+	[ -n "${history_seen[$key]:-}" ] && return
+	history_seen[$key]=1
+  printf '%s location=%s class=%s\n' "$commit" "$(safe_history_location "$path")" "$class"
+  history_reachability "$commit"
+  fail=1
+}
+
+prepare_history_population() {
+  local population="$1" ref object advertised
+  clear_history_scan_refs
+  case "$population" in
+    local|union)
+      while read -r object ref; do
+        [ -n "$object" ] && [ -n "$ref" ] || continue
+        case "$ref" in "$history_scan_namespace"/*) continue ;; esac
+        git -C "$repo_root" update-ref "$history_scan_namespace/local/${ref#refs/}" "$object"
+      done < <(git -C "$repo_root" for-each-ref --format='%(objectname) %(refname)' refs)
+      ;;
+  esac
+  case "$population" in
+    remote|union)
+      if ! advertised="$(git -C "$repo_root" ls-remote --refs origin 2>/dev/null)" || [ -z "$advertised" ]; then
+        echo "boundary history scan error: could not enumerate refs advertised by origin"
+        return 1
+      fi
+      if ! git -C "$repo_root" fetch --quiet --no-tags origin "+refs/*:$history_scan_namespace/remote/*"; then
+        echo "boundary history scan error: could not fetch every ref advertised by origin"
+        return 1
+      fi
+      ;;
+    local) ;;
+    *)
+      echo "boundary history scan error: unknown publication population $population"
+      return 1
+      ;;
+  esac
+}
+
+scan_history_raw() {
+  echo "== boundary guard: scanning full $history_population all-refs reachability =="
+  if ! git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "boundary history scan error: not a git repository"
+    fail=1
+    return
+  fi
+  if [ "$history_population" != "local" ] && [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
+    echo "boundary history scan error: repository history is shallow or unreadable; remote reachability cannot be proven"
+    fail=1
+    return
+  fi
+  if [ "$history_population" != "local" ] && ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    echo "boundary history scan error: origin remote is unavailable; remote fetchability cannot be established"
+    fail=1
+    return
+  fi
+	local pattern_rc
+	set +e
+	printf '' | grep -qP "$full_alternation" 2>/dev/null
+	pattern_rc=$?
+	set -e
+	if [ "$pattern_rc" -gt 1 ]; then
+		echo "boundary history scan error: content token pattern is invalid"
+		fail=1
+		return
+	fi
+	set +e
+	printf '' | grep -qP "$history_path_alternation" 2>/dev/null
+	pattern_rc=$?
+	set -e
+	if [ "$pattern_rc" -gt 1 ]; then
+		echo "boundary history scan error: history path pattern is invalid"
+		fail=1
+		return
+	fi
+
+  local commits commit message paths path content_hits rc before
+  if ! prepare_history_population "$history_population"; then
+    clear_history_scan_refs
+    fail=1
+    return
+  fi
+  if ! commits="$(git -C "$repo_root" for-each-ref --format='%(objectname)' "$history_scan_namespace" | git -C "$repo_root" rev-list --stdin 2>/dev/null | sort -u)"; then
+    echo "boundary history scan error: could not enumerate commits reachable from fetched origin refs"
+    clear_history_scan_refs
+    fail=1
+    return
+  fi
+  before="$fail"
+  while IFS= read -r commit; do
+    [ -z "$commit" ] && continue
+
+    # Commit messages are public history too. They have no repository path, so
+    # report the synthetic location only — never echo the matching text.
+    if ! message="$(git -C "$repo_root" show -s --format='%B' "$commit" 2>/dev/null)"; then
+      echo "boundary history scan error: could not read commit $commit"
+      fail=1
+      continue
+    fi
+    set +e
+    printf '%s\n' "$message" | grep -qIP "$full_alternation" 2>/dev/null
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      history_hit "$commit" "<commit-message>" "content-token"
+    elif [ "$rc" -gt 1 ]; then
+      echo "boundary history scan error: token pattern evaluation failed at commit $commit"
+      fail=1
+    fi
+
+    # Changed paths supply the path-class axis and catch private tokens embedded
+    # in filenames. This deliberately consults tracked history, never check-ignore.
+    if ! paths="$(git -C "$repo_root" diff-tree -m --root --no-commit-id --name-only -r "$commit" 2>/dev/null | sort -u)"; then
+      echo "boundary history scan error: could not enumerate paths for commit $commit"
+      fail=1
+      continue
+    fi
+    while IFS= read -r path; do
+      [ -z "$path" ] && continue
+      if printf '%s\n' "$path" | grep -qP "$full_alternation" 2>/dev/null; then
+        history_hit "$commit" "$path" "content-token-in-path"
+      elif printf '%s\n' "$path" | grep -qP "$history_path_alternation" 2>/dev/null; then
+        history_hit "$commit" "$path" "state-carrier-path"
+      fi
+    done <<<"$paths"
+
+    # Scan each reachable commit snapshot with the exact PCRE engine used by the
+    # tip scanner. `-l` returns paths only, so the gate cannot leak matched text.
+    set +e
+    content_hits="$(git -C "$repo_root" grep -IlP "$full_alternation" "$commit" -- . "${SELF_EXCLUDE[@]}" 2>/dev/null)"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        path="${path#"$commit:"}"
+        history_hit "$commit" "$path" "content-token"
+      done <<<"$content_hits"
+    elif [ "$rc" -gt 1 ]; then
+      echo "boundary history scan error: could not scan content at commit $commit"
+      fail=1
+    fi
+  done <<<"$commits"
+
+  clear_history_scan_refs
+
+  if [ "$fail" -eq "$before" ]; then
+    echo "history clean."
+  else
+    echo "PRIVATE HISTORY CARRIER found at the commit/path locations listed above."
+  fi
+}
+
+scan_history() {
+  local report line
+  report="$(mktemp)"
+  # The egress boundary is the process, not only its report document. Capture
+  # subprocess diagnostics and progress output with stdout so every externally
+  # visible byte crosses the same final denylist pass.
+  scan_history_raw >"$report" 2>&1
+  while IFS= read -r line || [ -n "$line" ]; do
+    if printf '%s\n' "$line" | grep -qP "$full_alternation" 2>/dev/null; then
+      echo "<redacted-report-line>"
+    else
+      printf '%s\n' "$line"
+    fi
+  done <"$report"
+  rm -f "$report"
+}
+
 # Dispatch. `--file F` scans one file (hook + conformance test); otherwise the tree
-# scan runs, with `--issues` adding the open-issue/PR scan.
+# scan runs, with `--issues` adding open GitHub surfaces and `--history` adding
+# every commit fetchable from every ref advertised by origin. A tip-only pass is
+# snapshot evidence, never publication clearance.
 if [ "${1:-}" = "--file" ]; then
   [ -n "${2:-}" ] || { echo "usage: $0 --file <path>"; exit 2; }
   scan_file "$2"
 else
-  scan_tree
-  [ "${1:-}" = "--issues" ] && scan_issues
+  case "${1:-}" in
+    --issues) scan_tree; scan_issues ;;
+    --history) scan_history ;;
+    "") scan_tree ;;
+    *) echo "usage: $0 [--issues|--history|--file <path>]"; exit 2 ;;
+  esac
 fi
 
 if [ "$fail" -ne 0 ]; then
