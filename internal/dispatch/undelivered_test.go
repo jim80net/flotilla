@@ -112,6 +112,34 @@ func TestLookupNonce_DispositionOrder(t *testing.T) {
 	}
 }
 
+func TestOutboxNonceJoinsRejectQuotedHistoricalText(t *testing.T) {
+	dir := t.TempDir()
+	const decoy = "flotilla-dispatch-aabbccdd"
+	message := "status report quoting " + decoy + " from an earlier dispatch"
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = outbox.NewStore(path).Insert(outbox.Entry{
+		Sender: "sender", Recipient: "recipient", Message: message,
+		EnqueuedAt: time.Now().UTC().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LookupNonce(dir, decoy, time.Now().UTC()); got.Disposition != DispositionUnknown {
+		t.Fatalf("dispatch-status adopted quoted decoy: %+v", got)
+	}
+	reports := ScanUndeliveredOutbox(dir, time.Now().UTC(), 30*time.Minute)
+	if len(reports) != 1 {
+		t.Fatalf("undelivered reports = %+v, want queued entry with no adopted nonce", reports)
+	}
+	if reports[0].Nonce != "" {
+		t.Fatalf("undelivered scan adopted quoted decoy nonce %q", reports[0].Nonce)
+	}
+}
+
 func TestMergedSuppress_AllCitedMustBeMerged(t *testing.T) {
 	msg := "Resume gate for PR #614 and PR #615 after review"
 	if _, ok := ShouldSuppressMerged(msg, func(pr int) bool { return pr == 614 }); ok {

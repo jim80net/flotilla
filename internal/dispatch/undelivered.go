@@ -80,7 +80,7 @@ func ScanUndeliveredOutbox(rosterDir string, now time.Time, age time.Duration) [
 		if got < age {
 			continue
 		}
-		nonce := inbound.ParseDispatchNonce(e.Message)
+		nonce := inbound.ParseOwnDispatchNonce(e.Message)
 		out = append(out, UndeliveredReport{
 			Kind:      "outbox",
 			ID:        e.ID,

@@ -71,7 +71,7 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		return *live
 	}
 	for _, e := range outbox.ListAll(rosterDir) {
-		if inbound.ParseDispatchNonce(e.Message) != nonce {
+		if inbound.ParseOwnDispatchNonce(e.Message) != nonce {
 			continue
 		}
 		st.Sender = e.Sender
