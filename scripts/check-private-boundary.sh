@@ -478,7 +478,10 @@ scan_history_raw() {
 scan_history() {
   local report line
   report="$(mktemp)"
-  scan_history_raw >"$report"
+  # The egress boundary is the process, not only its report document. Capture
+  # subprocess diagnostics and progress output with stdout so every externally
+  # visible byte crosses the same final denylist pass.
+  scan_history_raw >"$report" 2>&1
   while IFS= read -r line || [ -n "$line" ]; do
     if printf '%s\n' "$line" | grep -qP "$full_alternation" 2>/dev/null; then
       echo "<redacted-report-line>"

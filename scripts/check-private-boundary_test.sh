@@ -201,6 +201,33 @@ if printf '%s\n' "$OUTPUT" | grep -qP 'TEST_PRIVATE_[A-Z]+'; then
 	exit 1
 fi
 
+# Subprocess stderr is part of the process egress. A failing fetch diagnostic
+# carrying a denylisted value is sanitized before reaching combined output.
+REAL_GIT="$(command -v git)"
+DIAGNOSTIC_BIN="$TMP/diagnostic-bin"
+mkdir -p "$DIAGNOSTIC_BIN"
+for tool in bash grep paste jq base64; do
+	ln -s "$(command -v "$tool")" "$DIAGNOSTIC_BIN/$tool"
+done
+printf '%s\n' '#!/usr/bin/env bash' \
+	'for arg in "$@"; do' \
+	'  if [ "$arg" = fetch ]; then' \
+	'    echo "remote diagnostic TEST_PRIVATE_FETCH_STDERR" >&2' \
+	'    exit 1' \
+	'  fi' \
+	'done' \
+	'exec "'"$REAL_GIT"'" "$@"' >"$DIAGNOSTIC_BIN/git"
+chmod +x "$DIAGNOSTIC_BIN/git"
+set +e
+OUTPUT="$(cd "$HISTORY_REPO" && env PATH="$DIAGNOSTIC_BIN:/usr/bin:/bin" \
+  FLOTILLA_PRIVATE_DENYLIST='TEST_PRIVATE_[A-Z]+' \
+  bash scripts/check-private-boundary.sh --history 2>&1)"
+RC=$?
+set -e
+[[ "$RC" -eq 1 ]]
+require_contains '<redacted-report-line>'
+require_absent 'TEST_PRIVATE_FETCH_STDERR'
+
 # A token committed and deleted from the tip is still refused. History output
 # reports location only and never repeats the sensitive content it found.
 printf '%s\n' 'TEST_PRIVATE_HISTORY' >"$HISTORY_REPO/notes.txt"
