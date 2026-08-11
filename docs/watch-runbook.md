@@ -678,10 +678,17 @@ prompt). No special ephemeral runner (#435 withdrawn).
 Fail-closed aborts are **not log-only**. On non-zero recycle:
 
 1. Loud log with abort class + recovery command
-2. Durable `~/.flotilla/<desk>/last-recycle-abort.txt`
+2. Durable `~/.flotilla/<desk>/last-recycle-abort.txt`, including the outbox ID when queued
 3. Attempt confirmed injection into the owning coordinator's pane
 4. If the coordinator is busy or unreachable, enqueue the same notice durably through
    its configured adjutant; never collapse the required escalation back to log-only
+
+An aborted attempt removes its own unique handoff before retry or exit, so a later
+takeover cannot consume a dead picture. Each recycle also performs a bounded cleanup of
+old or explicitly aborted handoffs while always preserving the newest ordinary,
+potentially-unconsumed handoff. These files can contain environment-specific working
+context; bounding the ignored-file pile reduces the exposure blast radius if an ignore
+boundary is ever lost.
 
 Busy-desk (phase 0 / re-verify) aborts **retry** a small bound before final
 escalation. A genuinely active turn may be allowed to finish before one retry. If the

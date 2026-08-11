@@ -654,9 +654,17 @@ func cmdRecycle(args []string) error {
 			timeouts:        defaultTimeouts(),
 			selfPath:        selfPath,
 		}
+		if attempt == 0 {
+			if _, sweepErr := sweepRecycleHandoffOrphans(plan.designatedPath, time.Now()); sweepErr != nil {
+				log.Printf("flotilla: recycle: handoff orphan sweep failed (continuing conservatively): %v", sweepErr)
+			}
+		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
 			break
+		}
+		if cleanupErr := removeAbortedRecycleHandoff(plan.designatedPath); cleanupErr != nil {
+			log.Printf("flotilla: recycle: WARNING — aborted handoff cleanup failed: %v", cleanupErr)
 		}
 		if attempt+1 < attempts && isRetryableBusy(runErr) {
 			log.Printf("flotilla: recycle: busy-desk abort for %q (attempt %d/%d) — retrying after settle wait (#436)", agentName, attempt+1, attempts)
