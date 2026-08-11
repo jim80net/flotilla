@@ -795,15 +795,9 @@ func cmdWatch(args []string) error {
 				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
 				// list-nav / queued) elevates so status does not claim plain idle when
 				// recycle's idle∧cleared gate would refuse (#557).
-				state := surface.AssessForFleet(drv, pane)
-				if state == surface.StateAuthExpired {
-					injector.ObserveAuthExpired(agent, true)
-				} else if state != surface.StateUnknown && state != surface.StateShell {
-					// Only a positively observed live harness rearms the alarm. A
-					// capture failure or dead process is not evidence of re-login.
-					injector.ObserveAuthExpired(agent, false)
-				}
-				return state
+				return surface.AssessForFleetAuth(drv, pane, func(auth surface.AuthObservation) bool {
+					return injector.ObserveAuthState(agent, auth)
+				})
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			Usage:             usageObservation(cfg, flatLaunch),

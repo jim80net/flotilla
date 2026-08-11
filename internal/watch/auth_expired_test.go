@@ -9,8 +9,8 @@ import (
 
 func TestAuthExpiredAlarmEdgesAndRecovery(t *testing.T) {
 	r := newRig(surface.ErrAuthExpired)
-	r.in.ObserveAuthExpired("desk", true)
-	r.in.ObserveAuthExpired("desk", true)
+	r.in.ObserveAuthState("desk", surface.AuthExpired)
+	r.in.ObserveAuthState("desk", surface.AuthExpired)
 	if len(r.alerts) != 1 {
 		t.Fatalf("first auth-expired episode alerts = %d, want 1", len(r.alerts))
 	}
@@ -20,10 +20,29 @@ func TestAuthExpiredAlarmEdgesAndRecovery(t *testing.T) {
 		}
 	}
 
-	r.in.ObserveAuthExpired("desk", false)
-	r.in.ObserveAuthExpired("desk", true)
+	r.in.ObserveAuthState("desk", surface.AuthRecovered)
+	r.in.ObserveAuthState("desk", surface.AuthExpired)
 	if len(r.alerts) != 2 {
 		t.Fatalf("post-login auth-expired episode alerts = %d, want rearmed second alert", len(r.alerts))
+	}
+}
+
+func TestAuthExpiredEpisodePersistsAcrossDegradedObservation(t *testing.T) {
+	r := newRig(nil)
+	if active := r.in.ObserveAuthState("desk", surface.AuthExpired); !active {
+		t.Fatal("initial expiry did not activate the episode")
+	}
+	if active := r.in.ObserveAuthState("desk", surface.AuthUndetermined); !active {
+		t.Fatal("degraded observation prematurely cleared the expiry episode")
+	}
+	if active := r.in.ObserveAuthState("desk", surface.AuthExpired); !active {
+		t.Fatal("restored cursor provenance lost the unchanged expiry episode")
+	}
+	if len(r.alerts) != 1 {
+		t.Fatalf("expired→degraded→expired alerts = %d, want exactly 1", len(r.alerts))
+	}
+	if active := r.in.ObserveAuthState("desk", surface.AuthRecovered); active {
+		t.Fatal("positive healthy-composer evidence did not clear the episode")
 	}
 }
 

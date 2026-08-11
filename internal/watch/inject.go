@@ -309,7 +309,7 @@ func (in *Injector) deliver(j Job) {
 	switch {
 	case err == nil:
 		in.resetFutileAttempts(j.Agent)
-		in.ObserveAuthExpired(j.Agent, false)
+		in.ObserveAuthState(j.Agent, surface.AuthRecovered)
 		in.noteRelayDone(j)
 		in.logDelivered(j)
 		if isRelay(j.Kind) && j.MessageID != "" {
@@ -428,7 +428,7 @@ func intendedRecipient(j Job) string {
 // disk-backed retry at the busy cadence until deliverable (#286, #475).
 func (in *Injector) handleBusy(j Job, cause error) {
 	if errors.Is(cause, surface.ErrAuthExpired) {
-		in.ObserveAuthExpired(j.Agent, true)
+		in.ObserveAuthState(j.Agent, surface.AuthExpired)
 	} else {
 		in.noteFutileAttempt(j.Agent)
 	}

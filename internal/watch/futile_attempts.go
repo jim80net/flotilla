@@ -1,6 +1,10 @@
 package watch
 
-import "time"
+import (
+	"time"
+
+	"github.com/jim80net/flotilla/internal/surface"
+)
 
 // Sixty failed attempts inside five minutes corresponds to a continuously
 // futile recipient at the normal five-second tick cadence. It is long enough
@@ -40,27 +44,39 @@ func (in *Injector) resetFutileAttempts(recipient string) {
 	delete(in.futileAttempts, recipient)
 }
 
-// ObserveAuthExpired edge-triggers the human-required authentication alarm.
-// Detector assessments call it even when no delivery is queued; the delivery
-// path calls it as defense in depth. A non-expired observation rearms the edge.
-func (in *Injector) ObserveAuthExpired(recipient string, expired bool) {
+// ObserveAuthState edge-triggers the human-required authentication alarm and
+// returns whether the recipient remains in an active expiry episode. An
+// undetermined observation retains the episode; only positive recovery clears it.
+func (in *Injector) ObserveAuthState(recipient string, observation surface.AuthObservation) bool {
 	if recipient == "" {
-		return
+		return false
 	}
 	in.authExpiredMu.Lock()
-	if !expired {
+	switch observation {
+	case surface.AuthRecovered:
 		delete(in.authExpiredAlarmed, recipient)
 		in.authExpiredMu.Unlock()
-		return
+		return false
+	case surface.AuthUndetermined:
+		active := in.authExpiredAlarmed[recipient]
+		in.authExpiredMu.Unlock()
+		return active
+	case surface.AuthExpired:
+		// Continue below to edge-trigger the alarm.
+	default:
+		active := in.authExpiredAlarmed[recipient]
+		in.authExpiredMu.Unlock()
+		return active
 	}
 	if in.authExpiredAlarmed == nil {
 		in.authExpiredAlarmed = make(map[string]bool)
 	}
 	if in.authExpiredAlarmed[recipient] {
 		in.authExpiredMu.Unlock()
-		return
+		return true
 	}
 	in.authExpiredAlarmed[recipient] = true
 	in.authExpiredMu.Unlock()
 	in.raise("seat %q entered auth-expired: human login is required; deliveries remain durably held until authentication recovers", recipient)
+	return true
 }
