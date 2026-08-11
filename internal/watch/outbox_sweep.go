@@ -9,15 +9,20 @@ import (
 
 // OutboxSweeper enqueues pending inter-agent sends from per-sender outbox files (#475).
 type OutboxSweeper struct {
-	rosterDir string
-	enqueue   func(Job)
-	inFlight  sync.Map // entry key sender/id → struct{}
+	rosterDir   string
+	enqueue     func(Job)
+	observeHead func(outbox.Entry)
+	inFlight    sync.Map // entry key sender/id → struct{}
 }
 
 // NewOutboxSweeper builds a sweeper that delivers via the injector enqueue hook.
 func NewOutboxSweeper(rosterDir string, enqueue func(Job)) *OutboxSweeper {
 	return &OutboxSweeper{rosterDir: rosterDir, enqueue: enqueue}
 }
+
+// SetHeadObserver installs the recipient-head observability hook. It runs for
+// the admitted head on every sweep, including while that head is in flight.
+func (s *OutboxSweeper) SetHeadObserver(fn func(outbox.Entry)) { s.observeHead = fn }
 
 func entryKey(sender, id string) string { return sender + "/" + id }
 
@@ -44,6 +49,9 @@ func (s *OutboxSweeper) SweepAll() int {
 			continue
 		}
 		seenRecipient[e.Recipient] = true
+		if s.observeHead != nil {
+			s.observeHead(e)
+		}
 		key := entryKey(e.Sender, e.ID)
 		if _, loaded := s.inFlight.LoadOrStore(key, struct{}{}); loaded {
 			continue

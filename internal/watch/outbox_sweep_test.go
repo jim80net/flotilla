@@ -72,6 +72,24 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	}
 }
 
+func TestOutboxSweeperObservesOnlyRecipientHead(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := outbox.Enqueue(dir, "alpha", "desk", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := outbox.Enqueue(dir, "beta", "desk", "follower"); err != nil {
+		t.Fatal(err)
+	}
+	var observed []string
+	s := NewOutboxSweeper(dir, func(Job) {})
+	s.SetHeadObserver(func(entry outbox.Entry) { observed = append(observed, entry.ID) })
+	s.SweepAll()
+	if len(observed) != 1 || observed[0] != first {
+		t.Fatalf("observed heads = %v, want [%s]", observed, first)
+	}
+}
+
 func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 	dir := t.TempDir()
 	id, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "stand down this task")

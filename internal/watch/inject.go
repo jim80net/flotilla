@@ -165,6 +165,7 @@ type Injector struct {
 	onOperatorRelayBuffer func(leader, messageID, body, channelID, operatorID string) error
 	relayPendingMu        sync.Mutex
 	relayPending          map[string]int // in-flight KindRelay per agent (#523)
+	futileMu              sync.Mutex
 	futileAttempts        map[string]futileAttemptState
 }
 

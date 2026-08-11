@@ -336,6 +336,7 @@ func cmdWatch(args []string) error {
 		},
 	)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
+	outboxSweeper.SetHeadObserver(injector.ObserveQueuedHead)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(currentRoster(), sender, recipient, message)
 	})
