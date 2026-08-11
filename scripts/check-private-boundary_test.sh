@@ -109,4 +109,112 @@ set -e
 [[ "$RC" -eq 0 ]]
 require_contains 'gh not available; skipping issues scan'
 
+# History publication gate: a clean all-refs history passes.
+HISTORY_REPO="$TMP/history-repo"
+mkdir -p "$HISTORY_REPO/scripts"
+cp "$ROOT/scripts/check-private-boundary.sh" "$HISTORY_REPO/scripts/"
+chmod +x "$HISTORY_REPO/scripts/check-private-boundary.sh"
+git -C "$HISTORY_REPO" init -q
+git -C "$HISTORY_REPO" config user.email test@example.invalid
+git -C "$HISTORY_REPO" config user.name boundary-test
+git -C "$HISTORY_REPO" add scripts/check-private-boundary.sh
+git -C "$HISTORY_REPO" commit -qm init
+
+run_history_guard() {
+  set +e
+  OUTPUT="$(cd "$HISTORY_REPO" && env \
+    FLOTILLA_PRIVATE_DENYLIST='TEST_PRIVATE_[A-Z]+' \
+    FLOTILLA_PRIVATE_HISTORY_PATHS="${HISTORY_PATH_PATTERN:-}" \
+    bash scripts/check-private-boundary.sh --history 2>&1)"
+  RC=$?
+  set -e
+}
+
+run_history_guard
+[[ "$RC" -eq 0 ]]
+require_contains 'history clean.'
+
+# A shallow clone cannot prove full history and fails closed.
+SHALLOW_REPO="$TMP/shallow-repo"
+git clone -q --depth 1 "file://$HISTORY_REPO" "$SHALLOW_REPO"
+set +e
+OUTPUT="$(cd "$SHALLOW_REPO" && FLOTILLA_PRIVATE_DENYLIST='TEST_PRIVATE_[A-Z]+' \
+  bash scripts/check-private-boundary.sh --history 2>&1)"
+RC=$?
+set -e
+[[ "$RC" -eq 1 ]]
+require_contains 'repository history is shallow or unreadable'
+
+# A carrier reachable only from a non-current ref is still in publication scope.
+HISTORY_BRANCH="$(git -C "$HISTORY_REPO" branch --show-current)"
+git -C "$HISTORY_REPO" switch -qc retained-history
+printf '%s\n' 'TEST_PRIVATE_SIDE_REF' >"$HISTORY_REPO/side.txt"
+git -C "$HISTORY_REPO" add side.txt
+git -C "$HISTORY_REPO" commit -qm 'add side history fixture'
+SIDE_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+git -C "$HISTORY_REPO" switch -q "$HISTORY_BRANCH"
+run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$SIDE_COMMIT side.txt"
+require_absent 'TEST_PRIVATE_SIDE_REF'
+
+# A token committed and deleted from the tip is still refused. History output
+# reports location only and never repeats the sensitive content it found.
+printf '%s\n' 'TEST_PRIVATE_HISTORY' >"$HISTORY_REPO/notes.txt"
+git -C "$HISTORY_REPO" add notes.txt
+git -C "$HISTORY_REPO" commit -qm 'add historical fixture'
+TOKEN_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+git -C "$HISTORY_REPO" rm -q notes.txt
+git -C "$HISTORY_REPO" commit -qm 'remove historical fixture'
+run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$TOKEN_COMMIT notes.txt"
+require_absent 'TEST_PRIVATE_HISTORY'
+
+# Path-class carriers are caught after deletion from the tip.
+mkdir -p "$HISTORY_REPO/.flotilla/handoffs"
+printf '%s\n' 'generic handoff fixture' >"$HISTORY_REPO/.flotilla/handoffs/chapter.md"
+git -C "$HISTORY_REPO" add .flotilla/handoffs/chapter.md
+git -C "$HISTORY_REPO" commit -qm 'add handoff carrier'
+PATH_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+git -C "$HISTORY_REPO" rm -q .flotilla/handoffs/chapter.md
+git -C "$HISTORY_REPO" commit -qm 'remove handoff carrier'
+run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$PATH_COMMIT .flotilla/handoffs/chapter.md"
+
+# Ignore coverage is not clearance: a tracked path remains in history.
+printf '%s\n' '.flotilla/handoffs/' >"$HISTORY_REPO/.gitignore"
+mkdir -p "$HISTORY_REPO/.flotilla/handoffs"
+printf '%s\n' 'tracked despite ignore' >"$HISTORY_REPO/.flotilla/handoffs/tracked.md"
+git -C "$HISTORY_REPO" add .gitignore
+git -C "$HISTORY_REPO" add -f .flotilla/handoffs/tracked.md
+git -C "$HISTORY_REPO" commit -qm 'track ignored carrier'
+IGNORED_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$IGNORED_COMMIT .flotilla/handoffs/tracked.md"
+
+# Deployment-specific path vocabulary stays configuration-only and extends the
+# shipped generic classes.
+mkdir -p "$HISTORY_REPO/private-state/exports"
+printf '%s\n' 'generic state' >"$HISTORY_REPO/private-state/exports/item.json"
+git -C "$HISTORY_REPO" add private-state/exports/item.json
+git -C "$HISTORY_REPO" commit -qm 'add configured path carrier'
+CONFIG_PATH_COMMIT="$(git -C "$HISTORY_REPO" rev-parse HEAD)"
+HISTORY_PATH_PATTERN='(^|/)private-state/exports(/|$)' run_history_guard
+[[ "$RC" -eq 1 ]]
+require_contains "$CONFIG_PATH_COMMIT private-state/exports/item.json"
+
+# Tip scanning remains its existing surface and behavior.
+printf '%s\n' 'TEST_PRIVATE_TIP' >"$HISTORY_REPO/tip.txt"
+git -C "$HISTORY_REPO" add tip.txt
+set +e
+OUTPUT="$(cd "$HISTORY_REPO" && FLOTILLA_PRIVATE_DENYLIST='TEST_PRIVATE_[A-Z]+' \
+  bash scripts/check-private-boundary.sh 2>&1)"
+RC=$?
+set -e
+[[ "$RC" -eq 1 ]]
+require_contains 'PRIVATE TOKEN found in the tracked tree:'
+
 echo "check-private-boundary object attribution: PASS"

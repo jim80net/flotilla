@@ -35,6 +35,7 @@
 # Usage:
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
+#   scripts/check-private-boundary.sh --history  # scan TREE + every commit reachable from ALL refs
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
 #                                                  # pre-commit + pre-push hooks and the
 #                                                  # conformance test use this; no `git
@@ -47,6 +48,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DENYLIST_FILE="${FLOTILLA_PRIVATE_DENYLIST_FILE:-$repo_root/.flotilla/private-denylist}"
 WARNLIST_FILE="${FLOTILLA_PRIVATE_WARNLIST_FILE:-$repo_root/.flotilla/private-warnlist}"
+HISTORY_PATHS_FILE="${FLOTILLA_PRIVATE_HISTORY_PATHS_FILE:-$repo_root/.flotilla/private-history-paths}"
 
 # --- 1. built-in, deployment-AGNOSTIC patterns --------------------------------
 # Private for ANY deployment, no configuration required. Kept high-signal so the
@@ -83,6 +85,25 @@ full_alternation="$(printf '%s|' "${GENERIC_PATTERNS[@]}")"
 full_alternation="${full_alternation%|}"
 [ -n "$deployment_alternation" ] && full_alternation="$full_alternation|$deployment_alternation"
 
+# History path classes are independent of content tokens: deployment state can
+# be private because of what the path represents even when the blob text happens
+# to contain no configured token. Generic carrier classes ship here; private
+# deployments extend them from a gitignored file or environment regex.
+GENERIC_HISTORY_PATH_PATTERNS=(
+  '(^|/)\.flotilla/handoffs(/|$)'
+  '(^|/)\.flotilla/state(/|$)'
+  '(^|/)\.flotilla/switch(/|$)'
+)
+deployment_history_paths=""
+if [ -n "${FLOTILLA_PRIVATE_HISTORY_PATHS:-}" ]; then
+  deployment_history_paths="$FLOTILLA_PRIVATE_HISTORY_PATHS"
+elif [ -f "$HISTORY_PATHS_FILE" ]; then
+  deployment_history_paths="$(grep -vE '^[[:space:]]*(#|$)' "$HISTORY_PATHS_FILE" | paste -sd '|' - || true)"
+fi
+history_path_alternation="$(printf '%s|' "${GENERIC_HISTORY_PATH_PATTERNS[@]}")"
+history_path_alternation="${history_path_alternation%|}"
+[ -n "$deployment_history_paths" ] && history_path_alternation="$history_path_alternation|$deployment_history_paths"
+
 # --- 3. YOUR deployment WARNLIST (advisory; from file or env; NEVER hard-coded) ---
 # Loaded EXACTLY like the denylist (the deployment vocabulary is never committed),
 # but a hit is ADVISORY: a WARN section + exit 0, never a failure. The runtime
@@ -102,6 +123,7 @@ SELF_EXCLUDE=(
   ':(exclude)docs/private-public-boundary.md'
   ':(exclude).flotilla/private-denylist.example'
   ':(exclude).flotilla/private-warnlist.example'
+  ':(exclude).flotilla/private-history-paths.example'
 )
 
 fail=0
@@ -228,14 +250,133 @@ scan_issues() {
 	fi
 }
 
+declare -A history_seen=()
+
+history_hit() {
+  local commit="$1"
+  local path="$2"
+	local key="$commit:$path"
+	[ -n "${history_seen[$key]:-}" ] && return
+	history_seen[$key]=1
+  printf '%s %s\n' "$commit" "$path"
+  fail=1
+}
+
+scan_history() {
+  echo "== boundary guard: scanning full all-refs history =="
+  if ! git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "boundary history scan error: not a git repository"
+    fail=1
+    return
+  fi
+  if [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
+    echo "boundary history scan error: repository history is shallow or unreadable; fetch all refs and full history before publication"
+    fail=1
+    return
+  fi
+	local pattern_rc
+	set +e
+	printf '' | grep -qP "$full_alternation" 2>/dev/null
+	pattern_rc=$?
+	set -e
+	if [ "$pattern_rc" -gt 1 ]; then
+		echo "boundary history scan error: content token pattern is invalid"
+		fail=1
+		return
+	fi
+	set +e
+	printf '' | grep -qP "$history_path_alternation" 2>/dev/null
+	pattern_rc=$?
+	set -e
+	if [ "$pattern_rc" -gt 1 ]; then
+		echo "boundary history scan error: history path pattern is invalid"
+		fail=1
+		return
+	fi
+
+  local commits commit message paths path content_hits rc before
+  if ! commits="$(git -C "$repo_root" log --all --format='%H' 2>/dev/null)"; then
+    echo "boundary history scan error: could not enumerate all refs"
+    fail=1
+    return
+  fi
+  before="$fail"
+  while IFS= read -r commit; do
+    [ -z "$commit" ] && continue
+
+    # Commit messages are public history too. They have no repository path, so
+    # report the synthetic location only — never echo the matching text.
+    if ! message="$(git -C "$repo_root" show -s --format='%B' "$commit" 2>/dev/null)"; then
+      echo "boundary history scan error: could not read commit $commit"
+      fail=1
+      continue
+    fi
+    set +e
+    printf '%s\n' "$message" | grep -qIP "$full_alternation" 2>/dev/null
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      history_hit "$commit" "<commit-message>"
+    elif [ "$rc" -gt 1 ]; then
+      echo "boundary history scan error: token pattern evaluation failed at commit $commit"
+      fail=1
+    fi
+
+    # Changed paths supply the path-class axis and catch private tokens embedded
+    # in filenames. This deliberately consults tracked history, never check-ignore.
+    if ! paths="$(git -C "$repo_root" diff-tree -m --root --no-commit-id --name-only -r "$commit" 2>/dev/null | sort -u)"; then
+      echo "boundary history scan error: could not enumerate paths for commit $commit"
+      fail=1
+      continue
+    fi
+    while IFS= read -r path; do
+      [ -z "$path" ] && continue
+      if printf '%s\n' "$path" | grep -qP "$history_path_alternation" 2>/dev/null ||
+         printf '%s\n' "$path" | grep -qP "$full_alternation" 2>/dev/null; then
+        history_hit "$commit" "$path"
+      fi
+    done <<<"$paths"
+
+    # Scan each reachable commit snapshot with the exact PCRE engine used by the
+    # tip scanner. `-l` returns paths only, so the gate cannot leak matched text.
+    set +e
+    content_hits="$(git -C "$repo_root" grep -IlP "$full_alternation" "$commit" -- . "${SELF_EXCLUDE[@]}" 2>/dev/null)"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        path="${path#"$commit:"}"
+        history_hit "$commit" "$path"
+      done <<<"$content_hits"
+    elif [ "$rc" -gt 1 ]; then
+      echo "boundary history scan error: could not scan content at commit $commit"
+      fail=1
+    fi
+  done <<<"$commits"
+
+  if [ "$fail" -eq "$before" ]; then
+    echo "history clean."
+  else
+    echo "PRIVATE HISTORY CARRIER found at the commit/path locations listed above."
+  fi
+}
+
 # Dispatch. `--file F` scans one file (hook + conformance test); otherwise the tree
-# scan runs, with `--issues` adding the open-issue/PR scan.
+# scan runs, with `--issues` adding open GitHub surfaces and `--history` adding
+# every commit reachable from every local ref. A tip-only pass is not publication
+# clearance.
 if [ "${1:-}" = "--file" ]; then
   [ -n "${2:-}" ] || { echo "usage: $0 --file <path>"; exit 2; }
   scan_file "$2"
 else
   scan_tree
-  [ "${1:-}" = "--issues" ] && scan_issues
+  case "${1:-}" in
+    --issues) scan_issues ;;
+    --history) scan_history ;;
+    "") ;;
+    *) echo "usage: $0 [--issues|--history|--file <path>]"; exit 2 ;;
+  esac
 fi
 
 if [ "$fail" -ne 0 ]; then
