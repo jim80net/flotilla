@@ -10,6 +10,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 func TestClassifyRecycleAbort(t *testing.T) {
@@ -163,8 +164,15 @@ func TestRecycleAbortBusyRecordNamesDurableOutboxAndCanDrain(t *testing.T) {
 		t.Fatalf("queued abort = %+v", entries)
 	}
 	delivered := ""
-	delivered = entries[0].Message // idle sweep's confirmed-send success
-	store.Remove(entries[0].ID)
+	sweeper := watch.NewOutboxSweeper(dir, func(job watch.Job) {
+		// The coordinator is idle now: the confirmed delivery succeeds and the
+		// injector's completion callback removes the durable entry.
+		delivered = job.Message
+		store.Remove(job.MessageID)
+	})
+	if got := sweeper.SweepAll(); got != 1 {
+		t.Fatalf("idle sweep queued %d jobs, want 1", got)
+	}
 	if delivered != "abort" || len(store.Load()) != 0 {
 		t.Fatalf("idle drain delivered=%q remaining=%+v", delivered, store.Load())
 	}
