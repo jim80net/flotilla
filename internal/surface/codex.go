@@ -25,7 +25,7 @@ type codex struct {
 	paneCommand    func(string) (string, error)
 	isShell        func(string) bool
 	capturePane    func(string) (string, error)
-	classify       func(string) State
+	classify       func(captured string, cursorY int, cursorVouched bool) State
 	send           func(string, string) error
 	inject         func(string, string) error
 	paneCWD        func(string) (string, error)
@@ -73,7 +73,13 @@ func (c codex) Assess(pane string) State {
 	if err != nil {
 		return StateUnknown
 	}
-	return c.classify(captured)
+	cursorY, cursorVouched := -1, false
+	if c.cursorPosition != nil {
+		if _, y, inMode, cursorErr := c.cursorPosition(pane); cursorErr == nil && !inMode {
+			cursorY, cursorVouched = y, true
+		}
+	}
+	return c.classify(captured, cursorY, cursorVouched)
 }
 
 // Rotate resets context by injecting Codex's /clear (documented slash command — fresh chat).
@@ -175,11 +181,16 @@ var codexApprovalMarkers = []string{
 
 // Working-turn chrome (binary-sourced footer/status — revalidate post-auth).
 var codexWorkingMarkers = []string{
-	" to interrupt",                   // footer hint (leading key glyph varies)
 	"while a task is in progress",     // disabled-action suffix
 	"Waiting for background terminal", // background exec in-turn
 	"a turn is running",               // mode-switch guard
 }
+
+// codexWorkingSpinner is the LIVE-CAPTURED Codex status row. Anchoring the
+// whole render shape prevents a bare/quoted "esc to interrupt" in response
+// text from becoming working chrome. The response bullet is excluded for the
+// same reason as Claude's spinner detector: output can itself say "Working".
+var codexWorkingSpinner = regexp.MustCompile(`^[^\s›●\w]\s+Working\s+\([^)]*\bto interrupt\)\s*$`)
 
 // Rate-limit overlay markers are INFERRED from the event report and the shared
 // selector rendering, pending an exact live capture under #690. Safety does not
@@ -190,7 +201,7 @@ var (
 	codexRateLimitChoiceRE  = regexp.MustCompile(`(?im)^\s*(?:›\s*)?\d+\.\s+switch to gpt-[^\s]*mini\b`)
 )
 
-func parseCodexState(captured string) State {
+func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
 	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
 	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return StateAwaitingInput
@@ -199,13 +210,45 @@ func parseCodexState(captured string) State {
 	if containsAny(tail, codexApprovalMarkers) {
 		return StateAwaitingApproval
 	}
-	if containsAny(tail, codexWorkingMarkers) {
+	if cursorVouched && codexHasWorkingMarkerAtComposer(captured, cursorY) {
 		return StateWorking
 	}
 	if codexHasNonComposerSelector(tail) {
 		return StateAwaitingInput
 	}
 	return StateIdle
+}
+
+// codexHasWorkingMarkerAtComposer binds working chrome to the live terminal
+// cursor. The status row must be immediately above a cursor-vouched composer;
+// an identical phrase in output, quoted source, or scrollback has no working
+// provenance.
+func codexHasWorkingMarkerAtComposer(captured string, cursorY int) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY <= 0 || cursorY >= len(lines) {
+		return false
+	}
+	if !strings.HasPrefix(trimSpace(lines[cursorY]), codexComposerPrompt) {
+		return false
+	}
+	return codexIsWorkingStatusLine(lines[cursorY-1])
+}
+
+func codexIsWorkingStatusLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if codexWorkingSpinner.MatchString(line) {
+		return true
+	}
+	if strings.HasPrefix(line, "Waiting for background terminal") {
+		return true
+	}
+	line = strings.TrimSuffix(line, ".")
+	for _, marker := range codexWorkingMarkers {
+		if strings.HasSuffix(line, marker) && strings.Contains(line, " is disabled ") {
+			return true
+		}
+	}
+	return false
 }
 
 func codexOverlayName(captured string) string {

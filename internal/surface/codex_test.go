@@ -63,25 +63,9 @@ func TestParseCodexState(t *testing.T) {
 			want:     StateAwaitingApproval,
 		},
 		{
-			name:     "footer interrupt hint (binary) → Working",
+			name:     "unvouched footer interrupt hint → Idle",
 			captured: "  streaming output above\n  esc to interrupt\n  /status",
-			want:     StateWorking,
-		},
-		{
-			name: "working spinner LIVE 2026-07-03 → Working",
-			captured: "  › Reply with exactly PONG and nothing else.\n" +
-				"  ◦ Working (0s • esc to interrupt)\n  › Find and fix a bug in @filename",
-			want: StateWorking,
-		},
-		{
-			name:     "task in progress guard → Working",
-			captured: "  Ctrl+L is disabled while a task is in progress.\n  │ composer │",
-			want:     StateWorking,
-		},
-		{
-			name:     "waiting for background terminal → Working",
-			captured: "  Waiting for background terminal\n  job still running",
-			want:     StateWorking,
+			want:     StateIdle,
 		},
 		{
 			name:     "idle empty composer → Idle (default)",
@@ -152,22 +136,59 @@ func TestParseCodexState(t *testing.T) {
 		{
 			// A working desk DISPLAYING this driver's own marker strings (source
 			// code, diffs, fixtures — this repo dogfoods codex desks on itself)
-			// must not misread as a first-run menu: quoted/assigned forms are not
-			// whole rendered option rows, so the line-anchored row match rejects
-			// them and the working footer wins.
-			name: "working desk displaying marker source → Working (not menu)",
+			// must not misread as a first-run menu or a live working footer:
+			// quoted/assigned forms have neither menu-row nor cursor provenance.
+			name: "desk displaying marker source → Idle (not menu or Working)",
 			captured: "  codexTrustQuestion = \"Do you trust the contents\"\n" +
 				"  codexTrustYesRow   = \"1. Yes, continue\"\n" +
 				"  codexUpdateBanner  = \"Update available!\"\n" +
 				"  codexUpdateSkipRow = \"3. Skip until next version\"\n" +
 				"  ◦ Working (3s • esc to interrupt)",
-			want: StateWorking,
+			want: StateIdle,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := parseCodexState(tc.captured); got != tc.want {
+			if got := parseCodexState(tc.captured, -1, false); got != tc.want {
 				t.Errorf("parseCodexState = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCodexStateRejectsUnvouchedWorkingMarker(t *testing.T) {
+	captured := "  The captured tail says “◦ Working (3s • esc to interrupt)” in quoted prose.\n" +
+		"  ordinary response output"
+	if got := parseCodexState(captured, -1, false); got == StateWorking {
+		t.Fatalf("parseCodexState = %v for an unvouched quoted marker, want not Working", got)
+	}
+}
+
+func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
+	for name, status := range map[string]string{
+		"live spinner":              "◦ Working (3s • esc to interrupt)",
+		"disabled task action":      "Ctrl+L is disabled while a task is in progress.",
+		"background terminal wait":  "Waiting for background terminal",
+		"disabled during live turn": "Mode switch is disabled while a turn is running.",
+	} {
+		t.Run(name+" at live composer is Working", func(t *testing.T) {
+			captured := status + "\n› "
+			if got := parseCodexState(captured, 1, true); got != StateWorking {
+				t.Fatalf("parseCodexState = %v for marker at cursor-vouched composer, want Working", got)
+			}
+		})
+	}
+	captured := "  ◦ Working (3s • esc to interrupt)\n  › Find and fix a bug in @filename"
+	if got := parseCodexState(captured, 0, true); got == StateWorking {
+		t.Fatalf("parseCodexState = %v when cursor vouches for another row, want not Working", got)
+	}
+	for name, marker := range map[string]string{
+		"bare":   "esc to interrupt",
+		"quoted": "response text quotes “◦ Working (3s • esc to interrupt)”",
+	} {
+		t.Run(name+" marker beside composer is not chrome", func(t *testing.T) {
+			if got := parseCodexState(marker+"\n› ", 1, true); got == StateWorking {
+				t.Fatalf("parseCodexState = %v for %s marker, want not Working", got, name)
 			}
 		})
 	}
@@ -182,14 +203,19 @@ func TestCodexAssess(t *testing.T) {
 		isShell    bool
 		captured   string
 		captureErr error
+		cursorY    int
+		cursorMode bool
+		cursorErr  error
 		want       State
 	}{
-		{"panecommand error → unknown", "", boom, false, "", nil, StateUnknown},
-		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
-		{"capture error → unknown", "codex", nil, false, "", boom, StateUnknown},
-		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, StateAwaitingInput},
-		{"classifier routes: working", "codex", nil, false, "esc to interrupt", nil, StateWorking},
-		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, StateIdle},
+		{"panecommand error → unknown", "", boom, false, "", nil, 0, false, nil, StateUnknown},
+		{"isShell → shell", "bash", nil, true, "", nil, 0, false, nil, StateShell},
+		{"capture error → unknown", "codex", nil, false, "", boom, 0, false, nil, StateUnknown},
+		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, 0, false, nil, StateAwaitingInput},
+		{"classifier routes: working", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, false, nil, StateWorking},
+		{"copy mode rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, true, nil, StateAwaitingInput},
+		{"cursor error rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, false, boom, StateAwaitingInput},
+		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, 0, false, nil, StateIdle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,6 +224,9 @@ func TestCodexAssess(t *testing.T) {
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
 				classify:    parseCodexState,
+				cursorPosition: func(string) (int, int, bool, error) {
+					return 0, tc.cursorY, tc.cursorMode, tc.cursorErr
+				},
 			}
 			if got := c.Assess("0:0.0"); got != tc.want {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
