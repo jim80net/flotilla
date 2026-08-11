@@ -11,6 +11,19 @@ import (
 
 const claudeConfigDir = "CLAUDE_CONFIG_DIR"
 
+type configDirObservationState uint8
+
+const (
+	configDirUnavailable configDirObservationState = iota
+	configDirObservedAbsent
+	configDirObservedValue
+)
+
+type configDirObservation struct {
+	state configDirObservationState
+	value string
+}
+
 var (
 	panePID          = deliver.PanePID
 	paneStartCommand = deliver.PaneStartCommand
@@ -27,9 +40,10 @@ func envValue(data []byte, key string) string {
 	return ""
 }
 
-func observedConfigDir(pid int) string {
+func observedConfigDir(pid int) configDirObservation {
 	seen := map[int]bool{}
 	queue := []int{pid}
+	observedEnvironment := false
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -38,8 +52,9 @@ func observedConfigDir(pid int) string {
 		}
 		seen[current] = true
 		if data, err := readProcFile(filepath.Join("/proc", strconv.Itoa(current), "environ")); err == nil {
+			observedEnvironment = true
 			if value := envValue(data, claudeConfigDir); value != "" {
-				return value
+				return configDirObservation{state: configDirObservedValue, value: value}
 			}
 		}
 		if data, err := readProcFile(filepath.Join("/proc", strconv.Itoa(current), "task", strconv.Itoa(current), "children")); err == nil {
@@ -50,7 +65,10 @@ func observedConfigDir(pid int) string {
 			}
 		}
 	}
-	return ""
+	if observedEnvironment {
+		return configDirObservation{state: configDirObservedAbsent}
+	}
+	return configDirObservation{state: configDirUnavailable}
 }
 
 // configDirFromLaunch extracts the launch-recipe environment assignment recorded by tmux.
@@ -70,8 +88,11 @@ func configDirFromLaunch(launch string) string {
 
 func projectsRootForPane(pane string) (string, bool) {
 	if pid, err := panePID(pane); err == nil {
-		if dir := observedConfigDir(pid); dir != "" {
-			return filepath.Join(dir, "projects"), true
+		switch observed := observedConfigDir(pid); observed.state {
+		case configDirObservedValue:
+			return filepath.Join(observed.value, "projects"), true
+		case configDirObservedAbsent:
+			return projectsRoot()
 		}
 	}
 	if launch, err := paneStartCommand(pane); err == nil {

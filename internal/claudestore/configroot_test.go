@@ -36,6 +36,24 @@ func TestProjectsRootForPanePrecedence(t *testing.T) {
 	if !ok || root != "/observed/account/projects" {
 		t.Fatalf("observed root=(%q,%t)", root, ok)
 	}
+	// A successful process-environment observation that lacks the variable is
+	// evidence for Claude's default root. Stale recipe intent must not override it.
+	readProcFile = func(path string) ([]byte, error) {
+		switch path {
+		case "/proc/101/environ":
+			return []byte("PATH=/bin\x00"), nil
+		case "/proc/101/task/101/children":
+			return []byte(""), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	root, ok = projectsRootForPane("pane")
+	if !ok || root != filepath.Join(home, ".claude", "projects") {
+		t.Fatalf("observed-absent root=(%q,%t), want default despite recipe intent", root, ok)
+	}
+
+	// Only an unavailable live observation permits launch-recipe fallback.
 	panePID = func(string) (int, error) { return 0, fmt.Errorf("unavailable") }
 	root, ok = projectsRootForPane("pane")
 	if !ok || root != "/intent/account/projects" {
