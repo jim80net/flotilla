@@ -688,7 +688,10 @@ takeover cannot consume a dead picture. Each recycle also performs a bounded cle
 old or explicitly aborted handoffs while always preserving the newest ordinary,
 potentially-unconsumed handoff. These files can contain environment-specific working
 context; bounding the ignored-file pile reduces the exposure blast radius if an ignore
-boundary is ever lost.
+boundary is ever lost. Before asking the desk to write, recycle also verifies the exact
+target is absent from Git's tracked index: an ignore rule does not protect a path that was
+already committed. A tracked target aborts loudly before handoff content is produced and
+routes through the same abort-escalation path.
 
 Busy-desk (phase 0 / re-verify) aborts **retry** a small bound before final
 escalation. A genuinely active turn may be allowed to finish before one retry. If the

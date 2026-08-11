@@ -85,6 +85,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 		assess:       r.assess,
 		composer:     r.composer,
 		absent:       func(string, string) (bool, error) { return r.absentResult, r.absentErr },
+		untracked:    func(string, string) (bool, error) { return true, nil },
 		durable:      func(string, string, int) (bool, error) { return !r.failDurable, nil },
 		deliver:      func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
 		closeFn:      func(string) error { r.closed = true; return r.closeErr },
@@ -166,6 +167,19 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+}
+
+func TestRunRecycleTrackedHandoffRefusesBeforeWriter(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.untracked = func(string, string) (bool, error) { return false, nil }
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "tracked by git") || !strings.Contains(err.Error(), "ABORT before writing") {
+		t.Fatalf("err=%v, want loud tracked-path refusal", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Fatalf("writer was invoked for tracked target: %v", r.delivered)
 	}
 }
 

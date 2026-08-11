@@ -53,6 +53,7 @@ type recycleOps struct {
 	assess       func(target string) surface.State                  // driver.Assess
 	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
 	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
+	untracked    func(cwd, path string) (bool, error)               // deliver.HandoffUntracked (index-reachability guard)
 	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
 	deliver      func(target, text string) error                    // confirmed delivery bound to the driver
 	closeFn      func(target string) error                          // driver.Close
@@ -176,6 +177,13 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 	if !absent {
 		return "", worktreeCloseNote{}, fmt.Errorf("a blob already exists at the designated handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.designatedPath)
+	}
+	untracked, err := ops.untracked(p.cwd, p.designatedPath)
+	if err != nil {
+		return "", worktreeCloseNote{}, fmt.Errorf("handoff tracked-status check for %q: %w — ABORT before writing handoff content", p.designatedPath, err)
+	}
+	if !untracked {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing recycle: designated handoff %s is tracked by git even if ignored — ABORT before writing deployment-specific handoff content; remove it from the index through the repository-owner workflow, then retry", p.designatedPath)
 	}
 
 	// PHASE 1 — handoff (lockless): deliver the non-interactive handoff turn, then gate on the
@@ -601,6 +609,7 @@ func cmdRecycle(args []string) error {
 		assess:       drv.Assess,
 		composer:     probe.ComposerState,
 		absent:       deliver.HandoffAbsentAtHead,
+		untracked:    deliver.HandoffUntracked,
 		durable:      deliver.HandoffDurable,
 		deliver:      func(target, text string) error { return confirm.Submit(drv, target, text) },
 		closeFn:      drv.Close,
