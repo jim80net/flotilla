@@ -99,7 +99,7 @@ func DroppedDispatchFinishHookWithMerged(
 			log.Printf("flotilla watch: dropped-dispatch queued-ack scan %s failed: %v", agent, pathErr)
 		} else {
 			for _, entry := range outbox.NewStore(outboxPath).Load() {
-				if dispatch.RecipientQueueMember(rosterDir, entry, entry.Recipient) {
+				if outbox.RecipientQueueMember(rosterDir, entry, entry.Recipient) {
 					queuedOutbox = append(queuedOutbox, entry)
 				}
 			}

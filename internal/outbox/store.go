@@ -449,11 +449,18 @@ func ListAll(rosterDir string) []Entry {
 // HasPendingRecipient reports whether any durable order is already queued for recipient.
 func HasPendingRecipient(rosterDir, recipient string) bool {
 	for _, entry := range ListAll(rosterDir) {
-		if entry.Recipient == recipient && Current(rosterDir, entry) {
+		if RecipientQueueMember(rosterDir, entry, recipient) {
 			return true
 		}
 	}
 	return false
+}
+
+// RecipientQueueMember is the single current-population rule for every outbox
+// reader. A consumer cannot claim a queued or undelivered entry unless this
+// predicate includes it in the recipient's current population.
+func RecipientQueueMember(rosterDir string, entry Entry, recipient string) bool {
+	return entry.Recipient == recipient && Current(rosterDir, entry)
 }
 
 func entryMateriallyChanged(prev, next Entry) bool {

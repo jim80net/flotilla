@@ -4,7 +4,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/outbox"
 )
 
@@ -32,7 +31,7 @@ func (s *OutboxSweeper) SweepAll() int {
 	n := 0
 	seenRecipient := make(map[string]bool)
 	for _, e := range pending {
-		if !dispatch.RecipientQueueMember(s.rosterDir, e, e.Recipient) {
+		if !outbox.RecipientQueueMember(s.rosterDir, e, e.Recipient) {
 			_, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
 			if err != nil {
 				log.Printf("flotilla watch: failed to garbage-collect canceled or superseded send %s from %q to %q (epoch %d): %v", e.ID, e.Sender, e.Recipient, e.Epoch, err)

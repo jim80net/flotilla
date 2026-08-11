@@ -243,8 +243,8 @@ func TestLookupNonceAndRecipientQueueShareCurrentPopulation(t *testing.T) {
 		for _, queued := range queue {
 			inQueue = inQueue || queued.ID == entry.ID
 		}
-		if inQueue != RecipientQueueMember(dir, entry, "recipient") {
-			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, RecipientQueueMember(dir, entry, "recipient"))
+		if inQueue != outbox.RecipientQueueMember(dir, entry, "recipient") {
+			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, outbox.RecipientQueueMember(dir, entry, "recipient"))
 		}
 	}
 }
