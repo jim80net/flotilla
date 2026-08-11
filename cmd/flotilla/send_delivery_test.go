@@ -113,6 +113,30 @@ func TestDirectSendAfterDurableJoinsTailWithoutQueueJump(t *testing.T) {
 	}
 }
 
+func TestDirectSendIgnoresSupersededOutboxPopulation(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	path, err := outbox.Path(dir, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := `{"epochs":{"xo":2},"pending":[{"id":"stale","sender":"alpha","recipient":"xo","message":"old","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	delivered := 0
+	queued, err := deliverOrQueueSendWith(&roster.Config{}, rosterPath, "beta", "xo", "pane", "new direct order", func() error {
+		delivered++
+		return nil
+	})
+	if err != nil || queued || delivered != 1 {
+		t.Fatalf("queued=%v delivered=%d err=%v, want direct delivery past superseded row", queued, delivered, err)
+	}
+	if got := outbox.ListAll(dir); len(got) != 1 || got[0].ID != "stale" {
+		t.Fatalf("outbox = %+v, want no new queued entry", got)
+	}
+}
+
 // #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
 func TestFormatQueuedAck_Visible(t *testing.T) {
 	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false)

@@ -32,6 +32,40 @@ func TestSweepGarbageCollectsNonCurrentWithAuditLine(t *testing.T) {
 	}
 }
 
+func TestSweepGarbageCollectedHeadAdvancesRecipientFIFO(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-alpha-outbox.json")
+	raw := `{"epochs":{"recipient":2},"pending":[{"id":"stale-head","sender":"alpha","recipient":"recipient","message":"old","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},{"id":"live-next","sender":"alpha","recipient":"recipient","message":"next","epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
+	if got := s.SweepAll(); got != 1 || len(ids) != 1 || ids[0] != "live-next" {
+		t.Fatalf("GC head advancement = %v (count %d), want live-next in same sweep", ids, got)
+	}
+}
+
+func TestCanceledHeadAdvancesRecipientFIFO(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := outbox.Enqueue(dir, "alpha", "recipient", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := outbox.Enqueue(dir, "alpha", "recipient", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbox.Cancel(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
+	if got := s.SweepAll(); got != 1 || len(ids) != 1 || ids[0] != second {
+		t.Fatalf("canceled head advancement = %v (count %d), want %s", ids, got, second)
+	}
+}
+
 // busyThenIdleSend is a SendFunc that returns ErrBusy once, then succeeds.
 type busyThenIdleSend struct {
 	calls atomic.Int32

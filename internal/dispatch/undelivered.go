@@ -69,6 +69,12 @@ func ScanUndeliveredOutbox(rosterDir string, now time.Time, age time.Duration) [
 	}
 	var out []UndeliveredReport
 	for _, e := range outbox.ListAll(rosterDir) {
+		// Undelivered means live in the same current recipient population used
+		// by dispatch-status. Superseded rows retain their terminal status via
+		// LookupNonce; they must never emit a still-queued alert.
+		if !outbox.RecipientQueueMember(rosterDir, e, e.Recipient) {
+			continue
+		}
 		if e.EnqueuedAt.IsZero() {
 			continue
 		}
@@ -80,7 +86,7 @@ func ScanUndeliveredOutbox(rosterDir string, now time.Time, age time.Duration) [
 		if got < age {
 			continue
 		}
-		nonce := inbound.ParseDispatchNonce(e.Message)
+		nonce := inbound.ParseOwnDispatchNonce(e.Message)
 		out = append(out, UndeliveredReport{
 			Kind:      "outbox",
 			ID:        e.ID,

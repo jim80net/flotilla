@@ -18,19 +18,25 @@ const (
 	DispositionDelivered   Disposition = "delivered"   // inbound ledger pending ack
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
 	DispositionUndelivered Disposition = "undelivered" // queued past age bound
+	DispositionSuperseded  Disposition = "superseded"  // retained outbox row from a non-current epoch
 )
 
 // Status is the resolved view for `flotilla dispatch-status`.
 type Status struct {
-	Nonce       string
-	Disposition Disposition
-	Sender      string
-	Recipient   string
-	PayloadHash string
-	Reason      string // consume reason when consumed
-	ID          string // outbox or inbound id
-	Age         time.Duration
-	Detail      string
+	Nonce         string
+	Disposition   Disposition
+	Sender        string
+	Recipient     string
+	PayloadHash   string
+	Reason        string // consume reason when consumed
+	ID            string // outbox or inbound id
+	Age           time.Duration
+	Detail        string
+	QueueDepth    int
+	Position      int // one-based position in the recipient FIFO
+	HeadID        string
+	Deferrals     int
+	HeadDeferrals int
 }
 
 // LookupNonce resolves a nonce across consumed → inbound → outbox (first hit
@@ -70,16 +76,39 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 		return *live
 	}
-	for _, e := range outbox.ListAll(rosterDir) {
-		if inbound.ParseDispatchNonce(e.Message) != nonce {
+	pending := outbox.ListAll(rosterDir)
+	for _, e := range pending {
+		if inbound.ParseOwnDispatchNonce(e.Message) != nonce {
 			continue
 		}
 		st.Sender = e.Sender
 		st.Recipient = e.Recipient
 		st.ID = e.ID
 		st.PayloadHash = PayloadHash(e.Message)
+		if !outbox.RecipientQueueMember(rosterDir, e, e.Recipient) {
+			st.Disposition = DispositionSuperseded
+			st.Detail = fmt.Sprintf("superseded at epoch %d; not a member of the current recipient FIFO", statusEpoch(e.Epoch))
+			return st
+		}
+		queue := senderRecipientQueue(rosterDir, pending, e.Sender, e.Recipient)
+		st.QueueDepth = len(queue)
+		st.Deferrals = e.Deferrals
+		for i, queued := range queue {
+			if i == 0 {
+				st.HeadID = queued.ID
+				st.HeadDeferrals = queued.Deferrals
+			}
+			if queued.ID == e.ID && queued.Sender == e.Sender {
+				st.Position = i + 1
+			}
+		}
 		if !e.EnqueuedAt.IsZero() {
 			st.Age = now.Sub(e.EnqueuedAt).Round(time.Second)
+		}
+		if st.Position > 1 {
+			st.Disposition = DispositionQueued
+			st.Detail = fmt.Sprintf("sender-recipient FIFO follower; position %d behind lane head %s", st.Position, emptyDash(st.HeadID))
+			return st
 		}
 		if st.Age >= UndeliveredOutboxAge && e.LastStaleEscalation.IsZero() {
 			st.Disposition = DispositionUndelivered
@@ -87,11 +116,28 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 			return st
 		}
 		st.Disposition = DispositionQueued
-		st.Detail = "queued in sender outbox; waiting for recipient idle"
+		st.Detail = "sender-recipient FIFO head; eligible for delivery attempt"
 		return st
 	}
 	st.Detail = "nonce not found in consumed, inbound, or outbox"
 	return st
+}
+
+func senderRecipientQueue(rosterDir string, pending []outbox.Entry, sender, recipient string) []outbox.Entry {
+	queue := make([]outbox.Entry, 0)
+	for _, entry := range pending {
+		if entry.Sender == sender && outbox.RecipientQueueMember(rosterDir, entry, recipient) {
+			queue = append(queue, entry)
+		}
+	}
+	return queue
+}
+
+func statusEpoch(epoch uint64) uint64 {
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }
 
 func lookupInboundNonce(rosterDir, nonce string, now time.Time) *Status {
@@ -137,6 +183,9 @@ func FormatStatus(s Status) string {
 	}
 	if s.Age > 0 {
 		parts = append(parts, "age="+s.Age.String())
+	}
+	if s.QueueDepth > 0 {
+		parts = append(parts, fmt.Sprintf("queue_position=%d/%d", s.Position, s.QueueDepth), "head_id="+emptyDash(s.HeadID), fmt.Sprintf("deferrals=%d head_deferrals=%d", s.Deferrals, s.HeadDeferrals))
 	}
 	if s.Detail != "" {
 		parts = append(parts, s.Detail)

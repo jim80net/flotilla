@@ -416,6 +416,9 @@ func buildDispatchTimeline(rosterDir string, refs []string) ([]WorkTimelineEvent
 	var events []WorkTimelineEvent
 	matchedNonces := map[string]bool{}
 	for _, entry := range outbox.ListAll(rosterDir) {
+		if !outbox.RecipientQueueMember(rosterDir, entry, entry.Recipient) {
+			continue
+		}
 		if !timelineMessageMatches(entry.Message, refs) {
 			continue
 		}

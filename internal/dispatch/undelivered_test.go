@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +111,171 @@ func TestLookupNonce_DispositionOrder(t *testing.T) {
 	}
 	if st.Reason != ReasonMerged {
 		t.Fatalf("reason = %q", st.Reason)
+	}
+}
+
+func TestOutboxNonceJoinsRejectQuotedHistoricalText(t *testing.T) {
+	dir := t.TempDir()
+	const decoy = "flotilla-dispatch-aabbccdd"
+	message := "status report quoting " + decoy + " from an earlier dispatch"
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = outbox.NewStore(path).Insert(outbox.Entry{
+		Sender: "sender", Recipient: "recipient", Message: message,
+		EnqueuedAt: time.Now().UTC().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LookupNonce(dir, decoy, time.Now().UTC()); got.Disposition != DispositionUnknown {
+		t.Fatalf("dispatch-status adopted quoted decoy: %+v", got)
+	}
+	reports := ScanUndeliveredOutbox(dir, time.Now().UTC(), 30*time.Minute)
+	if len(reports) != 1 {
+		t.Fatalf("undelivered reports = %+v, want queued entry with no adopted nonce", reports)
+	}
+	if reports[0].Nonce != "" {
+		t.Fatalf("undelivered scan adopted quoted decoy nonce %q", reports[0].Nonce)
+	}
+}
+
+func TestLookupNonceReportsSenderRecipientFIFOPosition(t *testing.T) {
+	dir := t.TempDir()
+	var nonces []string
+	for _, body := range []string{"first queued work", "second queued work", "third queued work"} {
+		message, nonce, err := inbound.AppendDispatchNonce(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonces = append(nonces, nonce)
+		if _, _, err := outbox.Enqueue(dir, "sender", "recipient", message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries := outbox.ListAll(dir)
+	st := LookupNonce(dir, nonces[1], time.Now().UTC().Add(time.Hour))
+	if st.Disposition != DispositionQueued || st.Position != 2 || st.QueueDepth != 3 || st.HeadID != entries[0].ID {
+		t.Fatalf("follower status = %+v, want position 2/3 behind %s", st, entries[0].ID)
+	}
+	if st.Detail != "sender-recipient FIFO follower; position 2 behind lane head "+entries[0].ID {
+		t.Fatalf("follower detail = %q", st.Detail)
+	}
+	formatted := FormatStatus(st)
+	for _, want := range []string{"queue_position=2/3", "head_id=" + entries[0].ID, "deferrals=0", "sender-recipient FIFO follower"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted status %q missing %q", formatted, want)
+		}
+	}
+}
+
+func TestLookupNonceQueuePositionIsPerSenderRecipientLane(t *testing.T) {
+	dir := t.TempDir()
+	alphaMessage, alphaNonce, err := inbound.AppendDispatchNonce("alpha wedged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaMessage, betaNonce, err := inbound.AppendDispatchNonce("beta independent work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaID, _, err := outbox.Enqueue(dir, "alpha", "recipient", alphaMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaID, _, err := outbox.Enqueue(dir, "beta", "recipient", betaMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Add(time.Hour)
+	alpha := LookupNonce(dir, alphaNonce, now)
+	beta := LookupNonce(dir, betaNonce, now)
+	if alpha.Position != 1 || alpha.QueueDepth != 1 || alpha.HeadID != alphaID {
+		t.Fatalf("alpha lane status = %+v, want independent position 1/1 at %s", alpha, alphaID)
+	}
+	if beta.Position != 1 || beta.QueueDepth != 1 || beta.HeadID != betaID {
+		t.Fatalf("beta lane status = %+v, want independent position 1/1 at %s", beta, betaID)
+	}
+}
+
+func TestLookupNonceAndRecipientQueueShareCurrentPopulation(t *testing.T) {
+	dir := t.TempDir()
+	staleMessage, staleNonce, err := inbound.AppendDispatchNonce("superseded queued work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveMessage, liveNonce, err := inbound.AppendDispatchNonce("current queued work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := fmt.Sprintf(`{"epochs":{"recipient":2},"pending":[`+
+		`{"id":"stale","sender":"sender","recipient":"recipient","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live","sender":"sender","recipient":"recipient","message":%q,"epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, staleMessage, liveMessage)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 8, 1, 0, 2, 0, 0, time.UTC)
+	stale := LookupNonce(dir, staleNonce, now)
+	if stale.Disposition != DispositionSuperseded || stale.Position != 0 || stale.QueueDepth != 0 || stale.HeadID != "" {
+		t.Fatalf("stale status = %+v, want superseded outside recipient FIFO", stale)
+	}
+	if !strings.Contains(stale.Detail, "superseded at epoch 1") {
+		t.Fatalf("stale detail = %q", stale.Detail)
+	}
+
+	live := LookupNonce(dir, liveNonce, now)
+	if live.Disposition != DispositionQueued || live.Position != 1 || live.QueueDepth != 1 || live.HeadID != "live" {
+		t.Fatalf("live status = %+v, want sole current FIFO head", live)
+	}
+
+	entries := outbox.ListAll(dir)
+	for _, entry := range entries {
+		queue := senderRecipientQueue(dir, entries, entry.Sender, "recipient")
+		inQueue := false
+		for _, queued := range queue {
+			inQueue = inQueue || queued.ID == entry.ID
+		}
+		if inQueue != outbox.RecipientQueueMember(dir, entry, "recipient") {
+			t.Fatalf("entry %s membership disagrees: queue=%v predicate=%v", entry.ID, inQueue, outbox.RecipientQueueMember(dir, entry, "recipient"))
+		}
+	}
+}
+
+func TestScanUndeliveredOutboxExcludesSupersededPopulation(t *testing.T) {
+	dir := t.TempDir()
+	staleMessage, _, err := inbound.AppendDispatchNonce("superseded aged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveMessage, liveNonce, err := inbound.AppendDispatchNonce("current aged work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := outbox.Path(dir, "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := fmt.Sprintf(`{"epochs":{"recipient":2},"pending":[`+
+		`{"id":"stale","sender":"sender","recipient":"recipient","message":%q,"epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},`+
+		`{"id":"live","sender":"sender","recipient":"recipient","message":%q,"epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"}]}`, staleMessage, liveMessage)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reports := ScanUndeliveredOutbox(dir, time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC), 15*time.Minute)
+	if len(reports) != 1 || reports[0].ID != "live" || reports[0].Nonce != liveNonce {
+		t.Fatalf("undelivered reports = %+v, want only current epoch-2 entry", reports)
+	}
+	if reports[0].Message == "" || strings.Contains(reports[0].Message, "stale") {
+		t.Fatalf("undelivered report leaked superseded entry: %+v", reports[0])
 	}
 }
 
