@@ -18,6 +18,7 @@ const (
 	DispositionDelivered   Disposition = "delivered"   // inbound ledger pending ack
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
 	DispositionUndelivered Disposition = "undelivered" // queued past age bound
+	DispositionSubmitted   Disposition = "submitted"   // transport accepted; recipient handling separate
 )
 
 // Status is the resolved view for `flotilla dispatch-status`.
@@ -70,8 +71,14 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 		return *live
 	}
+	for _, event := range allDeliveryStages(rosterDir) {
+		if event.Nonce == nonce && event.Stage == outbox.StageSubmitted {
+			return Status{Nonce: nonce, Disposition: DispositionSubmitted, Sender: event.Sender,
+				Recipient: event.Recipient, ID: event.OutboxID, Detail: "transport submitted; recipient handling is separate"}
+		}
+	}
 	for _, e := range outbox.ListAll(rosterDir) {
-		if inbound.ParseDispatchNonce(e.Message) != nonce {
+		if inbound.ParseOwnDispatchNonce(e.Message) != nonce {
 			continue
 		}
 		st.Sender = e.Sender
@@ -92,6 +99,14 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	}
 	st.Detail = "nonce not found in consumed, inbound, or outbox"
 	return st
+}
+
+func allDeliveryStages(rosterDir string) []outbox.StageEvent {
+	events, err := outbox.AllDeliveryStages(rosterDir)
+	if err != nil {
+		return nil
+	}
+	return events
 }
 
 func lookupInboundNonce(rosterDir, nonce string, now time.Time) *Status {

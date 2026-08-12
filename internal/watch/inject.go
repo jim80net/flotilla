@@ -335,6 +335,9 @@ func (in *Injector) deliver(j Job) {
 	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
 		in.handleBusy(j, err)
+	case errors.Is(err, surface.ErrWedge):
+		in.noteKnownWedge(j.Agent)
+		in.handleBusy(j, err)
 	case errors.Is(err, surface.ErrPanelBlocked):
 		// The desk's composer did NOT accept the message (#152): either a per-agent message
 		// sub-composer / agent-panel held focus (a paste would mis-deliver — refused before pasting),
@@ -349,6 +352,7 @@ func (in *Injector) deliver(j Job) {
 		in.noteRelayDone(j)
 		log.Printf("flotilla watch: deliver to %q INPUT-BLOCKED — composer did not accept the message (needs attention at its pane): %v", j.Agent, err)
 		if j.Kind == KindSend {
+			in.recordTerminalStage(j, outbox.StageFailed, err)
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
@@ -360,10 +364,25 @@ func (in *Injector) deliver(j Job) {
 		}
 		in.noteRelayDone(j)
 		if j.Kind == KindSend {
+			in.recordTerminalStage(j, outbox.StageFailed, err)
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+	}
+}
+
+func (in *Injector) recordTerminalStage(j Job, stage outbox.DeliveryStage, cause error) {
+	if !j.OutboxBound || in.rosterDir == "" {
+		return
+	}
+	evidence := "terminal delivery failure"
+	if cause != nil {
+		evidence = cause.Error()
+	}
+	if err := outbox.RecordStage(in.rosterDir, outbox.Entry{ID: j.MessageID, Sender: j.Sender,
+		Recipient: intendedRecipient(j), Message: j.Message}, stage, evidence, time.Now().UTC()); err != nil {
+		log.Printf("flotilla watch: record terminal stage for %s failed: %v", j.MessageID, err)
 	}
 }
 
@@ -476,6 +495,8 @@ func outboxRecipientClass(cause error) outbox.RecipientClass {
 	switch {
 	case errors.Is(cause, surface.ErrBusy):
 		return outbox.RecipientWorking
+	case errors.Is(cause, surface.ErrWedge):
+		return outbox.RecipientWedge
 	case errors.Is(cause, surface.ErrTransient):
 		return outbox.RecipientTransient
 	case errors.Is(cause, surface.ErrPanelBlocked), errors.Is(cause, surface.ErrCrashed):

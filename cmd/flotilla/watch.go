@@ -284,6 +284,7 @@ func cmdWatch(args []string) error {
 	// kill-switch). When unwired, SubmitWithSelfHeal == Submit (inert), so relay and tick behave
 	// identically. Ctrl-C is destructive — see surface.selfHeal's safety gates.
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+	temporalClassifier := surface.NewTemporalClassifier(deliver.CapturePane)
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 		log.Printf("flotilla watch: self-heal ENABLED (FLOTILLA_SELF_HEAL) — relay input-blocks attempt bounded Ctrl-C recovery")
@@ -307,7 +308,7 @@ func cmdWatch(args []string) error {
 				return err
 			}
 			defer txn.Release()
-			return submit(drv, pane, message)
+			return submit(temporalClassifier.Temporal(drv, pane), pane, message)
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)

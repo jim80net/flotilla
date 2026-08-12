@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/outbox"
 )
 
 // Consume reasons recorded on the durable registry.
@@ -204,6 +205,12 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		inserted = true
 		return r.save(f)
 	})
+	if err == nil && inserted && e.Nonce != "" {
+		if stageErr := outbox.RecordStageByNonce(filepath.Dir(r.path), e.Nonce,
+			outbox.StageRecipientConsumed, e.Reason, e.ConsumedAt); stageErr != nil {
+			log.Printf("flotilla dispatch: record consumed delivery stage failed: %v", stageErr)
+		}
+	}
 	return inserted, err
 }
 

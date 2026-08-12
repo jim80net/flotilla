@@ -19,6 +19,9 @@ const (
 	StateAwaitingInput          // blocked on a prompt for input (reserved; per-surface)
 	StateAwaitingApproval       // blocked on a tool/permission approval (reserved; per-surface)
 	StateErrored                // surfaced an error state (reserved; per-surface)
+	// Appended: detector snapshots persist State numerically; insertion would
+	// reinterpret prior idle/awaiting states after upgrade.
+	StateWedge // working chrome is static while completed-result evidence is stable
 )
 
 // String renders a State as a short lowercase label for logs and the
@@ -29,6 +32,8 @@ func (s State) String() string {
 		return "shell"
 	case StateWorking:
 		return "working"
+	case StateWedge:
+		return "wedge"
 	case StateIdle:
 		return "idle"
 	case StateAwaitingInput:

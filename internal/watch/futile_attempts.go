@@ -36,6 +36,25 @@ func (in *Injector) noteFutileAttempt(recipient string) {
 	in.futileAttempts[recipient] = state
 }
 
+// noteKnownWedge is the edge-triggered arm for positive temporal wedge evidence.
+// It shares recovery/rearm state with the attempt-storm arm but never waits for N.
+func (in *Injector) noteKnownWedge(recipient string) {
+	if recipient == "" {
+		return
+	}
+	if in.futileAttempts == nil {
+		in.futileAttempts = make(map[string]futileAttemptState)
+	}
+	state := in.futileAttempts[recipient]
+	if state.alarmed {
+		return
+	}
+	now := in.clock()
+	state = futileAttemptState{first: now, count: state.count + 1, alarmed: true}
+	in.futileAttempts[recipient] = state
+	in.raise("delivery wedge for seat %q: temporal classifier observed static working chrome plus stable completed-result evidence; deliveries remain durable and held", recipient)
+}
+
 func (in *Injector) resetFutileAttempts(recipient string) {
 	delete(in.futileAttempts, recipient)
 }

@@ -102,6 +102,11 @@ var ErrUnconfirmed = errors.New("surface: submit could not be confirmed — esca
 // ErrBusy/ErrCrashed.
 var ErrPanelBlocked = errors.New("surface: composer is input-blocked behind the agents panel — not delivered")
 
+// ErrWedge means temporal evidence disproved ordinary moving work: the working
+// render and completed-result evidence remained unchanged for the bounded window.
+// It is non-deliverable, but unlike ErrBusy it warrants immediate intervention.
+var ErrWedge = errors.New("surface: pane is statically wedged — not delivered")
+
 // Confirm carries the injectable collaborators for confirmed delivery so the orchestration
 // is unit-testable without a tmux server or a real clock. Production wires SendEnter to
 // deliver.SendEnter and Sleep to time.Sleep. Build it once per entrypoint and call Submit
@@ -185,6 +190,8 @@ func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
 		}
 	case StateShell:
 		return ErrCrashed
+	case StateWedge:
+		return ErrWedge
 	case StateIdle:
 		// proceed
 	default: // Unknown, AwaitingInput, AwaitingApproval, Errored
