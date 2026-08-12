@@ -203,6 +203,7 @@ var codexWorkingSpinner = regexp.MustCompile(`^[^\s›●\w]\s+Working\s+\([^)]*
 var (
 	codexRateLimitHeadingRE = regexp.MustCompile(`(?i)\bapproaching rate limits\b`)
 	codexRateLimitChoiceRE  = regexp.MustCompile(`(?im)^\s*(?:›\s*)?\d+\.\s+switch to gpt-[^\s]*mini\b`)
+	codexApprovalChoiceRE   = regexp.MustCompile(`^›\s+\d+\.\s+\S.*$`)
 )
 
 func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
@@ -225,8 +226,8 @@ func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
 
 // codexHasApprovalChrome requires two pieces of modal structure: an exact
 // approval status row and, within the next three rows, either the exact
-// auto-review action or a highlighted non-composer choice. An idle composer is
-// explicitly excluded from the latter, even though it shares the `›` glyph.
+// auto-review action or a numbered highlighted choice. The glyph alone is not
+// provenance: composers and quoted prose can begin with the same `›`.
 func codexHasApprovalChrome(captured string) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	for i, line := range lines {
@@ -238,9 +239,7 @@ func codexHasApprovalChrome(captured string) bool {
 			if action == "Approve for me" {
 				return true
 			}
-			if strings.HasPrefix(action, codexComposerPrompt) &&
-				strings.TrimSpace(strings.TrimPrefix(action, codexComposerPrompt)) != "" &&
-				!codexHasStructuredComposerAt(lines, j) {
+			if codexApprovalChoiceRE.MatchString(action) && !codexHasStructuredComposerAt(lines, j) {
 				return true
 			}
 		}

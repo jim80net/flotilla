@@ -159,8 +159,8 @@ func TestParseCodexState(t *testing.T) {
 func TestParseCodexStateRejectsUnvouchedWorkingMarker(t *testing.T) {
 	captured := "  The captured tail says “◦ Working (3s • esc to interrupt)” in quoted prose.\n" +
 		"  ordinary response output"
-	if got := parseCodexState(captured, -1, false); got == StateWorking {
-		t.Fatalf("parseCodexState = %v for an unvouched quoted marker, want not Working", got)
+	if got := parseCodexState(captured, -1, false); got != StateIdle {
+		t.Fatalf("parseCodexState = %v for an unvouched quoted marker, want Idle", got)
 	}
 }
 
@@ -180,6 +180,14 @@ func TestParseCodexStateRequiresApprovalChrome(t *testing.T) {
 		captured := "Would you like to run the following command?\n› 1. Yes, proceed (y)\nPress enter to confirm or esc to cancel"
 		if got := parseCodexState(captured, 1, true); got != StateAwaitingApproval {
 			t.Fatalf("parseCodexState = %v, want AwaitingApproval", got)
+		}
+	})
+	t.Run("approval status with glyph prose above idle composer is Idle", func(t *testing.T) {
+		captured := "Would you like to run the following command?\n" +
+			"› The report quotes a choice but this is prose\n" +
+			"› \n/ for commands"
+		if got := parseCodexState(captured, 2, true); got != StateIdle {
+			t.Fatalf("parseCodexState = %v, want Idle", got)
 		}
 	})
 }
@@ -202,8 +210,8 @@ func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
 		})
 	}
 	captured := "  ◦ Working (3s • esc to interrupt)\n  › Find and fix a bug in @filename"
-	if got := parseCodexState(captured, 0, true); got == StateWorking {
-		t.Fatalf("parseCodexState = %v when cursor vouches for another row, want not Working", got)
+	if got := parseCodexState(captured, 0, true); got != StateAwaitingInput {
+		t.Fatalf("parseCodexState = %v when cursor vouches for another row, want AwaitingInput", got)
 	}
 	for name, marker := range map[string]string{
 		"bare":                        "esc to interrupt",
