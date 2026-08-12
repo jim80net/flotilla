@@ -105,7 +105,7 @@ func recordDirectInboundTrack(cfg *roster.Config, rosterPath, sender, recipient,
 		fmt.Fprintf(os.Stderr, "flotilla: inbound track %q from %q failed: %v\n", recipient, sender, err)
 	}
 	if decision == inbound.TrackSkipped {
-		if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message); err != nil {
+		if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "flotilla: consume coordinator dispatch for %q failed: %v\n", recipient, err)
 		}
 	}

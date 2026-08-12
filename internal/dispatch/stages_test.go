@@ -34,7 +34,7 @@ func TestConsumeRecordsRecipientConsumedStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inserted, err := Consume(dir, ConsumedEntry{Nonce: "flotilla-dispatch-deadbeef", PayloadHash: PayloadHash(message), Sender: "sender", Recipient: "recipient"})
+	inserted, err := Consume(dir, ConsumedEntry{OutboxID: id, Nonce: "flotilla-dispatch-deadbeef", PayloadHash: PayloadHash(message), Sender: "sender", Recipient: "recipient"})
 	if err != nil || !inserted {
 		t.Fatalf("inserted=%v err=%v", inserted, err)
 	}
@@ -67,7 +67,7 @@ func TestRecipientConsumedBindsExactEdgeInEitherInsertionOrder(t *testing.T) {
 				}
 				ids[edge.sender] = id
 			}
-			inserted, err := Consume(dir, ConsumedEntry{Nonce: nonce, PayloadHash: PayloadHash(messageA),
+			inserted, err := Consume(dir, ConsumedEntry{OutboxID: ids["sender-a"], Nonce: nonce, PayloadHash: PayloadHash(messageA),
 				Sender: "sender-a", Recipient: "recipient-a", Reason: ReasonDurableAck})
 			if err != nil || !inserted {
 				t.Fatalf("inserted=%v err=%v", inserted, err)
@@ -86,6 +86,35 @@ func TestRecipientConsumedBindsExactEdgeInEitherInsertionOrder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRecipientConsumedBindsOutboxIDWithinIdenticalTuple(t *testing.T) {
+	dir := t.TempDir()
+	nonce := "flotilla-dispatch-deadbeef"
+	message := "identical-payload" + inbound.FormatDispatchFooter(nonce)
+	for _, id := range []string{"first", "second"} {
+		if err := outbox.RecordStage(dir, outbox.Entry{ID: id, Sender: "sender", Recipient: "recipient", Message: message},
+			outbox.StageSubmitted, "paste+enter confirmed", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := ConsumeFromInbound(nonce, message, ReasonDurableAck, "sender", "recipient", "first")
+	if inserted, err := Consume(dir, entry); err != nil || !inserted {
+		t.Fatalf("inserted=%v err=%v", inserted, err)
+	}
+	for _, id := range []string{"first", "second"} {
+		events, err := outbox.DeliveryStages(dir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		consumed := false
+		for _, event := range events {
+			consumed = consumed || event.Stage == outbox.StageRecipientConsumed
+		}
+		if want := id == "first"; consumed != want {
+			t.Fatalf("id=%s consumed=%v want=%v events=%+v", id, consumed, want, events)
+		}
 	}
 }
 
@@ -119,7 +148,7 @@ func TestRecipientConsumedStageSurvivesHotRegistryEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := NewRegistry(dir)
-	if inserted, err := reg.Consume(ConsumeFromInbound(nonce, message, ReasonDurableAck, "sender", "recipient")); err != nil || !inserted {
+	if inserted, err := reg.Consume(ConsumeFromInbound(nonce, message, ReasonDurableAck, "sender", "recipient", id)); err != nil || !inserted {
 		t.Fatalf("inserted=%v err=%v", inserted, err)
 	}
 	hot := consumedFile{Entries: make([]ConsumedEntry, maxConsumedEntries)}

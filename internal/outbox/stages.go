@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/inbound"
@@ -44,6 +45,26 @@ type stageFile struct {
 	Events  []StageEvent `json:"events"`
 }
 
+const refusalFlushInterval = time.Minute
+
+type refusalBatch struct {
+	lastFlush time.Time
+	pending   uint64
+	lastAt    time.Time
+	evidence  string
+}
+
+type stageWriteMetric struct {
+	writes uint64
+	bytes  uint64
+}
+
+var stageRuntime = struct {
+	sync.Mutex
+	refusals map[string]refusalBatch
+	writes   map[string]stageWriteMetric
+}{refusals: make(map[string]refusalBatch), writes: make(map[string]stageWriteMetric)}
+
 func stagesPath(rosterDir string) string {
 	return filepath.Join(rosterDir, "flotilla-delivery-stages.json")
 }
@@ -63,6 +84,17 @@ func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage Del
 		now = time.Now().UTC()
 	}
 	path := stagesPath(rosterDir)
+	batchKey := path + "\x00" + e.ID
+	refusalCount := uint64(1)
+	refusalLastAt := now.UTC()
+	if stage == StageAttemptedRefused {
+		var persist bool
+		refusalCount, refusalLastAt, evidence, persist = stageRefusalAttempt(batchKey, now.UTC(), evidence)
+		if !persist {
+			return nil
+		}
+	}
+	pendingCount, pendingLastAt, pendingEvidence := takePendingRefusals(batchKey, stage != StageAttemptedRefused)
 	lock, err := acquireFileLock(path, outboxLockTimeout)
 	if err != nil {
 		return err
@@ -77,6 +109,9 @@ func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage Del
 		return fmt.Errorf("outbox stage: read: %w", err)
 	}
 	f.Version = 1
+	if pendingCount > 0 {
+		mergeRefusalEvent(&f, e.ID, pendingCount, pendingLastAt, pendingEvidence)
+	}
 	if stage == StageAttemptedRefused {
 		for i := len(f.Events) - 1; i >= 0; i-- {
 			event := &f.Events[i]
@@ -86,16 +121,65 @@ func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage Del
 			if event.Count == 0 {
 				event.Count = 1
 			}
-			event.Count++
-			event.LastAt = now.UTC()
+			event.Count += refusalCount
+			event.LastAt = refusalLastAt
 			event.Evidence = evidence
 			return saveStageFile(rosterDir, path, f)
 		}
 	}
 	f.Events = append(f.Events, StageEvent{OutboxID: e.ID, Sender: e.Sender,
 		Recipient: e.Recipient, Nonce: nonce, PayloadHash: payloadHash,
-		Stage: stage, At: now.UTC(), LastAt: now.UTC(), Count: 1, Evidence: evidence})
+		Stage: stage, At: now.UTC(), LastAt: refusalLastAt, Count: refusalCount, Evidence: evidence})
 	return saveStageFile(rosterDir, path, f)
+}
+
+func stageRefusalAttempt(key string, now time.Time, evidence string) (uint64, time.Time, string, bool) {
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	state, ok := stageRuntime.refusals[key]
+	if !ok {
+		stageRuntime.refusals[key] = refusalBatch{lastFlush: now}
+		return 1, now, evidence, true
+	}
+	state.pending++
+	state.lastAt = now
+	state.evidence = evidence
+	if now.Sub(state.lastFlush) < refusalFlushInterval {
+		stageRuntime.refusals[key] = state
+		return 0, time.Time{}, "", false
+	}
+	count := state.pending
+	state.pending = 0
+	state.lastFlush = now
+	stageRuntime.refusals[key] = state
+	return count, now, evidence, true
+}
+
+func takePendingRefusals(key string, terminal bool) (uint64, time.Time, string) {
+	if !terminal {
+		return 0, time.Time{}, ""
+	}
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	state := stageRuntime.refusals[key]
+	delete(stageRuntime.refusals, key)
+	return state.pending, state.lastAt, state.evidence
+}
+
+func mergeRefusalEvent(f *stageFile, outboxID string, count uint64, lastAt time.Time, evidence string) {
+	for i := len(f.Events) - 1; i >= 0; i-- {
+		event := &f.Events[i]
+		if event.OutboxID != outboxID || event.Stage != StageAttemptedRefused {
+			continue
+		}
+		if event.Count == 0 {
+			event.Count = 1
+		}
+		event.Count += count
+		event.LastAt = lastAt
+		event.Evidence = evidence
+		return
+	}
 }
 
 func saveStageFile(rosterDir, path string, f stageFile) error {
@@ -124,7 +208,22 @@ func saveStageFile(rosterDir, path string, f stageFile) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	stageRuntime.Lock()
+	metric := stageRuntime.writes[path]
+	metric.writes++
+	metric.bytes += uint64(len(raw) + 1)
+	stageRuntime.writes[path] = metric
+	stageRuntime.Unlock()
+	return nil
+}
+
+func stageWriteMetrics(path string) stageWriteMetric {
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	return stageRuntime.writes[path]
 }
 
 func stagePayloadHash(message string) string {
@@ -166,8 +265,8 @@ func HasDeliveryStage(rosterDir, id string, stage DeliveryStage) (bool, error) {
 // RecordStageByEdge links recipient handling to the exact immutable outbound
 // edge. Nonce alone is intentionally insufficient because one dispatch may
 // traverse multiple sender/recipient edges.
-func RecordStageByEdge(rosterDir, sender, recipient, nonce, payloadHash string, stage DeliveryStage, evidence string, now time.Time) error {
-	if sender == "" || recipient == "" || nonce == "" || payloadHash == "" {
+func RecordStageByEdge(rosterDir, outboxID, sender, recipient, nonce, payloadHash string, stage DeliveryStage, evidence string, now time.Time) error {
+	if outboxID == "" || sender == "" || recipient == "" || nonce == "" || payloadHash == "" {
 		return nil
 	}
 	events, err := AllDeliveryStages(rosterDir)
@@ -176,7 +275,7 @@ func RecordStageByEdge(rosterDir, sender, recipient, nonce, payloadHash string, 
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		if event.Nonce != nonce || event.Sender != sender || event.Recipient != recipient || event.PayloadHash != payloadHash {
+		if event.OutboxID != outboxID || event.Nonce != nonce || event.Sender != sender || event.Recipient != recipient || event.PayloadHash != payloadHash {
 			continue
 		}
 		return recordStage(rosterDir, Entry{ID: event.OutboxID, Sender: event.Sender,

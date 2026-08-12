@@ -26,7 +26,7 @@ func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredica
 			log.Printf("flotilla watch: inbound track %q from %q failed: %v", j.Agent, j.Sender, err)
 		}
 		if decision == inbound.TrackSkipped {
-			if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, j.Sender, j.Agent, j.Message); err != nil {
+			if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID); err != nil {
 				log.Printf("flotilla watch: consume coordinator dispatch for %q failed: %v", j.Agent, err)
 			}
 		}
@@ -82,7 +82,7 @@ func DroppedDispatchFinishHookWithMerged(
 		// MERGED-state pre-filter (#616) — does not require turn-final text.
 		for _, e := range st.Load() {
 			if pr, merged := dispatch.ShouldSuppressMerged(e.Message, isMerged); merged {
-				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
+				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonMerged, e.Sender, e.Recipient, e.ID)); cerr != nil {
 					log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", e.Nonce, cerr)
 				} else {
 					log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=merged pr=%d", agent, e.Nonce, pr)
@@ -104,7 +104,7 @@ func DroppedDispatchFinishHookWithMerged(
 			if !hasQueuedDispatchAck(queuedOutbox, agent, e.Sender, e.Nonce) {
 				continue
 			}
-			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient)); cerr != nil {
+			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient, e.ID)); cerr != nil {
 				log.Printf("flotilla watch: dropped-dispatch consume queued-ack failed nonce=%s: %v", e.Nonce, cerr)
 				continue
 			}
@@ -131,7 +131,7 @@ func DroppedDispatchFinishHookWithMerged(
 					continue
 				}
 				if pr, merged := dispatch.ShouldSuppressMerged(a.Entry.Message, isMerged); merged {
-					if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(a.Entry.Nonce, a.Entry.Message, dispatch.ReasonMerged, a.Entry.Sender, a.Entry.Recipient)); cerr != nil {
+					if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(a.Entry.Nonce, a.Entry.Message, dispatch.ReasonMerged, a.Entry.Sender, a.Entry.Recipient, a.Entry.ID)); cerr != nil {
 						log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", a.Entry.Nonce, cerr)
 					} else {
 						log.Printf("flotilla watch: dropped-dispatch suppress reinject %s nonce=%s reason=merged pr=%d", agent, a.Entry.Nonce, pr)
@@ -168,7 +168,7 @@ func DroppedDispatchFinishHookWithMerged(
 			if !inbound.Acknowledged(text, e) {
 				continue
 			}
-			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonTurnFinalAck, e.Sender, e.Recipient)); cerr != nil {
+			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonTurnFinalAck, e.Sender, e.Recipient, e.ID)); cerr != nil {
 				log.Printf("flotilla watch: dropped-dispatch consume-ack failed nonce=%s: %v", e.Nonce, cerr)
 			}
 		}

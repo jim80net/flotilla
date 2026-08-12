@@ -54,12 +54,19 @@ func TestAttemptedRefusalsCoalesceToBoundedEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := RecordStage(dir, e, StageFailed, "terminal", start.Add(1000*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	events, err := DeliveryStages(dir, e.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].Count != 1000 || !events[0].At.Equal(start) || !events[0].LastAt.Equal(start.Add(999*time.Second)) {
+	if len(events) != 2 || events[0].Count != 1000 || !events[0].At.Equal(start) || !events[0].LastAt.Equal(start.Add(999*time.Second)) {
 		t.Fatalf("coalesced events=%+v", events)
+	}
+	metric := stageWriteMetrics(stagesPath(dir))
+	if metric.writes > 18 || metric.bytes > 18*4096 {
+		t.Fatalf("write work not bounded: writes=%d bytes=%d", metric.writes, metric.bytes)
 	}
 	info, err := os.Stat(stagesPath(dir))
 	if err != nil {

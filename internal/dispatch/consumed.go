@@ -37,6 +37,7 @@ const maxConsumedEntries = 2048
 // Keyed by Nonce when present; PayloadHash disambiguates same-nonce collisions
 // and supports hash-only lookup when a message lacked a nonce stamp.
 type ConsumedEntry struct {
+	OutboxID    string    `json:"outbox_id,omitempty"`
 	Nonce       string    `json:"nonce,omitempty"`
 	PayloadHash string    `json:"payload_hash"`
 	ConsumedAt  time.Time `json:"consumed_at"`
@@ -206,7 +207,7 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		return r.save(f)
 	})
 	if err == nil && inserted && e.Nonce != "" {
-		if stageErr := outbox.RecordStageByEdge(filepath.Dir(r.path), e.Sender, e.Recipient, e.Nonce, e.PayloadHash,
+		if stageErr := outbox.RecordStageByEdge(filepath.Dir(r.path), e.OutboxID, e.Sender, e.Recipient, e.Nonce, e.PayloadHash,
 			outbox.StageRecipientConsumed, e.Reason, e.ConsumedAt); stageErr != nil {
 			log.Printf("flotilla dispatch: record consumed delivery stage failed: %v", stageErr)
 		}
@@ -265,12 +266,17 @@ func IsConsumed(rosterDir, nonce, payloadHash string) bool {
 // coordinator-directed report that merely QUOTES another dispatch's nonce in
 // prose settles nothing — consuming a quoted nonce would silently disable the
 // reinject / escalation supervision of the desk that dispatch actually targets.
-func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string) (inserted bool, err error) {
+func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string, outboxIDs ...string) (inserted bool, err error) {
 	nonce := inbound.ParseOwnDispatchNonce(message)
 	if nonce == "" {
 		return false, nil
 	}
+	outboxID := ""
+	if len(outboxIDs) > 0 {
+		outboxID = outboxIDs[0]
+	}
 	return Consume(rosterDir, ConsumedEntry{
+		OutboxID:    outboxID,
 		Nonce:       nonce,
 		PayloadHash: PayloadHash(message),
 		Reason:      ReasonCoordinatorRecipient,
@@ -280,8 +286,13 @@ func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string) (
 }
 
 // ConsumeFromInbound builds a ConsumedEntry from an inbound pending dispatch.
-func ConsumeFromInbound(nonce, message, reason, sender, recipient string) ConsumedEntry {
+func ConsumeFromInbound(nonce, message, reason, sender, recipient string, outboxIDs ...string) ConsumedEntry {
+	outboxID := ""
+	if len(outboxIDs) > 0 {
+		outboxID = outboxIDs[0]
+	}
 	return ConsumedEntry{
+		OutboxID:    outboxID,
 		Nonce:       nonce,
 		PayloadHash: PayloadHash(message),
 		ConsumedAt:  time.Now().UTC(),
