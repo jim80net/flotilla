@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -179,6 +180,41 @@ func TestClaudeAssessStructuralInterruptStatusExactStates(t *testing.T) {
 	c.cursorState = func(string) (int, bool, error) { return 1, false, nil }
 	if got := c.Assess("0:0.0"); got != StateIdle {
 		t.Fatalf("quoted interrupt-status prose Assess = %v, want Idle", got)
+	}
+}
+
+func TestClaudeAssessGenuineNBSPComposerFixture(t *testing.T) {
+	fixture, err := os.ReadFile("../deliver/testdata/working-cos.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(fixture), "\n"), "\n")
+	if got, want := len(lines), 63; got != want {
+		t.Fatalf("working-cos.txt rows = %d, want %d", got, want)
+	}
+	if got, want := lines[51], "✢ Diagnosing the fleet delivery blockage… (18m 1s · ↓ 18.6k tokens)"; got != want {
+		t.Fatalf("spinner row = %q, want %q", got, want)
+	}
+	if got, want := lines[60], "❯\u00a0"; got != want {
+		t.Fatalf("composer row bytes = % x, want % x", []byte(got), []byte(want))
+	}
+	if got, want := lines[62], "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents"; got != want {
+		t.Fatalf("status row = %q, want %q", got, want)
+	}
+	const cursorY = 60
+	if got := deliver.ParseBusyAt(string(fixture), cursorY); !got {
+		t.Fatalf("ParseBusyAt(genuine fixture, %d) = %v, want true", cursorY, got)
+	}
+
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return string(fixture), nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return cursorY, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateWorking {
+		t.Fatalf("Assess(genuine fixture) = %v, want exact state %v", got, StateWorking)
 	}
 }
 

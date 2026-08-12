@@ -51,7 +51,7 @@ var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯●\w]\s+[^\s\x{2026}]+\x
 // claudeComposer identifies the live Claude Code composer row. ParseBusy uses
 // its position as render provenance: only the status row immediately above the
 // composer can describe the current turn.
-var claudeComposer = regexp.MustCompile(`^[ \t]*❯(?:[ \t]|$)`)
+var claudeComposer = regexp.MustCompile(`^[ \t\x{00a0}]*❯(?:[ \t\x{00a0}]|$)`)
 
 // claudeInterruptStatus matches the live Claude status-bar render observed on
 // an interruptible turn. It is anchored to the complete row and is considered
