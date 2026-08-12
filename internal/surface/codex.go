@@ -180,10 +180,12 @@ var codexApprovalMarkers = []string{
 }
 
 // Working-turn chrome (binary-sourced footer/status — revalidate post-auth).
-var codexWorkingMarkers = []string{
-	"while a task is in progress",     // disabled-action suffix
-	"Waiting for background terminal", // background exec in-turn
-	"a turn is running",               // mode-switch guard
+// These are complete rendered rows, not substrings: prose that quotes or starts
+// with one of the rows has no status provenance.
+var codexWorkingStatusLines = map[string]struct{}{
+	"Ctrl+L is disabled while a task is in progress.":  {},
+	"Waiting for background terminal":                  {},
+	"Mode switch is disabled while a turn is running.": {},
 }
 
 // codexWorkingSpinner is the LIVE-CAPTURED Codex status row. Anchoring the
@@ -228,7 +230,7 @@ func codexHasWorkingMarkerAtComposer(captured string, cursorY int) bool {
 	if cursorY <= 0 || cursorY >= len(lines) {
 		return false
 	}
-	if !strings.HasPrefix(trimSpace(lines[cursorY]), codexComposerPrompt) {
+	if !codexHasStructuredComposerAt(lines, cursorY) {
 		return false
 	}
 	return codexIsWorkingStatusLine(lines[cursorY-1])
@@ -239,16 +241,8 @@ func codexIsWorkingStatusLine(line string) bool {
 	if codexWorkingSpinner.MatchString(line) {
 		return true
 	}
-	if strings.HasPrefix(line, "Waiting for background terminal") {
-		return true
-	}
-	line = strings.TrimSuffix(line, ".")
-	for _, marker := range codexWorkingMarkers {
-		if strings.HasSuffix(line, marker) && strings.Contains(line, " is disabled ") {
-			return true
-		}
-	}
-	return false
+	_, ok := codexWorkingStatusLines[line]
+	return ok
 }
 
 func codexOverlayName(captured string) string {
@@ -445,17 +439,38 @@ func codexHasIdleComposerFooter(lines []string, promptRow int) bool {
 	return false
 }
 
+// codexHasStructuredComposerAt is the single composer identity predicate used
+// by both working-marker provenance and selector exclusion. A leading `›` is
+// insufficient because highlighted selector rows use the same glyph; the idle
+// footer supplies the structural distinction.
+func codexHasStructuredComposerAt(lines []string, promptRow int) bool {
+	if promptRow < 0 || promptRow >= len(lines) {
+		return false
+	}
+	if !strings.HasPrefix(trimSpace(lines[promptRow]), codexComposerPrompt) {
+		return false
+	}
+	return codexHasIdleComposerFooter(lines, promptRow)
+}
+
 func codexHasNonComposerSelector(captured string) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	highlighted := false
 	for i, line := range lines {
-		if !strings.HasPrefix(trimSpace(line), codexComposerPrompt) {
+		trimmed := trimSpace(line)
+		if !strings.HasPrefix(trimmed, codexComposerPrompt) {
+			continue
+		}
+		if codexHasStructuredComposerAt(lines, i) {
+			return false
+		}
+		// A cropped bare composer has no selector content. Treating it as a
+		// highlighted option would turn quoted response prose above it into a
+		// false AwaitingInput state.
+		if strings.TrimSpace(strings.TrimPrefix(trimmed, codexComposerPrompt)) == "" {
 			continue
 		}
 		highlighted = true
-		if codexHasIdleComposerFooter(lines, i) {
-			return false
-		}
 	}
 	return highlighted
 }

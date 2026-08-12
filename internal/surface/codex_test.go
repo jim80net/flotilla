@@ -172,7 +172,7 @@ func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
 		"disabled during live turn": "Mode switch is disabled while a turn is running.",
 	} {
 		t.Run(name+" at live composer is Working", func(t *testing.T) {
-			captured := status + "\n› "
+			captured := status + "\n› \n/ for commands"
 			if got := parseCodexState(captured, 1, true); got != StateWorking {
 				t.Fatalf("parseCodexState = %v for marker at cursor-vouched composer, want Working", got)
 			}
@@ -183,15 +183,33 @@ func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
 		t.Fatalf("parseCodexState = %v when cursor vouches for another row, want not Working", got)
 	}
 	for name, marker := range map[string]string{
-		"bare":   "esc to interrupt",
-		"quoted": "response text quotes “◦ Working (3s • esc to interrupt)”",
+		"bare":                        "esc to interrupt",
+		"quoted spinner":              "The report quotes ◦ Working (3s • esc to interrupt)",
+		"quoted disabled task action": "Documentation says Ctrl+L is disabled while a task is in progress.",
+		"background wait prose":       "Waiting for background terminal is a phrase in the documentation",
+		"quoted disabled live turn":   "Documentation says Mode switch is disabled while a turn is running.",
 	} {
-		t.Run(name+" marker beside composer is not chrome", func(t *testing.T) {
-			if got := parseCodexState(marker+"\n› ", 1, true); got == StateWorking {
-				t.Fatalf("parseCodexState = %v for %s marker, want not Working", got, name)
+		t.Run(name+" marker beside structured composer is Idle", func(t *testing.T) {
+			if got := parseCodexState(marker+"\n› \n/ for commands", 1, true); got != StateIdle {
+				t.Fatalf("parseCodexState = %v for %s marker, want Idle", got, name)
 			}
 		})
 	}
+}
+
+func TestParseCodexStateDistinguishesComposerFromSelector(t *testing.T) {
+	t.Run("exact quoted adjacency at cropped composer is Idle", func(t *testing.T) {
+		captured := "The report quotes esc to interrupt\n› "
+		if got := parseCodexState(captured, 1, true); got != StateIdle {
+			t.Fatalf("parseCodexState = %v, want Idle", got)
+		}
+	})
+	t.Run("working status above selector is AwaitingInput", func(t *testing.T) {
+		captured := "◦ Working (1s • esc to interrupt)\n› 2. Switch to gpt-5.4-mini\nEnter to select · Esc to cancel"
+		if got := parseCodexState(captured, 1, true); got != StateAwaitingInput {
+			t.Fatalf("parseCodexState = %v, want AwaitingInput", got)
+		}
+	})
 }
 
 func TestCodexAssess(t *testing.T) {
@@ -212,9 +230,9 @@ func TestCodexAssess(t *testing.T) {
 		{"isShell → shell", "bash", nil, true, "", nil, 0, false, nil, StateShell},
 		{"capture error → unknown", "codex", nil, false, "", boom, 0, false, nil, StateUnknown},
 		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, 0, false, nil, StateAwaitingInput},
-		{"classifier routes: working", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, false, nil, StateWorking},
-		{"copy mode rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, true, nil, StateAwaitingInput},
-		{"cursor error rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› ", nil, 1, false, boom, StateAwaitingInput},
+		{"classifier routes: working", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› \n/ for commands", nil, 1, false, nil, StateWorking},
+		{"copy mode rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› \n/ for commands", nil, 1, true, nil, StateIdle},
+		{"cursor error rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› \n/ for commands", nil, 1, false, boom, StateIdle},
 		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, 0, false, nil, StateIdle},
 	}
 	for _, tc := range cases {
