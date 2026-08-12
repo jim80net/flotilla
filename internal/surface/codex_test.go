@@ -165,11 +165,14 @@ func TestParseCodexStateRejectsUnvouchedWorkingMarker(t *testing.T) {
 }
 
 func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
+	// The turn-running row below is BINARY-SOURCED—UNVERIFIED: no raw Codex
+	// capture of that status was available as of 2026-08-12. Keep the fixture's
+	// provenance explicit until a real capture can confirm or replace it.
 	for name, status := range map[string]string{
-		"live spinner":              "◦ Working (3s • esc to interrupt)",
-		"disabled task action":      "Ctrl+L is disabled while a task is in progress.",
-		"background terminal wait":  "Waiting for background terminal",
-		"disabled during live turn": "Mode switch is disabled while a turn is running.",
+		"live spinner":             "◦ Working (3s • esc to interrupt)",
+		"disabled task action":     "Ctrl+L is disabled while a task is in progress.",
+		"background terminal wait": "Waiting for background terminal",
+		"disabled during live turn (binary-sourced, unverified)": "Mode switch is disabled while a turn is running.",
 	} {
 		t.Run(name+" at live composer is Working", func(t *testing.T) {
 			captured := status + "\n› \n/ for commands"
