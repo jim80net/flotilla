@@ -159,6 +159,29 @@ func TestClaudeAssessHistoricalSpinnerPromptPairIsNotWorking(t *testing.T) {
 	}
 }
 
+func TestClaudeAssessStructuralInterruptStatusExactStates(t *testing.T) {
+	working := "✻ Deliberating… (3m 14s · thinking)\none\ntwo\nthree\nfour\nfive\nsix\nseven\n" +
+		"──────────────────────── cos ──\n❯ \n──────────────────────────────\n" +
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents"
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return working, nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return 9, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateWorking {
+		t.Fatalf("structural interrupt status Assess = %v, want Working", got)
+	}
+
+	quoted := "● The report quotes ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents\n❯ "
+	c.capturePane = func(string) (string, error) { return quoted, nil }
+	c.cursorState = func(string) (int, bool, error) { return 1, false, nil }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("quoted interrupt-status prose Assess = %v, want Idle", got)
+	}
+}
+
 func TestClaudeSubmitAndRotateRoute(t *testing.T) {
 	var submitted, rotated bool
 	c := claudeCode{

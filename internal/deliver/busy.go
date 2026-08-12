@@ -53,6 +53,12 @@ var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯●\w]\s+[^\s\x{2026}]+\x
 // composer can describe the current turn.
 var claudeComposer = regexp.MustCompile(`^[ \t]*❯(?:[ \t]|$)`)
 
+// claudeInterruptStatus matches the live Claude status-bar render observed on
+// an interruptible turn. It is anchored to the complete row and is considered
+// only below the cursor-vouched composer; prose elsewhere that merely quotes
+// "esc to interrupt" is not status chrome.
+var claudeInterruptStatus = regexp.MustCompile(`^[ \t]*⏵⏵ auto mode on \(shift\+tab to cycle\) · esc to interrupt(?: · [^·\r\n]+)*[ \t]*$`)
+
 // CapturePane returns the visible contents of a tmux pane (`capture-pane -p`).
 // Shared by busy-detection and the heartbeat's pane-activity fingerprint.
 func CapturePane(target string) (string, error) {
@@ -144,5 +150,13 @@ func ParseBusyAt(captured string, cursorY int) bool {
 	if cursorY <= 0 || cursorY >= len(lines) || !claudeComposer.MatchString(lines[cursorY]) {
 		return false
 	}
-	return workingSpinner.MatchString(lines[cursorY-1])
+	if workingSpinner.MatchString(lines[cursorY-1]) {
+		return true
+	}
+	for _, line := range lines[cursorY+1:] {
+		if claudeInterruptStatus.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }

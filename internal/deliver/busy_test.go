@@ -101,3 +101,24 @@ func TestParseBusyAtUsesCursorProvenance(t *testing.T) {
 		t.Fatal("live cursor composer with adjacent spinner did not classify busy")
 	}
 }
+
+func TestParseBusyAtUsesStructuralInterruptStatus(t *testing.T) {
+	// Minimalized from working-cos.txt (SHA-256
+	// dec1ad1079dcd6ec8ae6d7548b9f3338c92c58168501cf2725c9aac47456f722):
+	// the live spinner is eight rows above the cursor composer, while the
+	// interruptible status bar is two rows below it.
+	captured := "✻ Deliberating… (3m 14s · thinking)\n" +
+		"one\ntwo\nthree\nfour\nfive\nsix\nseven\n" +
+		"──────────────────────── cos ──\n" +
+		"❯ \n" +
+		"──────────────────────────────\n" +
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents"
+	if got := ParseBusyAt(captured, 9); !got {
+		t.Fatalf("ParseBusyAt = %v for cursor-vouched composer with structural interrupt status, want true", got)
+	}
+
+	quoted := "● The report quotes ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents\n❯ "
+	if got := ParseBusyAt(quoted, 1); got {
+		t.Fatalf("ParseBusyAt = %v for quoted interrupt-status prose, want false", got)
+	}
+}
