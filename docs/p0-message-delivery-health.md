@@ -29,7 +29,10 @@ retains first/last timestamps, latest evidence, and a count, so a five-second
 retry cannot grow and rewrite an ever-larger file. Refusal persistence is
 interval-gated to at most once per minute per outbox identity and any pending
 count is flushed with the terminal transition; the hot retry path therefore
-does not rewrite the global ledger on every poll.
+does not rewrite the global ledger on every poll. Flushes are write-then-clear:
+pending counts remain reserved until the durable rename succeeds, and any
+lock/read/write/fsync/rename failure restores the reservation so the next retry
+cannot mistake unpersisted evidence for a recorded attempt.
 
 ## Evidence and fixture provenance
 

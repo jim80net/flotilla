@@ -50,8 +50,17 @@ const refusalFlushInterval = time.Minute
 type refusalBatch struct {
 	lastFlush time.Time
 	pending   uint64
+	firstAt   time.Time
 	lastAt    time.Time
 	evidence  string
+	flushing  bool
+}
+
+type refusalSnapshot struct {
+	count    uint64
+	firstAt  time.Time
+	lastAt   time.Time
+	evidence string
 }
 
 type stageWriteMetric struct {
@@ -63,7 +72,13 @@ var stageRuntime = struct {
 	sync.Mutex
 	refusals map[string]refusalBatch
 	writes   map[string]stageWriteMetric
-}{refusals: make(map[string]refusalBatch), writes: make(map[string]stageWriteMetric)}
+	failures map[string][]stageInjectedFailure
+}{refusals: make(map[string]refusalBatch), writes: make(map[string]stageWriteMetric), failures: make(map[string][]stageInjectedFailure)}
+
+type stageInjectedFailure struct {
+	phase string
+	err   error
+}
 
 func stagesPath(rosterDir string) string {
 	return filepath.Join(rosterDir, "flotilla-delivery-stages.json")
@@ -85,32 +100,47 @@ func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage Del
 	}
 	path := stagesPath(rosterDir)
 	batchKey := path + "\x00" + e.ID
-	refusalCount := uint64(1)
-	refusalLastAt := now.UTC()
+	var snapshot refusalSnapshot
 	if stage == StageAttemptedRefused {
 		var persist bool
-		refusalCount, refusalLastAt, evidence, persist = stageRefusalAttempt(batchKey, now.UTC(), evidence)
+		var err error
+		snapshot, persist, err = prepareRefusalFlush(batchKey, now.UTC(), evidence)
+		if err != nil {
+			return err
+		}
 		if !persist {
 			return nil
 		}
+	} else {
+		var err error
+		snapshot, err = prepareTerminalFlush(batchKey)
+		if err != nil {
+			return err
+		}
 	}
-	pendingCount, pendingLastAt, pendingEvidence := takePendingRefusals(batchKey, stage != StageAttemptedRefused)
+	if err := takeStageFailure(path, "lock"); err != nil {
+		rollbackRefusalFlush(batchKey, snapshot)
+		return err
+	}
 	lock, err := acquireFileLock(path, outboxLockTimeout)
 	if err != nil {
+		rollbackRefusalFlush(batchKey, snapshot)
 		return err
 	}
 	defer lock.release()
 	f := stageFile{Version: 1}
 	if raw, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(raw, &f); err != nil {
+			rollbackRefusalFlush(batchKey, snapshot)
 			return fmt.Errorf("outbox stage: corrupt ledger: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
+		rollbackRefusalFlush(batchKey, snapshot)
 		return fmt.Errorf("outbox stage: read: %w", err)
 	}
 	f.Version = 1
-	if pendingCount > 0 {
-		mergeRefusalEvent(&f, e.ID, pendingCount, pendingLastAt, pendingEvidence)
+	if stage != StageAttemptedRefused && snapshot.count > 0 {
+		mergeRefusalEvent(&f, e.ID, snapshot.count, snapshot.lastAt, snapshot.evidence)
 	}
 	if stage == StageAttemptedRefused {
 		for i := len(f.Events) - 1; i >= 0; i-- {
@@ -121,49 +151,100 @@ func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage Del
 			if event.Count == 0 {
 				event.Count = 1
 			}
-			event.Count += refusalCount
-			event.LastAt = refusalLastAt
-			event.Evidence = evidence
-			return saveStageFile(rosterDir, path, f)
+			event.Count += snapshot.count
+			event.LastAt = snapshot.lastAt
+			event.Evidence = snapshot.evidence
+			err := saveStageFile(rosterDir, path, f)
+			finishRefusalFlush(batchKey, snapshot, err, false)
+			return err
 		}
+	}
+	count, at, lastAt := uint64(1), now.UTC(), now.UTC()
+	if stage == StageAttemptedRefused {
+		count, at, lastAt, evidence = snapshot.count, snapshot.firstAt, snapshot.lastAt, snapshot.evidence
 	}
 	f.Events = append(f.Events, StageEvent{OutboxID: e.ID, Sender: e.Sender,
 		Recipient: e.Recipient, Nonce: nonce, PayloadHash: payloadHash,
-		Stage: stage, At: now.UTC(), LastAt: refusalLastAt, Count: refusalCount, Evidence: evidence})
-	return saveStageFile(rosterDir, path, f)
+		Stage: stage, At: at, LastAt: lastAt, Count: count, Evidence: evidence})
+	err = saveStageFile(rosterDir, path, f)
+	finishRefusalFlush(batchKey, snapshot, err, stage != StageAttemptedRefused)
+	return err
 }
 
-func stageRefusalAttempt(key string, now time.Time, evidence string) (uint64, time.Time, string, bool) {
+func prepareRefusalFlush(key string, now time.Time, evidence string) (refusalSnapshot, bool, error) {
 	stageRuntime.Lock()
 	defer stageRuntime.Unlock()
-	state, ok := stageRuntime.refusals[key]
-	if !ok {
-		stageRuntime.refusals[key] = refusalBatch{lastFlush: now}
-		return 1, now, evidence, true
+	state := stageRuntime.refusals[key]
+	if state.pending == 0 {
+		state.firstAt = now
 	}
 	state.pending++
 	state.lastAt = now
 	state.evidence = evidence
-	if now.Sub(state.lastFlush) < refusalFlushInterval {
+	if state.flushing {
 		stageRuntime.refusals[key] = state
-		return 0, time.Time{}, "", false
+		return refusalSnapshot{}, false, fmt.Errorf("outbox stage: refusal persistence already in flight")
 	}
-	count := state.pending
-	state.pending = 0
-	state.lastFlush = now
+	if !state.lastFlush.IsZero() && now.Sub(state.lastFlush) < refusalFlushInterval {
+		stageRuntime.refusals[key] = state
+		return refusalSnapshot{}, false, nil
+	}
+	snapshot := refusalSnapshot{count: state.pending, firstAt: state.firstAt, lastAt: state.lastAt, evidence: state.evidence}
+	state.flushing = true
 	stageRuntime.refusals[key] = state
-	return count, now, evidence, true
+	return snapshot, true, nil
 }
 
-func takePendingRefusals(key string, terminal bool) (uint64, time.Time, string) {
-	if !terminal {
-		return 0, time.Time{}, ""
+func prepareTerminalFlush(key string) (refusalSnapshot, error) {
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	state := stageRuntime.refusals[key]
+	if state.flushing {
+		return refusalSnapshot{}, fmt.Errorf("outbox stage: refusal persistence already in flight")
+	}
+	if state.pending == 0 {
+		return refusalSnapshot{}, nil
+	}
+	snapshot := refusalSnapshot{count: state.pending, firstAt: state.firstAt, lastAt: state.lastAt, evidence: state.evidence}
+	state.flushing = true
+	stageRuntime.refusals[key] = state
+	return snapshot, nil
+}
+
+func finishRefusalFlush(key string, snapshot refusalSnapshot, writeErr error, terminal bool) {
+	if writeErr != nil {
+		rollbackRefusalFlush(key, snapshot)
+		return
 	}
 	stageRuntime.Lock()
 	defer stageRuntime.Unlock()
 	state := stageRuntime.refusals[key]
-	delete(stageRuntime.refusals, key)
-	return state.pending, state.lastAt, state.evidence
+	if terminal {
+		delete(stageRuntime.refusals, key)
+		return
+	}
+	if state.pending >= snapshot.count {
+		state.pending -= snapshot.count
+	}
+	state.flushing = false
+	state.lastFlush = snapshot.lastAt
+	if state.pending == 0 {
+		state.firstAt = time.Time{}
+		state.lastAt = time.Time{}
+		state.evidence = ""
+	}
+	stageRuntime.refusals[key] = state
+}
+
+func rollbackRefusalFlush(key string, snapshot refusalSnapshot) {
+	if snapshot.count == 0 {
+		return
+	}
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	state := stageRuntime.refusals[key]
+	state.flushing = false
+	stageRuntime.refusals[key] = state
 }
 
 func mergeRefusalEvent(f *stageFile, outboxID string, count uint64, lastAt time.Time, evidence string) {
@@ -197,6 +278,10 @@ func saveStageFile(rosterDir, path string, f stageFile) error {
 		tmp.Close()
 		return err
 	}
+	if err := takeStageFailure(path, "write"); err != nil {
+		tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(append(raw, '\n')); err != nil {
 		tmp.Close()
 		return err
@@ -206,6 +291,9 @@ func saveStageFile(rosterDir, path string, f stageFile) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := takeStageFailure(path, "rename"); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {
@@ -224,6 +312,26 @@ func stageWriteMetrics(path string) stageWriteMetric {
 	stageRuntime.Lock()
 	defer stageRuntime.Unlock()
 	return stageRuntime.writes[path]
+}
+
+func injectStageFailure(path, phase string, err error) {
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	stageRuntime.failures[path] = append(stageRuntime.failures[path], stageInjectedFailure{phase: phase, err: err})
+}
+
+func takeStageFailure(path, phase string) error {
+	stageRuntime.Lock()
+	defer stageRuntime.Unlock()
+	failures := stageRuntime.failures[path]
+	for i, failure := range failures {
+		if failure.phase != phase {
+			continue
+		}
+		stageRuntime.failures[path] = append(failures[:i], failures[i+1:]...)
+		return failure.err
+	}
+	return nil
 }
 
 func stagePayloadHash(message string) string {

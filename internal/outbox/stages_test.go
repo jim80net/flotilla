@@ -77,6 +77,63 @@ func TestAttemptedRefusalsCoalesceToBoundedEvidence(t *testing.T) {
 	}
 }
 
+func TestRefusalBatchRestoresAfterInitialPersistenceFailure(t *testing.T) {
+	for _, phase := range []string{"lock", "write", "rename"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			path := stagesPath(dir)
+			e := Entry{ID: "wedged", Sender: "a", Recipient: "b", Message: "body"}
+			start := time.Unix(10, 0).UTC()
+			injectStageFailure(path, phase, errors.New("injected "+phase+" failure"))
+			if err := RecordStage(dir, e, StageAttemptedRefused, "first", start); err == nil {
+				t.Fatal("injected first persistence unexpectedly succeeded")
+			}
+			if err := RecordStage(dir, e, StageAttemptedRefused, "second", start.Add(time.Second)); err != nil {
+				t.Fatalf("retry persistence: %v", err)
+			}
+			if err := RecordStage(dir, e, StageFailed, "terminal", start.Add(2*time.Second)); err != nil {
+				t.Fatalf("terminal persistence: %v", err)
+			}
+			assertRefusalTimeline(t, dir, e.ID, 2, start, start.Add(time.Second))
+		})
+	}
+}
+
+func TestRefusalBatchRestoresAfterTerminalPersistenceFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := stagesPath(dir)
+	e := Entry{ID: "wedged", Sender: "a", Recipient: "b", Message: "body"}
+	start := time.Unix(20, 0).UTC()
+	if err := RecordStage(dir, e, StageAttemptedRefused, "first", start); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordStage(dir, e, StageAttemptedRefused, "second", start.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	injectStageFailure(path, "rename", errors.New("injected terminal rename failure"))
+	if err := RecordStage(dir, e, StageFailed, "terminal", start.Add(2*time.Second)); err == nil {
+		t.Fatal("injected terminal persistence unexpectedly succeeded")
+	}
+	if err := RecordStage(dir, e, StageFailed, "terminal", start.Add(3*time.Second)); err != nil {
+		t.Fatalf("terminal retry: %v", err)
+	}
+	assertRefusalTimeline(t, dir, e.ID, 2, start, start.Add(time.Second))
+}
+
+func assertRefusalTimeline(t *testing.T, dir, id string, count uint64, first, last time.Time) {
+	t.Helper()
+	events, err := DeliveryStages(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Stage != StageAttemptedRefused || events[1].Stage != StageFailed {
+		t.Fatalf("timeline=%+v", events)
+	}
+	if events[0].Count != count || !events[0].At.Equal(first) || !events[0].LastAt.Equal(last) {
+		t.Fatalf("refusal=%+v want count=%d first=%s last=%s", events[0], count, first, last)
+	}
+}
+
 func TestSubmittedMeansTransportNotHandled(t *testing.T) {
 	dir := t.TempDir()
 	e := Entry{ID: "id", Sender: "a", Recipient: "b", Message: "body"}
