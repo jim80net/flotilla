@@ -166,17 +166,19 @@ const (
 )
 
 // Approval modal chrome — on-request permission prompt LIVE-CAPTURED 2026-07-03; auto-review
-// strings binary-sourced 0.142.5 (not elicited live this session).
-var codexApprovalMarkers = []string{
-	"Would you like to run the following command?", // LIVE 2026-07-03 on-request shell approval
-	"Would you like to make the following edits?",  // binary 0.142.5 (edit approval sibling)
-	"[ ! ] Action Required",
-	"[ . ] Action Required",
-	"Approve for me",
-	"main needs approval",
-	"main needs input",
-	"parent needs approval",
-	"Choose how you'd like Codex to proceed",
+// strings binary-sourced 0.142.5 (not elicited live this session). These are
+// exact rendered rows; approval provenance additionally requires a neighboring
+// modal action row, so prose quoting one of these strings cannot block delivery.
+var codexApprovalStatusLines = map[string]struct{}{
+	"Would you like to run the following command?": {}, // LIVE 2026-07-03 on-request shell approval
+	"Would you like to make the following edits?":  {}, // binary 0.142.5 (edit approval sibling)
+	"[ ! ] Action Required":                        {},
+	"[ . ] Action Required":                        {},
+	"Approve for me":                               {},
+	"main needs approval":                          {},
+	"main needs input":                             {},
+	"parent needs approval":                        {},
+	"Choose how you'd like Codex to proceed":       {},
 }
 
 // Working-turn chrome (binary-sourced footer/status — revalidate post-auth).
@@ -209,7 +211,7 @@ func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
 		return StateAwaitingInput
 	}
 	tail := strings.Join(lastNNonEmptyLines(captured, codexTail), "\n")
-	if containsAny(tail, codexApprovalMarkers) {
+	if codexHasApprovalChrome(tail) {
 		return StateAwaitingApproval
 	}
 	if cursorVouched && codexHasWorkingMarkerAtComposer(captured, cursorY) {
@@ -219,6 +221,31 @@ func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
 		return StateAwaitingInput
 	}
 	return StateIdle
+}
+
+// codexHasApprovalChrome requires two pieces of modal structure: an exact
+// approval status row and, within the next three rows, either the exact
+// auto-review action or a highlighted non-composer choice. An idle composer is
+// explicitly excluded from the latter, even though it shares the `›` glyph.
+func codexHasApprovalChrome(captured string) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	for i, line := range lines {
+		if _, ok := codexApprovalStatusLines[strings.TrimSpace(line)]; !ok {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+3; j++ {
+			action := trimSpace(lines[j])
+			if action == "Approve for me" {
+				return true
+			}
+			if strings.HasPrefix(action, codexComposerPrompt) &&
+				strings.TrimSpace(strings.TrimPrefix(action, codexComposerPrompt)) != "" &&
+				!codexHasStructuredComposerAt(lines, j) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // codexHasWorkingMarkerAtComposer binds working chrome to the live terminal

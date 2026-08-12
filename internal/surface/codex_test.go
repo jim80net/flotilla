@@ -59,7 +59,7 @@ func TestParseCodexState(t *testing.T) {
 		},
 		{
 			name:     "main needs approval status → AwaitingApproval",
-			captured: "  review started: main needs input\n  Approve for me\n  /status",
+			captured: "  main needs input\n  Approve for me\n  /status",
 			want:     StateAwaitingApproval,
 		},
 		{
@@ -162,6 +162,26 @@ func TestParseCodexStateRejectsUnvouchedWorkingMarker(t *testing.T) {
 	if got := parseCodexState(captured, -1, false); got == StateWorking {
 		t.Fatalf("parseCodexState = %v for an unvouched quoted marker, want not Working", got)
 	}
+}
+
+func TestParseCodexStateRequiresApprovalChrome(t *testing.T) {
+	for name, prose := range map[string]string{
+		"marker embedded in prose":          "The report quotes Would you like to run the following command? in prose.",
+		"exact marker without modal action": "Would you like to run the following command?",
+	} {
+		t.Run(name+" above idle composer is Idle", func(t *testing.T) {
+			captured := prose + "\n› \n/ for commands"
+			if got := parseCodexState(captured, 1, true); got != StateIdle {
+				t.Fatalf("parseCodexState = %v, want Idle", got)
+			}
+		})
+	}
+	t.Run("genuine approval modal is AwaitingApproval", func(t *testing.T) {
+		captured := "Would you like to run the following command?\n› 1. Yes, proceed (y)\nPress enter to confirm or esc to cancel"
+		if got := parseCodexState(captured, 1, true); got != StateAwaitingApproval {
+			t.Fatalf("parseCodexState = %v, want AwaitingApproval", got)
+		}
+	})
 }
 
 func TestParseCodexStateRequiresWorkingMarkerAtCursorComposer(t *testing.T) {
