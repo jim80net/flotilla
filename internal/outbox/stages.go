@@ -1,6 +1,8 @@
 package outbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,13 +27,16 @@ const (
 )
 
 type StageEvent struct {
-	OutboxID  string        `json:"outbox_id"`
-	Sender    string        `json:"sender"`
-	Recipient string        `json:"recipient"`
-	Nonce     string        `json:"nonce,omitempty"`
-	Stage     DeliveryStage `json:"stage"`
-	At        time.Time     `json:"at"`
-	Evidence  string        `json:"evidence,omitempty"`
+	OutboxID    string        `json:"outbox_id"`
+	Sender      string        `json:"sender"`
+	Recipient   string        `json:"recipient"`
+	Nonce       string        `json:"nonce,omitempty"`
+	PayloadHash string        `json:"payload_hash,omitempty"`
+	Stage       DeliveryStage `json:"stage"`
+	At          time.Time     `json:"at"`
+	LastAt      time.Time     `json:"last_at,omitempty"`
+	Count       uint64        `json:"count,omitempty"`
+	Evidence    string        `json:"evidence,omitempty"`
 }
 
 type stageFile struct {
@@ -47,10 +52,10 @@ func stagesPath(rosterDir string) string {
 // persisted. The stage ledger is separate from the pending queue so submitted
 // evidence survives removal of the outbox entry.
 func RecordStage(rosterDir string, e Entry, stage DeliveryStage, evidence string, now time.Time) error {
-	return recordStage(rosterDir, e, inbound.ParseOwnDispatchNonce(e.Message), stage, evidence, now)
+	return recordStage(rosterDir, e, inbound.ParseOwnDispatchNonce(e.Message), stagePayloadHash(e.Message), stage, evidence, now)
 }
 
-func recordStage(rosterDir string, e Entry, nonce string, stage DeliveryStage, evidence string, now time.Time) error {
+func recordStage(rosterDir string, e Entry, nonce, payloadHash string, stage DeliveryStage, evidence string, now time.Time) error {
 	if rosterDir == "" || e.ID == "" || e.Sender == "" || e.Recipient == "" {
 		return fmt.Errorf("outbox stage: incomplete delivery identity")
 	}
@@ -72,9 +77,28 @@ func recordStage(rosterDir string, e Entry, nonce string, stage DeliveryStage, e
 		return fmt.Errorf("outbox stage: read: %w", err)
 	}
 	f.Version = 1
+	if stage == StageAttemptedRefused {
+		for i := len(f.Events) - 1; i >= 0; i-- {
+			event := &f.Events[i]
+			if event.OutboxID != e.ID || event.Stage != StageAttemptedRefused {
+				continue
+			}
+			if event.Count == 0 {
+				event.Count = 1
+			}
+			event.Count++
+			event.LastAt = now.UTC()
+			event.Evidence = evidence
+			return saveStageFile(rosterDir, path, f)
+		}
+	}
 	f.Events = append(f.Events, StageEvent{OutboxID: e.ID, Sender: e.Sender,
-		Recipient: e.Recipient, Nonce: nonce,
-		Stage: stage, At: now.UTC(), Evidence: evidence})
+		Recipient: e.Recipient, Nonce: nonce, PayloadHash: payloadHash,
+		Stage: stage, At: now.UTC(), LastAt: now.UTC(), Count: 1, Evidence: evidence})
+	return saveStageFile(rosterDir, path, f)
+}
+
+func saveStageFile(rosterDir, path string, f stageFile) error {
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
@@ -101,6 +125,11 @@ func recordStage(rosterDir string, e Entry, nonce string, stage DeliveryStage, e
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+func stagePayloadHash(message string) string {
+	sum := sha256.Sum256([]byte(inbound.StripDispatchFooter(message)))
+	return hex.EncodeToString(sum[:16])
 }
 
 // DeliveryStages returns the durable timeline for one outbox identity.
@@ -134,10 +163,11 @@ func HasDeliveryStage(rosterDir, id string, stage DeliveryStage) (bool, error) {
 	return false, nil
 }
 
-// RecordStageByNonce links a recipient-side acknowledgement to the immutable
-// outbound identity without copying message content into the stage ledger.
-func RecordStageByNonce(rosterDir, nonce string, stage DeliveryStage, evidence string, now time.Time) error {
-	if nonce == "" {
+// RecordStageByEdge links recipient handling to the exact immutable outbound
+// edge. Nonce alone is intentionally insufficient because one dispatch may
+// traverse multiple sender/recipient edges.
+func RecordStageByEdge(rosterDir, sender, recipient, nonce, payloadHash string, stage DeliveryStage, evidence string, now time.Time) error {
+	if sender == "" || recipient == "" || nonce == "" || payloadHash == "" {
 		return nil
 	}
 	events, err := AllDeliveryStages(rosterDir)
@@ -146,11 +176,11 @@ func RecordStageByNonce(rosterDir, nonce string, stage DeliveryStage, evidence s
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		if event.Nonce != nonce {
+		if event.Nonce != nonce || event.Sender != sender || event.Recipient != recipient || event.PayloadHash != payloadHash {
 			continue
 		}
 		return recordStage(rosterDir, Entry{ID: event.OutboxID, Sender: event.Sender,
-			Recipient: event.Recipient}, nonce, stage, evidence, now)
+			Recipient: event.Recipient}, nonce, payloadHash, stage, evidence, now)
 	}
 	return nil
 }

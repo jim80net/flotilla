@@ -21,6 +21,12 @@ Transport delivery becomes true at `submitted`, after paste + Enter is confirmed
 `recipient_consumed` is deliberately separate: it means the recipient later
 handled/acknowledged the dispatch. This change does not collapse handled into
 delivered and does not spend recipient inference to establish transport truth.
+The consumed registry remains a capped hot yes/no index, not durable historical
+evidence. An append-only `recipient_consumed` ledger line is instead bound to the
+exact sender, recipient, payload hash, nonce, and outbox identity. Repeated
+`attempted_refused` observations are the sole coalesced event class: one row
+retains first/last timestamps, latest evidence, and a count, so a five-second
+retry cannot grow and rewrite an ever-larger file.
 
 ## Evidence and fixture provenance
 

@@ -71,11 +71,21 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 		return *live
 	}
+	var submitted []outbox.StageEvent
 	for _, event := range allDeliveryStages(rosterDir) {
 		if event.Nonce == nonce && event.Stage == outbox.StageSubmitted {
-			return Status{Nonce: nonce, Disposition: DispositionSubmitted, Sender: event.Sender,
-				Recipient: event.Recipient, ID: event.OutboxID, Detail: "transport submitted; recipient handling is separate"}
+			submitted = append(submitted, event)
 		}
+	}
+	if len(submitted) == 1 {
+		event := submitted[0]
+		return Status{Nonce: nonce, Disposition: DispositionSubmitted, Sender: event.Sender,
+			Recipient: event.Recipient, ID: event.OutboxID, PayloadHash: event.PayloadHash,
+			Detail: "transport submitted; recipient handling is separate"}
+	}
+	if len(submitted) > 1 {
+		st.Detail = fmt.Sprintf("nonce is ambiguous across %d submitted edges; specify edge identity", len(submitted))
+		return st
 	}
 	for _, e := range outbox.ListAll(rosterDir) {
 		if inbound.ParseOwnDispatchNonce(e.Message) != nonce {

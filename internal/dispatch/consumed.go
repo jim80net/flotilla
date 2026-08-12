@@ -206,7 +206,7 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		return r.save(f)
 	})
 	if err == nil && inserted && e.Nonce != "" {
-		if stageErr := outbox.RecordStageByNonce(filepath.Dir(r.path), e.Nonce,
+		if stageErr := outbox.RecordStageByEdge(filepath.Dir(r.path), e.Sender, e.Recipient, e.Nonce, e.PayloadHash,
 			outbox.StageRecipientConsumed, e.Reason, e.ConsumedAt); stageErr != nil {
 			log.Printf("flotilla dispatch: record consumed delivery stage failed: %v", stageErr)
 		}

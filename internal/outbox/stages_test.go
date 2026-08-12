@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -41,6 +42,31 @@ func TestDeliveryStagesQueuedRefusedSubmittedAreDurable(t *testing.T) {
 	}
 	if events[2].Nonce != "flotilla-dispatch-deadbeef" {
 		t.Fatalf("nonce=%q", events[2].Nonce)
+	}
+}
+
+func TestAttemptedRefusalsCoalesceToBoundedEvidence(t *testing.T) {
+	dir := t.TempDir()
+	e := Entry{ID: "wedged", Sender: "a", Recipient: "b", Message: "body"}
+	start := time.Unix(1, 0).UTC()
+	for i := 0; i < 1000; i++ {
+		if err := RecordStage(dir, e, StageAttemptedRefused, "classifier=wedge", start.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := DeliveryStages(dir, e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Count != 1000 || !events[0].At.Equal(start) || !events[0].LastAt.Equal(start.Add(999*time.Second)) {
+		t.Fatalf("coalesced events=%+v", events)
+	}
+	info, err := os.Stat(stagesPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > 2048 {
+		t.Fatalf("coalesced ledger grew to %d bytes", info.Size())
 	}
 }
 
