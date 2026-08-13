@@ -26,6 +26,100 @@ func TestNextSendRetryWait(t *testing.T) {
 	}
 }
 
+func TestReopenRecipientQuarantineRequiresOpenRosterAndPreservesConsumed(t *testing.T) {
+	dir := t.TempDir()
+	q := dispatch.NewQuarantineRegistry(dir)
+	now := time.Date(2026, 8, 13, 20, 0, 0, 0, time.UTC)
+	entry := dispatch.QuarantineEntry{Kind: "inbound-ack", RowID: "synthetic-row", Recipient: "desk", QuarantinedAt: now}
+	if inserted, err := q.Quarantine(entry); err != nil || !inserted {
+		t.Fatalf("quarantine = (%v,%v)", inserted, err)
+	}
+	closed := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: true}}}
+	reopenRecipientQuarantine(dir, closed, "desk", now.Add(time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || !active {
+		t.Fatalf("closed recipient reopened: active=%v err=%v", active, err)
+	}
+	open := &roster.Config{Agents: []roster.Agent{{Name: "desk"}}}
+	reopenRecipientQuarantine(dir, open, "desk", now.Add(2*time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || active {
+		t.Fatalf("open confirmed recipient stayed quarantined: active=%v err=%v", active, err)
+	}
+	if consumed := dispatch.NewRegistry(dir).Load(); len(consumed) != 0 {
+		t.Fatalf("reopen fabricated acknowledgement: %+v", consumed)
+	}
+}
+
+func TestRecipientClosedOutUsesDurableDocumentUntilConfirmedRestoration(t *testing.T) {
+	dir := t.TempDir()
+	deskDir := filepath.Join(dir, "desks", "desk")
+	if err := os.MkdirAll(deskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Date(2026, 8, 13, 20, 3, 0, 0, time.UTC)
+	// Match the contract-of-record format exactly: UTC with minute precision.
+	doc := "# Close-out\n\n**When:** 2026-08-13T20:03Z\n"
+	if err := os.WriteFile(filepath.Join(deskDir, "CLOSE-OUT-20260813.md"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	openRoster := &roster.Config{Agents: []roster.Agent{{Name: "desk"}}}
+	if !recipientClosedOut(dir, openRoster, "desk") {
+		t.Fatal("durable close-out document did not close recipient")
+	}
+
+	// A real confirmed turn is restoration proof. It tombstones any row markers and records a
+	// durable recipient transition, while the close-out audit document remains untouched.
+	reopenRecipientQuarantine(dir, openRoster, "desk", closedAt.Add(time.Minute))
+	if recipientClosedOut(dir, openRoster, "desk") {
+		t.Fatal("confirmed restoration did not override the older audit close-out event")
+	}
+	if _, err := os.Stat(filepath.Join(deskDir, "CLOSE-OUT-20260813.md")); err != nil {
+		t.Fatalf("restoration removed close-out provenance: %v", err)
+	}
+	restoredAt, err := dispatch.NewQuarantineRegistry(dir).RecipientRestoredAt("desk")
+	if err != nil || !restoredAt.Equal(closedAt.Add(time.Minute)) {
+		t.Fatalf("durable restoration = %v err=%v", restoredAt, err)
+	}
+	generation, err := dispatch.NewQuarantineRegistry(dir).Generation("desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Routine later confirmed turns are not new restoration transitions: they must not rewrite
+	// the registry or advance Fired generation, which would recreate restart-style recurrence.
+	reopenRecipientQuarantine(dir, openRoster, "desk", closedAt.Add(2*time.Minute))
+	restoredAgain, err := dispatch.NewQuarantineRegistry(dir).RecipientRestoredAt("desk")
+	if err != nil || !restoredAgain.Equal(restoredAt) {
+		t.Fatalf("routine confirmed turn changed restoration: before=%v after=%v err=%v", restoredAt, restoredAgain, err)
+	}
+	if got, err := dispatch.NewQuarantineRegistry(dir).Generation("desk"); err != nil || got != generation {
+		t.Fatalf("routine confirmed turn changed generation: before=%d after=%d err=%v", generation, got, err)
+	}
+	if consumed := dispatch.NewRegistry(dir).Load(); len(consumed) != 0 {
+		t.Fatalf("restoration fabricated acknowledgement: %+v", consumed)
+	}
+
+	// A later explicit administrative close-out is a new event and wins again.
+	newClosedAt := closedAt.Add(3 * time.Minute)
+	doc = "# Close-out again\n\n**When:** " + newClosedAt.Format(time.RFC3339) + "\n"
+	if err := os.WriteFile(filepath.Join(deskDir, "CLOSE-OUT-20260813T2005.md"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !recipientClosedOut(dir, openRoster, "desk") {
+		t.Fatal("newer close-out event did not supersede restoration")
+	}
+}
+
+func TestRecipientClosedOutExplicitRosterFlagOverridesConfirmedRestoration(t *testing.T) {
+	dir := t.TempDir()
+	q := dispatch.NewQuarantineRegistry(dir)
+	if _, err := q.ReopenRecipient("desk", time.Date(2026, 8, 13, 21, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	closedRoster := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: true}}}
+	if !recipientClosedOut(dir, closedRoster, "desk") {
+		t.Fatal("explicit roster close-out must remain authoritative")
+	}
+}
+
 func TestErrRetryableBusyUnwrap(t *testing.T) {
 	err := fmt.Errorf("%w", errRetryableBusy{agent: "cos"})
 	if !errors.Is(err, surface.ErrBusy) {

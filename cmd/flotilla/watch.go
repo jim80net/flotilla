@@ -374,6 +374,9 @@ func cmdWatch(args []string) error {
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
 	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, func(agent string) bool { return currentRoster().IsCoordinator(agent) }))
+	injector.SetTurnConfirmed(func(recipient string) {
+		reopenRecipientQuarantine(rosterDir, currentRoster(), recipient, time.Now().UTC())
+	})
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -1031,6 +1034,9 @@ func cmdWatch(args []string) error {
 				},
 				IsMerged:       mergedPR,
 				IsCommitOnMain: commitOnMain,
+				RecipientClosedOut: func(recipient string) bool {
+					return recipientClosedOut(rosterDir, currentRoster(), recipient)
+				},
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)

@@ -19,6 +19,7 @@ const (
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
 	DispositionUndelivered Disposition = "undelivered" // queued past age bound
 	DispositionSubmitted   Disposition = "submitted"   // transport accepted; recipient handling separate
+	DispositionQuarantined Disposition = "quarantined" // preserved, unavailable recipient; NOT acknowledged
 )
 
 // Status is the resolved view for `flotilla dispatch-status`.
@@ -63,10 +64,16 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		if e.Reason != ReasonCoordinatorRecipient {
 			return consumed
 		}
+		if quarantined := lookupQuarantinedNonce(rosterDir, nonce, now); quarantined != nil {
+			return *quarantined
+		}
 		if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 			return *live
 		}
 		return consumed
+	}
+	if quarantined := lookupQuarantinedNonce(rosterDir, nonce, now); quarantined != nil {
+		return *quarantined
 	}
 	if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 		return *live
@@ -109,6 +116,29 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	}
 	st.Detail = "nonce not found in consumed, inbound, or outbox"
 	return st
+}
+
+func lookupQuarantinedNonce(rosterDir, nonce string, now time.Time) *Status {
+	entries, err := NewQuarantineRegistry(rosterDir).ActiveByNonce(nonce)
+	if err != nil {
+		return &Status{Nonce: nonce, Disposition: DispositionUnknown,
+			Detail: "quarantine registry unreadable; refusing to report acknowledgement state"}
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if len(entries) > 1 {
+		return &Status{Nonce: nonce, Disposition: DispositionUnknown,
+			Detail: fmt.Sprintf("nonce is ambiguous across %d quarantined edges; specify edge identity", len(entries))}
+	}
+	e := entries[0]
+	st := Status{Nonce: nonce, Disposition: DispositionQuarantined, Sender: e.Sender,
+		Recipient: e.Recipient, ID: e.RowID, PayloadHash: e.PayloadHash, Reason: e.Reason,
+		Detail: "recipient unavailable; source payload remains pending and was NOT acknowledged"}
+	if !e.QuarantinedAt.IsZero() {
+		st.Age = now.Sub(e.QuarantinedAt).Round(time.Second)
+	}
+	return &st
 }
 
 func allDeliveryStages(rosterDir string) []outbox.StageEvent {

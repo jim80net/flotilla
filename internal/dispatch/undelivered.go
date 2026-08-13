@@ -49,13 +49,14 @@ func OperatorLayerAge(kind string) time.Duration {
 
 // UndeliveredReport is one loud undelivered observation for journal / escalate.
 type UndeliveredReport struct {
-	Kind      string // "outbox" | "inbound-ack"
-	ID        string
-	Nonce     string
-	Sender    string
-	Recipient string
-	Age       time.Duration
-	Message   string // human-readable escalate line
+	Kind        string // "outbox" | "inbound-ack"
+	ID          string
+	Nonce       string
+	Sender      string
+	Recipient   string
+	PayloadHash string // durable identity binding; source payload remains in its original ledger
+	Age         time.Duration
+	Message     string // human-readable escalate line
 }
 
 // ScanUndeliveredOutbox returns outbox entries older than age that have not yet
@@ -82,12 +83,13 @@ func ScanUndeliveredOutbox(rosterDir string, now time.Time, age time.Duration) [
 		}
 		nonce := inbound.ParseDispatchNonce(e.Message)
 		out = append(out, UndeliveredReport{
-			Kind:      "outbox",
-			ID:        e.ID,
-			Nonce:     nonce,
-			Sender:    e.Sender,
-			Recipient: e.Recipient,
-			Age:       got.Round(time.Second),
+			Kind:        "outbox",
+			ID:          e.ID,
+			Nonce:       nonce,
+			Sender:      e.Sender,
+			Recipient:   e.Recipient,
+			PayloadHash: PayloadHash(e.Message),
+			Age:         got.Round(time.Second),
 			Message: fmt.Sprintf(
 				"dispatch undelivered: outbox send id=%s nonce=%s %s→%s still queued after %s — pane has not confirmed delivery",
 				e.ID, emptyDash(nonce), e.Sender, e.Recipient, got.Round(time.Second),
@@ -123,12 +125,13 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 			continue
 		}
 		out = append(out, UndeliveredReport{
-			Kind:      "inbound-ack",
-			ID:        e.ID,
-			Nonce:     e.Nonce,
-			Sender:    e.Sender,
-			Recipient: e.Recipient,
-			Age:       got.Round(time.Second),
+			Kind:        "inbound-ack",
+			ID:          e.ID,
+			Nonce:       e.Nonce,
+			Sender:      e.Sender,
+			Recipient:   e.Recipient,
+			PayloadHash: PayloadHash(e.Message),
+			Age:         got.Round(time.Second),
 			Message: fmt.Sprintf(
 				"dispatch undelivered-ack: inbound id=%s nonce=%s %s→%s unacknowledged after %s (delivered to pane, no durable or legacy turn-final ack)",
 				e.ID, emptyDash(e.Nonce), e.Sender, e.Recipient, got.Round(time.Second),

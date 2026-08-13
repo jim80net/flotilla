@@ -46,6 +46,10 @@ type Agent struct {
 	// desk OUT; true forces it ON. Pointer-with-omitempty so an ABSENT flag is
 	// distinguishable from an explicit false.
 	Heartbeat *bool `json:"heartbeat,omitempty"`
+	// ClosedOut marks a durably unavailable seat whose preserved dispatch rows must remain
+	// inspectable without recurring age escalation. It is a reversible routing disposition,
+	// not an acknowledgement; a confirmed turn after this flag clears reopens quarantine.
+	ClosedOut bool `json:"closed_out,omitempty"`
 	// ApprovalSensitive marks a high-consequence desk — one that places orders or spends.
 	// Such a desk defaults its heartbeat OFF (the #184 carve-out): the claude driver's
 	// Idle assessment is binary and cannot yet distinguish an approval-blocked desk from
@@ -1117,4 +1121,11 @@ func (c *Config) Agent(name string) (Agent, error) {
 		}
 	}
 	return Agent{}, fmt.Errorf("no agent named %q in roster", name)
+}
+
+// RecipientClosedOut reports the explicit durable routing disposition for a roster seat.
+// Unknown recipients are not silently classified closed; callers retain existing supervision.
+func (c *Config) RecipientClosedOut(name string) bool {
+	a, err := c.Agent(name)
+	return err == nil && a.ClosedOut
 }

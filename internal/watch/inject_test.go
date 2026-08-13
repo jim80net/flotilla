@@ -30,6 +30,22 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
+func TestInjectorTurnConfirmedHookUsesActualRecipientOnlyOnSuccess(t *testing.T) {
+	var recipients []string
+	in := NewInjector(func(agent, _ string) error {
+		if agent == "busy" {
+			return surface.ErrBusy
+		}
+		return nil
+	}, 1)
+	in.SetTurnConfirmed(func(recipient string) { recipients = append(recipients, recipient) })
+	in.deliver(Job{Agent: "restored", Message: "confirmed", Kind: KindDetector})
+	in.deliver(Job{Agent: "busy", Message: "not confirmed", Kind: KindDetector})
+	if len(recipients) != 1 || recipients[0] != "restored" {
+		t.Fatalf("turn-confirmed recipients = %v, want actual successful recipient only", recipients)
+	}
+}
+
 func TestInjectorSerializes(t *testing.T) {
 	var inFlight, overlap, count int32
 	send := func(agent, message string) error {
