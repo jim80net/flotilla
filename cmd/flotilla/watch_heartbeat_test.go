@@ -162,9 +162,8 @@ func TestWakeAgentDispatchesDeskHeartbeat(t *testing.T) {
 	}
 }
 
-// G6 — cap escalation names the wedged desk but uses the internal wedge destination,
-// leaving the operator-alert callback untouched.
-func TestDeskEscalateRoutesInternallyAndNeverToOperatorAlert(t *testing.T) {
+// G6 — cap escalation names the wedged desk and uses the internal wedge destination.
+func TestDeskEscalateRoutesInternally(t *testing.T) {
 	// Legacy star: the leaf "backend" is owned by "xo" (the channel it is a member of). AgentsAbove is
 	// empty for the leaf, so this proves the §8e channel-membership fallback (not AgentsAbove).
 	rosterPath := writeRosterFile(t, `{
@@ -177,7 +176,6 @@ func TestDeskEscalateRoutesInternallyAndNeverToOperatorAlert(t *testing.T) {
 
 	var recipient string
 	var alerts []string
-	operatorAlerts := 0
 	escalate := newDeskEscalate(cfg, "xo", func(r, m string) {
 		recipient = r
 		alerts = append(alerts, m)
@@ -197,8 +195,28 @@ func TestDeskEscalateRoutesInternallyAndNeverToOperatorAlert(t *testing.T) {
 	if recipient != "backend" {
 		t.Fatalf("internal destination recipient = %q, want affected seat backend", recipient)
 	}
-	if operatorAlerts != 0 {
-		t.Fatalf("desk wedge leaked to operator callback %d times", operatorAlerts)
+}
+
+func TestDeskHeartbeatLifecycleRoutesWedgeAndFormatNoticeInternally(t *testing.T) {
+	cfg := loadWarrantCfg(t)
+	var internal []watch.Job
+	lifecycle := newDeskHeartbeatLifecycle(func() *roster.Config { return cfg }, "xo", func(coordinator, message string) {
+		internal = append(internal, watch.Job{Agent: coordinator, Message: message, Kind: watch.KindDetector})
+	})
+
+	lifecycle.escalate("backend")
+	deskWarrantedGate(cfg,
+		func(string) ([]byte, bool, error) { return []byte("# Notes\nmissing backlog heading\n"), true, nil },
+		func(string) string { return "/state/flotilla-backend-backlog.md" },
+		lifecycle.alert)("backend")
+
+	if len(internal) != 2 {
+		t.Fatalf("wedge + sectionless lifecycle notices must route internally, got %+v", internal)
+	}
+	for _, job := range internal {
+		if job.Agent != "xo" || job.Kind != watch.KindDetector {
+			t.Fatalf("internal lifecycle route = %+v, want owning coordinator detector job", job)
+		}
 	}
 }
 

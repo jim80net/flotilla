@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -362,9 +363,10 @@ func cmdWatch(args []string) error {
 		func(sender string) string { return currentRoster().OwningXO(sender, xo) },
 		coordinatorAlert,
 	)
-	internalWedgeAlert := newInternalWedgeAlert(currentRoster, xo, func(coordinator, msg string) {
+	deskHeartbeatLifecycle := newDeskHeartbeatLifecycle(currentRoster, xo, func(coordinator, msg string) {
 		coordinatorAlert(coordinator, msg, "")
 	})
+	internalWedgeAlert := deskHeartbeatLifecycle.alert
 	injector.SetInternalWedgeAlert(internalWedgeAlert)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
@@ -647,16 +649,16 @@ func cmdWatch(args []string) error {
 		// (<dir>/flotilla-<agent>-settled). The cadence is the heartbeat interval — the detector's
 		// tick IS the interval, so DeskHeartbeatEveryTicks=1 (an idle desk is re-engaged within one
 		// interval). WakeDeskHeartbeat enqueues the non-authorizing desk-continuation beat (audit-
-		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
+		// suppressed); DeskEscalate raises an internal cap notice to the desk's owning XO.
 		deskSettled := watch.NewSettledMarkerSet(rosterDir)
 		deskHeartbeatEnabled := func(agent string) bool { return currentRoster().HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
-		deskEscalate := func(agent string) { newDeskEscalate(currentRoster(), xo, internalWedgeAlert)(agent) }
+		deskEscalate := deskHeartbeatLifecycle.escalate
 		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
 		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
 		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
-		// fresh each call and returns cfg.HeartbeatWarranted(agent, st). A desk with NO per-recipient
-		// ledger self-defaults to WARRANTED (the missing-ledger fallback — NOT the shared backlog), so a
+		// fresh each call and classifies its warrant. A desk with NO per-recipient ledger self-defaults
+		// to a fail-safe BEAT warrant (the missing-ledger fallback — NOT the shared backlog), so a
 		// deployment that keeps no per-recipient backlogs is #183-equivalent. The shared --backlog-file
 		// is deliberately NOT consulted here (it is the XO's drive queue, not a desk's work).
 		deskBacklogPath := func(agent string) string {
@@ -667,14 +669,14 @@ func cmdWatch(args []string) error {
 				raw, err := os.ReadFile(deskBacklogPath(agent))
 				if err != nil {
 					if os.IsNotExist(err) {
-						return nil, false, nil // absent ⇒ missing-ledger fallback (warranted)
+						return nil, false, nil // absent ⇒ missing-ledger fallback (fail-safe beat)
 					}
-					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe (warranted)
+					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe beat
 				}
 				return raw, true, nil
 			},
 			deskBacklogPath, // named in the #479 headingless alert so the fix is one copy-paste away
-			alert)
+			internalWedgeAlert, time.Now)
 
 		// #216 idle-hold antipattern: per-agent consecutive-strike tracker; the break
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
@@ -802,31 +804,32 @@ func cmdWatch(args []string) error {
 		if !xoRotate.AllowsIdleEdgeRotate() {
 			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
 		}
+		assessDesk := func(agent string) surface.State {
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, agent))
+			if err != nil {
+				return surface.StateShell
+			}
+			liveCommand, err := deliver.PaneCommand(pane)
+			if err != nil {
+				return surface.StateUnknown
+			}
+			drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
+			if err != nil {
+				return surface.StateUnknown
+			}
+			state := surface.AssessForFleet(drv, pane)
+			if state == surface.StateUnknown && officerDetectorIdleOverride(drv, agent, pane, liveSurface, liveCommand, watchOfficerRouteDeps(rosterDir)) {
+				return surface.StateIdle
+			}
+			return state
+		}
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
 			Interval:          interval,
 			ReferenceInterval: referenceInterval,
-			Assess: func(agent string) surface.State {
-				current := currentRoster()
-				pane, err := deliver.ResolvePane(agentTitle(current, agent))
-				if err != nil {
-					return surface.StateShell
-				}
-				liveCommand, err := deliver.PaneCommand(pane)
-				if err != nil {
-					return surface.StateUnknown
-				}
-				drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
-				if err != nil {
-					return surface.StateUnknown
-				}
-				state := surface.AssessForFleet(drv, pane)
-				if state == surface.StateUnknown && officerDetectorIdleOverride(drv, agent, pane, liveSurface, liveCommand, watchOfficerRouteDeps(rosterDir)) {
-					return surface.StateIdle
-				}
-				return state
-			},
+			Assess:            assessDesk,
 			RateLimitMaterial: rateLimitMaterial(currentRoster),
 			Usage:             usageObservation(currentRoster, flatLaunch),
 			UsageDispatch:     func(run func()) { go run() },
@@ -918,8 +921,15 @@ func cmdWatch(args []string) error {
 			SynthEveryTicks:     synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
-			HeartbeatEnabled:        deskHeartbeatEnabled,
-			HeartbeatWarranted:      deskHeartbeatWarranted,
+			HeartbeatEnabled:   deskHeartbeatEnabled,
+			HeartbeatWarranted: deskHeartbeatWarranted,
+			HeartbeatLiveState: func(agent string) surface.State {
+				// Fresh, non-debounced result-path join. This is the exact live-driver assessment
+				// used by `flotilla result`'s mid-turn warning (and by delivery's busy gate), not
+				// the detector's pane assessment or its officer override. Only proven live Idle
+				// from this independent observation may advance the wedge cap.
+				return deskHeartbeatResultState(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand, surface.ResolveResultReader)
+			},
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
@@ -1388,24 +1398,23 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 	}
 }
 
-// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted seam (a func(agent) bool) that
+// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted classification seam that
 // the detector invokes in its PHASE-1 warrant snapshot (deskWarrantSnapshot), OFF the detector lock,
 // BEFORE the under-lock decision runs. The backlog read is FILE I/O and lives HERE — off d.mu — so the
-// under-lock phase-2 decision consults only the resulting pure boolean (the detector's load-bearing
+// under-lock phase-2 decision consults only the resulting pure classification (the detector's load-bearing
 // off-mutex invariant, the same one synthesis + the mirror honor). For each agent it reads that agent's
 // OWN backlog (read is keyed by agent and resolves <rosterDir>/flotilla-<agent>-backlog.md), parses it
-// fresh each call (it is the desk's own output — NOT content-hashed), and returns
-// cfg.HeartbeatWarranted(agent, st).
+// fresh each call (it is the desk's own output — NOT content-hashed).
 //
-// The fail-safe direction is toward WARRANTED (keep the desk moving — never the silent-stall #183
-// fixed):
+// The fail-safe direction preserves the BEAT (keep the desk moving — never the silent-stall #183
+// fixed) while remaining cap-neutral because it is not positive evidence of owed work:
 //   - ABSENT per-recipient file ⇒ WARRANTED via the missing-ledger fallback (the desk has not opted
 //     into the judgment ⇒ driven exactly as #183). It does NOT fall back to the shared fleet backlog
 //     (that is the XO's drive queue, not THIS desk's; consulting it would warrant every ledger-less
 //     desk on a busy fleet — re-creating the indiscriminate poking this change exists to end).
 //   - UNREADABLE/torn present file ⇒ WARRANTED (fail-safe; a torn mid-write read self-heals next tick).
-//   - PRESENT-but-sectionless (Found=false) ⇒ WARRANTED via cfg.HeartbeatWarranted's !Found arm, AND a
-//     LOUD alert on a CONTENT-HASH latch (#479): the first headingless read alerts — naming the file,
+//   - PRESENT-but-sectionless (Found=false) ⇒ FAIL-SAFE warrant plus an INTERNAL notice on a
+//     CONTENT-HASH latch (#479): the first headingless read alerts — naming the file,
 //     the missing heading, and the one-line fix — and the alert REPEATS only when the file's content
 //     CHANGED and is STILL headingless. #479's discovering case showed why the old edge latch was not
 //     enough: a desk that keeps editing its ledger (reconciling markers, adding items) without ever
@@ -1419,25 +1428,25 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 // from the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch
 // map is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
 // AgentWake) never invoke this seam.
-func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
-	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert)
+func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string)) func(agent string) watch.DeskHeartbeatWarrant {
+	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert, time.Now)
 }
 
-func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
+func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string), now func() time.Time) func(agent string) watch.DeskHeartbeatWarrant {
 	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
-	return func(agent string) bool {
+	return func(agent string) watch.DeskHeartbeatWarrant {
 		raw, exists, err := read(agent)
 		if !exists {
 			// Absent (missing-ledger fallback): WARRANTED, latch cleared — a deleted ledger resets
 			// the state, so a re-created file is a genuinely new file and may alert afresh.
 			delete(alerted, agent)
-			return true
+			return watch.DeskHeartbeatFailSafeWarrant
 		}
 		if err != nil {
 			// Unreadable/torn (fail-safe): WARRANTED, latch KEPT — a transient read glitch must not
 			// make the SAME unchanged broken bytes re-alert once the read heals (cubic #480 P2);
 			// "repeat only when the file changes or after a clean read" survives the glitch.
-			return true
+			return watch.DeskHeartbeatFailSafeWarrant
 		}
 		content := string(raw)
 		st := backlog.Parse(content)
@@ -1449,14 +1458,54 @@ func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent str
 			h := fmt.Sprintf("%x", sha256.Sum256(raw))
 			if alerted[agent] != h {
 				alerted[agent] = h
-				alert(fmt.Sprintf("desk-heartbeat: %s's backlog (%s) has NO '## Backlog' section — the settle judgment parses ONLY that section, so it cannot prove the desk settled and heartbeats stay warranted. Fix: add a '## Backlog' heading above the item list. This alert repeats only if the file changes and is still missing the heading (#479).",
+				alert(agent, fmt.Sprintf("desk-heartbeat: %s's backlog (%s) has NO '## Backlog' section — the settle judgment parses ONLY that section, so it cannot prove the desk settled and heartbeats stay warranted. Fix: add a '## Backlog' heading above the item list. This alert repeats only if the file changes and is still missing the heading (#479).",
 					agent, path(agent)))
 			}
 		} else {
 			delete(alerted, agent)
 		}
-		return current().HeartbeatWarranted(agent, st)
+		if !st.Found {
+			return watch.DeskHeartbeatFailSafeWarrant
+		}
+		positive := current().HeartbeatWarranted(agent, st) && heartbeatObligationDue(st, now())
+		if positive {
+			return watch.DeskHeartbeatPositiveWarrant
+		}
+		return watch.DeskHeartbeatNotWarranted
 	}
+}
+
+var heartbeatDueTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z`)
+
+func parseHeartbeatDueTimestamp(stamp string) (time.Time, error) {
+	if due, err := time.Parse(time.RFC3339, stamp); err == nil {
+		return due, nil
+	}
+	// Operational pre-wall markers commonly omit seconds (for example 2026-08-13T21:13Z).
+	return time.Parse("2006-01-02T15:04Z", stamp)
+}
+
+// heartbeatObligationDue distinguishes an actionable obligation from a future [next] clock. An
+// [in-flight] item (or an undated [next]) is due now. A [next] item carrying an explicit UTC instant
+// becomes positive only at that instant, so waiting for its wall clock is not a progress failure.
+func heartbeatObligationDue(st backlog.Status, now time.Time) bool {
+	for _, line := range st.Unblocked {
+		if backlog.ClassifyLine(line) != "next" {
+			return true
+		}
+		if !strings.Contains(strings.ToLower(line), "pre-wall") {
+			return true
+		}
+		stamp := heartbeatDueTimestamp.FindString(line)
+		if stamp == "" {
+			return true
+		}
+		due, err := parseHeartbeatDueTimestamp(stamp)
+		if err != nil || !now.Before(due) {
+			return true
+		}
+	}
+	return false
 }
 
 // leaderPingBody is the primary-coordinator liveness ping (no adjutant configured).
@@ -1848,6 +1897,24 @@ func newInternalWedgeAlert(currentRoster func() *roster.Config, primaryXO string
 			return
 		}
 		coordinatorAlert(owner, message)
+	}
+}
+
+type deskHeartbeatLifecycleRoutes struct {
+	alert    func(string, string)
+	escalate func(string)
+}
+
+// newDeskHeartbeatLifecycle is the production composition for every desk-heartbeat lifecycle
+// notice. Its only egress is the owning-coordinator enqueue; no operator webhook callback enters
+// this constructor, so both cap wedges and sectionless-ledger notices are structurally internal.
+func newDeskHeartbeatLifecycle(currentRoster func() *roster.Config, primaryXO string, coordinatorAlert func(string, string)) deskHeartbeatLifecycleRoutes {
+	internal := newInternalWedgeAlert(currentRoster, primaryXO, coordinatorAlert)
+	return deskHeartbeatLifecycleRoutes{
+		alert: internal,
+		escalate: func(agent string) {
+			newDeskEscalate(currentRoster(), primaryXO, internal)(agent)
+		},
 	}
 }
 
@@ -2495,6 +2562,23 @@ func assessWatchAgent(cfg *roster.Config, agent string, resolvePane func(string)
 		return surface.StateShell
 	}
 	return assessWatchResolvedPane(cfg, agent, pane, paneCommand, surface.AssessForFleet)
+}
+
+type resultReaderResolver func(string, string, func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error)
+
+// deskHeartbeatResultState observes the result command's independent live path. The ResultReader
+// resolution binds to the pane's actual harness, then Driver.Assess supplies the same MID-TURN signal
+// printed by `flotilla result`. Resolution/read failures are Unknown and therefore cap-neutral.
+func deskHeartbeatResultState(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error), resolveResult resultReaderResolver) surface.State {
+	pane, err := resolvePane(agentTitle(cfg, agent))
+	if err != nil {
+		return surface.StateUnknown
+	}
+	_, drv, _, _, err := resolveResult(agentSurface(cfg, agent), pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown
+	}
+	return drv.Assess(pane)
 }
 
 func assessWatchResolvedPane(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) surface.State {

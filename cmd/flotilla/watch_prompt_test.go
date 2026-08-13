@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/watch"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -30,9 +33,9 @@ func loadWarrantCfg(t *testing.T) *roster.Config {
 	return cfg
 }
 
-// deskWarrantedGate builds the #189 HeartbeatWarranted seam OFF the detector lock: it reads the
+// deskWarrantedGate builds the #189 HeartbeatWarranted classification seam OFF the detector lock: it reads the
 // recipient's OWN backlog (absent ⇒ missing-ledger fallback ⇒ warranted, NOT the shared backlog),
-// parses a present file fresh each call, and returns cfg.HeartbeatWarranted(agent, st). An
+// parses a present file fresh each call, and returns an atomic warrant classification. An
 // unreadable/torn file ⇒ warranted; a present-but-sectionless file ⇒ warranted via the !Found arm
 // AND alerts ONCE on the edge. The read is INJECTED so the latch + fallback are unit-testable.
 func TestDeskWarrantedGate(t *testing.T) {
@@ -55,33 +58,39 @@ func TestDeskWarrantedGate(t *testing.T) {
 			return []byte(r.content), r.exists, nil
 		},
 		func(agent string) string { return "/state/flotilla-" + agent + "-backlog.md" },
-		func(m string) { alerts = append(alerts, m) })
+		func(_ string, m string) { alerts = append(alerts, m) })
 
 	// (a) per-recipient file ABSENT ⇒ WARRANTED (missing-ledger fallback) — the shared backlog is
 	//     NEVER consulted (the read closure only sees the per-agent agent name; there is no shared path).
 	state["backend"] = rd{exists: false}
-	if !gate("backend") {
-		t.Error("absent per-recipient backlog ⇒ warranted (missing-ledger fallback)")
+	if got := gate("backend"); got != watch.DeskHeartbeatFailSafeWarrant {
+		t.Errorf("absent backlog warrant = %+v, want fail-safe beat without positive wedge obligation", got)
+	}
+
+	// (a2) PRESENT but EMPTY is likewise only a fail-safe beat warrant, not positive work evidence.
+	state["backend"] = rd{content: "", exists: true}
+	if got := gate("backend"); got != watch.DeskHeartbeatFailSafeWarrant {
+		t.Errorf("empty backlog warrant = %+v, want fail-safe beat without positive wedge obligation", got)
 	}
 
 	// (b) PRESENT with an [in-flight] item ⇒ warranted (live actionable work).
 	state["backend"] = rd{content: "## Backlog\n- [in-flight] ship it\n", exists: true}
-	if !gate("backend") {
-		t.Error("present backlog with actionable work ⇒ warranted")
+	if got := gate("backend"); got != watch.DeskHeartbeatPositiveWarrant {
+		t.Errorf("actionable backlog warrant = %+v, want positive beat+wedge warrant", got)
 	}
 
 	// (c) PRESENT with everything parked ([blocked]/[awaiting-auth]/[done]) ⇒ NOT warranted (suppress).
 	state["backend"] = rd{content: "## Backlog\n- [blocked] q @op\n- [awaiting-auth] go @op\n- [done] x\n", exists: true}
-	if gate("backend") {
-		t.Error("present backlog with no actionable work ⇒ NOT warranted (suppress the beat)")
+	if got := gate("backend"); got != watch.DeskHeartbeatNotWarranted {
+		t.Errorf("parked parsed backlog warrant = %+v, want no beat and no wedge", got)
 	}
 
 	// (d) PRESENT but sectionless (Found=false) ⇒ warranted via the !Found arm AND alerts on the
 	//     #479 content-hash latch: loud on first sight, silent while the broken file is untouched.
 	alerts = nil
 	state["backend"] = rd{content: "# Notes\nsome prose, no ## Backlog section\n", exists: true}
-	if !gate("backend") {
-		t.Error("present-but-sectionless backlog ⇒ warranted (cannot prove no work)")
+	if got := gate("backend"); got != watch.DeskHeartbeatFailSafeWarrant {
+		t.Errorf("sectionless backlog warrant = %+v, want fail-safe beat without positive wedge obligation", got)
 	}
 	gate("backend")
 	gate("backend")
@@ -125,8 +134,8 @@ func TestDeskWarrantedGate(t *testing.T) {
 	state["backend"] = rd{content: broken, exists: true}
 	gate("backend") // alert 1: first sight of this broken content
 	state["backend"] = rd{exists: true, err: errors.New("torn mid-write")}
-	if !gate("backend") {
-		t.Error("unreadable/torn per-recipient backlog ⇒ warranted (fail-safe)")
+	if got := gate("backend"); got != watch.DeskHeartbeatFailSafeWarrant {
+		t.Errorf("unreadable backlog warrant = %+v, want fail-safe beat without positive wedge obligation", got)
 	}
 	state["backend"] = rd{content: broken, exists: true}
 	gate("backend") // healed read of the SAME bytes — must stay silent
@@ -144,8 +153,138 @@ func TestDeskWarrantedGate(t *testing.T) {
 	// (f) The HARD gate still wins: an approval-sensitive desk ("trader") with a backlog FULL of
 	//     actionable work is NOT warranted (cfg.HeartbeatWarranted returns false for the HARD-gated desk).
 	state["trader"] = rd{content: "## Backlog\n- [in-flight] place order\n", exists: true}
-	if gate("trader") {
-		t.Error("an approval-sensitive desk is HARD-gated off — never warranted even with actionable work")
+	if got := gate("trader"); got != watch.DeskHeartbeatNotWarranted {
+		t.Errorf("approval-sensitive desk warrant = %+v, want hard-gated off", got)
+	}
+}
+
+func TestDeskWarrantedGate_FutureNextPreWallIsNotDue(t *testing.T) {
+	cfg := loadWarrantCfg(t)
+	now := time.Date(2026, 8, 13, 21, 7, 0, 0, time.UTC)
+	due := now.Add(6 * time.Minute)
+	content := "## Backlog\n- [next] standing pre-wall check ≤~2026-08-13T21:13Z\n"
+	gate := deskWarrantedGateDynamic(func() *roster.Config { return cfg },
+		func(string) ([]byte, bool, error) { return []byte(content), true, nil },
+		func(string) string { return "/state/flotilla-backend-backlog.md" },
+		func(string, string) {}, func() time.Time { return now })
+
+	if got := gate("backend"); got != watch.DeskHeartbeatNotWarranted {
+		t.Fatalf("future [next] pre-wall warrant = %v, want not-warranted before its clock", got)
+	}
+	now = due
+	if got := gate("backend"); got != watch.DeskHeartbeatPositiveWarrant {
+		t.Fatalf("due [next] pre-wall warrant = %v, want positive at its clock", got)
+	}
+}
+
+type heartbeatResultDriver struct{ state surface.State }
+
+func (d heartbeatResultDriver) Name() string                        { return "heartbeat-result" }
+func (d heartbeatResultDriver) Submit(string, string) error         { return nil }
+func (d heartbeatResultDriver) Assess(string) surface.State         { return d.state }
+func (d heartbeatResultDriver) Rotate(string) error                 { return nil }
+func (d heartbeatResultDriver) RotateStrategy() surface.Strategy    { return surface.SlashCommand }
+func (d heartbeatResultDriver) Close(string) error                  { return nil }
+func (d heartbeatResultDriver) LatestResult(string) (string, error) { return "MID-TURN", nil }
+
+func TestDeskHeartbeatResultStateUsesIndependentResultPath(t *testing.T) {
+	cfg := loadWarrantCfg(t)
+	got := deskHeartbeatResultState(cfg, "backend",
+		func(string) (string, error) { return "%42", nil },
+		func(string) (string, error) { return "grok", nil },
+		func(rosterSurface, pane string, paneCommand func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error) {
+			drv := heartbeatResultDriver{state: surface.StateWorking}
+			return drv, drv, "grok", false, nil
+		})
+	if got != surface.StateWorking {
+		t.Fatalf("result path live state = %v, want working even when the detector pane snapshot is idle", got)
+	}
+}
+
+// Production-seam control for the reported false wedge. The real cmd classifier feeds the real
+// detector across capN+ cadence ticks; fail-safe ledgers keep receiving #183 beats but never accrue
+// the wedge cap, while a parsed actionable backlog still wedges exactly once at the cap edge.
+func TestDeskHeartbeatWedgeRequiresPositiveBacklogObligation(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		exists        bool
+		wantEscalate  int
+		wantContinues bool
+		liveIdle      bool
+		wantNoBeat    bool
+		futureNext    bool
+	}{
+		{name: "absent", exists: false, wantContinues: true, liveIdle: true},
+		{name: "empty", exists: true, content: "", wantContinues: true, liveIdle: true},
+		{name: "sectionless", exists: true, content: "# Notes\nparked\n", wantContinues: true, liveIdle: true},
+		{name: "actionable", exists: true, content: "## Backlog\n- [in-flight] owed work\n", wantEscalate: 1, liveIdle: true},
+		{name: "pane-idle-live-busy", exists: true, content: "## Backlog\n- [in-flight] owed work\n", wantNoBeat: true},
+		{name: "future-next-pre-wall", exists: true, liveIdle: true, wantNoBeat: true, futureNext: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rcfg := loadWarrantCfg(t)
+			var beats, internal []string
+			now := time.Date(2042, 3, 4, 5, 6, 0, 0, time.UTC)
+			if tc.futureNext {
+				tc.content = "## Backlog\n- [next] standing pre-wall check ≤~" + now.Add(time.Hour).Format(time.RFC3339) + "\n"
+			}
+			warrant := deskWarrantedGateDynamic(func() *roster.Config { return rcfg },
+				func(string) ([]byte, bool, error) { return []byte(tc.content), tc.exists, nil },
+				func(string) string { return "/state/flotilla-backend-backlog.md" },
+				func(_ string, msg string) { internal = append(internal, msg) },
+				func() time.Time { return now })
+			d := watch.NewDetector(watch.DetectorConfig{
+				XOAgent: "xo", Desks: []string{"xo", "backend"}, Interval: time.Minute,
+				Assess: func(string) surface.State { return surface.StateIdle },
+				AckAge: func() time.Duration { return 0 }, Wake: func(watch.WakeKind, []string) {},
+				Persist:            func(watch.Snapshot) error { return nil },
+				HeartbeatEnabled:   func(agent string) bool { return agent == "backend" },
+				HeartbeatWarranted: warrant,
+				HeartbeatLiveState: func(string) surface.State {
+					if tc.liveIdle {
+						return surface.StateIdle
+					}
+					return deskHeartbeatResultState(rcfg, "backend",
+						func(string) (string, error) { return "%42", nil },
+						func(string) (string, error) { return "grok", nil },
+						func(string, string, func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error) {
+							drv := heartbeatResultDriver{state: surface.StateWorking}
+							return drv, drv, "grok", false, nil
+						})
+				},
+				WakeDeskHeartbeat: func(agent string) { beats = append(beats, agent) },
+				DeskEscalate: newDeskEscalate(rcfg, "xo", func(_ string, msg string) {
+					internal = append(internal, msg)
+				}),
+				DeskHeartbeatEveryTicks: 1, DeskHeartbeatCap: 3,
+				Now: func() time.Time { return now },
+			}, filepath.Join(t.TempDir(), "missing-snapshot.json"))
+
+			for i := 0; i < 8; i++ { // cold start + anchor + capN+ cadence opportunities
+				d.Tick()
+				now = now.Add(time.Minute)
+			}
+			wedgeAlerts := 0
+			for _, msg := range internal {
+				if strings.Contains(msg, "appears WEDGED") {
+					wedgeAlerts++
+				}
+			}
+			if wedgeAlerts != tc.wantEscalate {
+				t.Fatalf("wedge escalations = %d, want %d; internal=%v", wedgeAlerts, tc.wantEscalate, internal)
+			}
+			if tc.wantContinues && len(beats) <= 3 {
+				t.Fatalf("parked fail-safe desk stopped at cap instead of continuing: beats=%v", beats)
+			}
+			if tc.wantNoBeat && len(beats) != 0 {
+				t.Fatalf("fresh live-busy join must suppress duplicate beats, got %v", beats)
+			}
+			if tc.wantEscalate == 1 && len(beats) != 3 {
+				t.Fatalf("positive obligation must stop after exactly capN=3 beats, got %v", beats)
+			}
+		})
 	}
 }
 

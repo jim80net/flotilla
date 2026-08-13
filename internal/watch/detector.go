@@ -279,21 +279,26 @@ type DetectorConfig struct {
 	// returns false is never beaten — the primary XO (which keeps its own clock) and the
 	// approval-sensitive desks are excluded here.
 	HeartbeatEnabled func(agent string) bool
-	// HeartbeatWarranted is the #189 per-recipient JUDGMENT: it reports whether there is OUTSTANDING
-	// ACTIONABLE WORK for the agent right now. It is the cmd-wiring's FILE I/O (os.ReadFile +
+	// HeartbeatWarranted is the #189 per-recipient JUDGMENT. Beat preserves the fail-safe #183
+	// continuation policy; Wedge is true only with positive evidence of an outstanding obligation.
+	// It is the cmd-wiring's FILE I/O (os.ReadFile +
 	// backlog.Parse of <dir>/flotilla-<agent>-backlog.md), and is therefore invoked ONLY in the
 	// PHASE-1 snapshot (deskWarrantSnapshot), OFF d.mu, BEFORE tickLocked acquires the lock. The
-	// under-lock phase-2 decision (deskHeartbeatLocked) consults ONLY the resulting pure map[agent]bool
-	// warrant as the LAST conjunct (after the HeartbeatEnabled HARD gate, the settle/stop checks, and
+	// under-lock phase-2 decision (deskHeartbeatLocked) consults ONLY the resulting pure evidence map
+	// as the LAST conjunct (after the HeartbeatEnabled HARD gate, the settle/stop checks, and
 	// the cadence) — so NO backlog file I/O ever runs under d.mu (the detector's load-bearing off-mutex
-	// invariant, honored by synthesis + the mirror; the same two-phase split). The judgment can ONLY
-	// suppress a beat the desk would otherwise receive — it can never resurrect a beat to an ineligible/
+	// invariant, honored by synthesis + the mirror; the same two-phase split). The judgment can only
+	// narrow the legacy beat candidate — it can never resurrect a beat to an ineligible/
 	// settled/stopped/non-idle desk (it is the LAST gate). A not-warranted desk is treated like a
 	// settled desk for that tick: no beat, no cap accrual, no cadence accrual (it is legitimately idle,
 	// not wedged). nil ⇒ the phase-1 snapshot is nil ⇒ every eligible desk defaults to warranted ⇒ the
 	// trigger is IDENTICAL to the pre-judgment recursive heartbeat (#183 byte-inert on this axis —
-	// NewDetector defaults it to a func returning true).
-	HeartbeatWarranted func(agent string) bool
+	// NewDetector defaults it to positive).
+	HeartbeatWarranted func(agent string) DeskHeartbeatWarrant
+	// HeartbeatLiveState is the fresh live half of the wedge predicate. It is sampled OFF d.mu in
+	// the same phase as the warrant. Only StateIdle can accrue the cap; StateWorking also re-arms a
+	// prior false stop. nil preserves #183's pane-only behavior.
+	HeartbeatLiveState func(agent string) surface.State
 	// WakeDeskHeartbeat delivers ONE desk-continuation beat to a desk that is OWED one (idle past
 	// its cadence, not settled, not stopped). Called OFF d.mu in runDeskHeartbeats (its confirmed
 	// delivery acquires the pane-txn lock — a bounded wait that must never be held under d.mu), like
@@ -364,6 +369,21 @@ type DetectorConfig struct {
 	// AdaptiveInterval varies the live tick period from Activity output (PR 3).
 	// Nil ⇒ fixed cfg.Interval (byte-inert). Ticker mutations occur only in loop().
 	AdaptiveInterval AdaptiveInterval
+}
+
+// DeskHeartbeatWarrant separates the permissive continuation predicate from the stricter wedge
+// predicate without admitting contradictory states such as "wedge but do not beat".
+type DeskHeartbeatWarrant uint8
+
+const (
+	DeskHeartbeatNotWarranted DeskHeartbeatWarrant = iota
+	DeskHeartbeatFailSafeWarrant
+	DeskHeartbeatPositiveWarrant
+)
+
+type deskHeartbeatEvidence struct {
+	warrant   DeskHeartbeatWarrant
+	liveState surface.State
 }
 
 type SynthOperation struct {
@@ -511,7 +531,9 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		// #189: an unwired judgment defaults to ALWAYS-WARRANTED, so the desk-heartbeat trigger is
 		// byte-identical to the pre-judgment recursive heartbeat (#183). A deployment that does not
 		// wire per-recipient backlogs behaves exactly as #183 (the regression-lock on this axis).
-		cfg.HeartbeatWarranted = func(string) bool { return true }
+		cfg.HeartbeatWarranted = func(string) DeskHeartbeatWarrant {
+			return DeskHeartbeatPositiveWarrant
+		}
 	}
 	if cfg.SynthParents == nil {
 		// No synthesis routing configured ⇒ a finishing desk marks NOBODY owed, so the owed-set
@@ -943,11 +965,11 @@ type rateLimitEpisodeOutcomes struct {
 // that wait while holding d.mu would let an external delivery stall the detector's tick loop and
 // block OperatorWake; running it in the tail keeps d.mu held only for the lock-free state logic.
 func (d *Detector) Tick() {
-	// #189 PHASE 1 (OFF d.mu): read + parse each eligible desk's per-recipient backlog and snapshot a
-	// PURE map[agent]bool warrant. The backlog read is FILE I/O and MUST NOT run under d.mu (the
+	// #189 PHASE 1 (OFF d.mu): read + parse each eligible desk's per-recipient backlog, assess its
+	// fresh live state, and snapshot PURE evidence. These reads MUST NOT run under d.mu (the
 	// detector's load-bearing off-mutex invariant — the same one synthesis + the mirror honor); doing it
 	// here, before tickLocked acquires the lock, means the under-lock phase-2 decision (deskHeartbeatLocked)
-	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
+	// consults only already-computed evidence and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
 	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingLeaderExhausted, pendingAutoRevert, pendingTurnEnds := d.tickLocked(warrant)
@@ -1253,7 +1275,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeams []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingLeaderExhausted []RateLimitAutoSwitchCandidate, pendingAutoRevert []string, pendingTurnEnds []string) {
+func (d *Detector) tickLocked(warrant map[string]deskHeartbeatEvidence) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeams []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingLeaderExhausted []RateLimitAutoSwitchCandidate, pendingAutoRevert []string, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -1565,24 +1587,30 @@ func (d *Detector) awaitingSweepLocked(cur Snapshot) []string {
 // lock. For each eligible desk (a configured non-XO agent that HeartbeatEnabled passes — the same
 // pre-filter the under-lock loop applies, so an opted-out/approval-sensitive desk's backlog is NEVER
 // read) it consults the HeartbeatWarranted seam — the FILE I/O (os.ReadFile + backlog.Parse via the cmd
-// wiring) — and snapshots a PURE map[agent]bool warrant. The under-lock phase-2 decision
+// wiring) — plus the fresh live-state seam, and snapshots a PURE evidence map. The under-lock phase-2 decision
 // (deskHeartbeatLocked) then consults ONLY this map, so NO backlog file I/O ever runs under d.mu (the
 // detector's load-bearing off-mutex invariant — the two-phase split mirroring synthEligibleLocked/
 // runSynthesis). Returns nil when the feature is off (HeartbeatEnabled nil) or the warrant seam is
-// unwired (NewDetector defaults it non-nil to always-true, so a wired-feature deployment with no
-// per-recipient backlogs maps every eligible desk to true ⇒ #183 behavior). The HeartbeatEnabled +
-// HeartbeatWarranted seams are read-only/pure w.r.t. detector state, so calling them without the lock is
-// safe (no detector mutable state is touched here).
-func (d *Detector) deskWarrantSnapshot() map[string]bool {
+// unwired (NewDetector defaults it to positive, while a nil live seam defaults to Idle, preserving
+// #183 behavior). The seams are read-only/pure w.r.t. detector state, so calling them without the
+// lock is safe (no detector mutable state is touched here).
+func (d *Detector) deskWarrantSnapshot() map[string]deskHeartbeatEvidence {
 	if d.cfg.HeartbeatEnabled == nil || d.cfg.HeartbeatWarranted == nil {
 		return nil // feature off OR warrant unwired ⇒ the under-lock decision defaults to warranted
 	}
-	warrant := make(map[string]bool, len(d.cfg.Desks))
+	warrant := make(map[string]deskHeartbeatEvidence, len(d.cfg.Desks))
 	for _, name := range d.cfg.Desks {
 		if name == d.cfg.XOAgent || !d.cfg.HeartbeatEnabled(name) {
 			continue // never read the backlog of the XO or an opted-out/approval-sensitive desk
 		}
-		warrant[name] = d.cfg.HeartbeatWarranted(name) // the OFF-lock file read happens HERE
+		liveState := surface.StateIdle
+		if d.cfg.HeartbeatLiveState != nil {
+			liveState = d.cfg.HeartbeatLiveState(name)
+		}
+		warrant[name] = deskHeartbeatEvidence{
+			warrant:   d.cfg.HeartbeatWarranted(name), // the OFF-lock file read happens HERE
+			liveState: liveState,
+		}
 	}
 	return warrant
 }
@@ -1601,7 +1629,7 @@ func (d *Detector) deskWarrantSnapshot() map[string]bool {
 //
 // Inert when HeartbeatEnabled is nil — the whole loop is skipped, so the detector is byte-identical to
 // before #183 (the regression-lock).
-func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]bool) (beats, escalations []string) {
+func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]deskHeartbeatEvidence) (beats, escalations []string) {
 	if d.cfg.HeartbeatEnabled == nil {
 		return nil, nil // feature OFF ⇒ byte-inert
 	}
@@ -1629,6 +1657,22 @@ func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]bo
 			if d.cfg.DeskSettleConsume != nil && d.cfg.DeskSettleConsume(name) {
 				d.deskSettled[name] = true
 			}
+			evidence, ok := warrant[name]
+			if !ok {
+				evidence = deskHeartbeatEvidence{warrant: DeskHeartbeatPositiveWarrant, liveState: surface.StateIdle}
+			}
+			if evidence.liveState != surface.StateIdle {
+				// The debounced pane snapshot said Idle, but a fresh live assessment says the desk is
+				// composing/busy/unknown. Treat that as responsive activity: no duplicate beat, no cap,
+				// and clear any false stop when the live source positively proves Working.
+				if evidence.liveState == surface.StateWorking {
+					delete(d.deskStopped, name)
+					d.deskProgressed[name] = true
+				}
+				d.deskNoProgress[name] = 0
+				delete(d.deskBeatEligibleAt, name)
+				continue
+			}
 			if d.deskSettled[name] || d.deskStopped[name] {
 				continue // a settled/stopped desk does not beat AND does not accrue cadence
 			}
@@ -1652,13 +1696,20 @@ func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]bo
 			// every tick) and continue WITHOUT touching the cap (cap-neutral: a not-warranted idle desk is
 			// not a wedge, so it accrues no no-progress). The judgment can ONLY suppress here; it never
 			// resurrects a beat the gates above withheld — a pure narrowing of the #183 candidate set.
-			if w, ok := warrant[name]; ok && !w {
+			w := evidence.warrant
+			if w == DeskHeartbeatNotWarranted {
 				delete(d.deskBeatEligibleAt, name)
 				continue
 			}
 			// Owed a beat.
 			beats = append(beats, name)
 			d.deskBeatEligibleAt[name] = now
+			if w != DeskHeartbeatPositiveWarrant {
+				// A fail-safe beat proves only that the ledger cannot settle the desk. It is not positive
+				// evidence of owed work, so it cannot advance the wedge cap or stop future beats.
+				d.deskProgressed[name] = false
+				continue
+			}
 			// Cap accounting (progress-observable, in-memory, HERE — not off-mutex): a desk that went
 			// Working since its last beat is responsive (cap resets); otherwise it accrues no-progress.
 			if d.deskProgressed[name] {
@@ -1667,7 +1718,7 @@ func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]bo
 				d.deskNoProgress[name]++
 			}
 			d.deskProgressed[name] = false
-			if d.deskNoProgress[name] >= capN {
+			if d.deskNoProgress[name] == capN {
 				// Wedged: idle + un-progressing across capN beats. Escalate ONCE on the ==capN edge,
 				// then stop beating until re-armed (AgentWake).
 				escalations = append(escalations, name)
