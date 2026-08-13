@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,7 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func TestInjectorTurnConfirmedHookUsesActualRecipientOnlyOnSuccess(t *testing.T) {
+func TestInjectorTurnConfirmedHookOnlyEligibleWorkSend(t *testing.T) {
 	var recipients []string
 	in := NewInjector(func(agent, _ string) error {
 		if agent == "busy" {
@@ -39,10 +40,16 @@ func TestInjectorTurnConfirmedHookUsesActualRecipientOnlyOnSuccess(t *testing.T)
 		return nil
 	}, 1)
 	in.SetTurnConfirmed(func(recipient string) { recipients = append(recipients, recipient) })
-	in.deliver(Job{Agent: "restored", Message: "confirmed", Kind: KindDetector})
-	in.deliver(Job{Agent: "busy", Message: "not confirmed", Kind: KindDetector})
-	if len(recipients) != 1 || recipients[0] != "restored" {
-		t.Fatalf("turn-confirmed recipients = %v, want actual successful recipient only", recipients)
+	in.deliver(Job{Agent: "detector", Message: "internal wake", Kind: KindDetector})
+	in.deliver(Job{Agent: "heartbeat", Message: "internal beat", Kind: KindHeartbeat})
+	in.deliver(Job{Agent: "default", Message: "bare operator work", Kind: KindDefault})
+	in.deliver(Job{Agent: "relay", Message: "operator work", Kind: KindRelay})
+	in.deliver(Job{Agent: "interrupt", Message: "live operator work", Kind: KindOperatorInterrupt})
+	in.deliver(Job{Agent: "send", Message: "desk work", Kind: KindSend})
+	in.deliver(Job{Agent: "busy", Message: "not confirmed", Kind: KindSend})
+	want := []string{"default", "relay", "interrupt", "send"}
+	if !reflect.DeepEqual(recipients, want) {
+		t.Fatalf("eligible turn-confirmed recipients = %v, want %v", recipients, want)
 	}
 }
 

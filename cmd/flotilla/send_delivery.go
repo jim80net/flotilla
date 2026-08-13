@@ -162,12 +162,16 @@ func closeOutDocumentState(rosterDir, recipient string) (exists bool, latest tim
 }
 
 // recipientClosedOut joins an explicit roster flag with the durable seat close-out record.
-// Any unreadable disposition fails closed toward quarantine (quiet, never authorizing escalation).
+// A close-out document is the current disposition until it is explicitly lifted; a delivery
+// confirmation never overrides that administrative state. Any unreadable disposition fails
+// closed toward quarantine (quiet, never authorizing escalation).
 func recipientClosedOut(rosterDir string, cfg *roster.Config, recipient string) bool {
-	if cfg != nil && cfg.RecipientClosedOut(recipient) {
-		return true
+	if cfg != nil {
+		if closed, present := cfg.RecipientClosedOutDisposition(recipient); present {
+			return closed
+		}
 	}
-	exists, closedAt, err := closeOutDocumentState(rosterDir, recipient)
+	exists, _, err := closeOutDocumentState(rosterDir, recipient)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla: read close-out disposition for %q failed; suppressing undelivered escalation: %v\n", recipient, err)
 		return true
@@ -175,35 +179,25 @@ func recipientClosedOut(rosterDir string, cfg *roster.Config, recipient string) 
 	if !exists {
 		return false
 	}
-	restoredAt, err := dispatch.NewQuarantineRegistry(rosterDir).RecipientRestoredAt(recipient)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "flotilla: read restoration disposition for %q failed; suppressing undelivered escalation: %v\n", recipient, err)
-		return true
-	}
-	// A malformed/legacy close-out document has no comparable timestamp and therefore remains
-	// closed until it is repaired; uncertainty must never authorize a recurring alert.
-	return closedAt.IsZero() || !restoredAt.After(closedAt)
+	return true
 }
 
 // reopenRecipientQuarantine lifts only the reversible quarantine marker after a confirmed turn
 // reaches a recipient whose explicit roster disposition is no longer closed out. It never consumes
 // or removes the preserved inbound rows and never fabricates an acknowledgement.
 func reopenRecipientQuarantine(rosterDir string, cfg *roster.Config, recipient string, now time.Time) {
-	if cfg == nil || cfg.RecipientClosedOut(recipient) {
+	// Use the exact same doc-aware disposition as the quarantine trigger. An eligible send
+	// confirmed into a still-closed composer is not proof that the provider/seat was restored.
+	if cfg == nil || recipientClosedOut(rosterDir, cfg, recipient) {
 		return
 	}
 	registry := dispatch.NewQuarantineRegistry(rosterDir)
-	hasDocument, closedAt, docErr := closeOutDocumentState(rosterDir, recipient)
 	hasActive, activeErr := registry.HasActiveRecipient(recipient)
-	restoredAt, restoredErr := registry.RecipientRestoredAt(recipient)
-	if docErr != nil || activeErr != nil || restoredErr != nil {
-		fmt.Fprintf(os.Stderr, "flotilla: inspect dispatch quarantine for %q failed: closeout=%v active=%v restored=%v\n", recipient, docErr, activeErr, restoredErr)
+	if activeErr != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: inspect dispatch quarantine for %q failed: %v\n", recipient, activeErr)
 		return
 	}
-	// Confirmed turns after the one restoration edge are no-ops. This prevents routine beats
-	// from changing the alert generation and re-emitting the same preserved rows forever.
-	documentNeedsRestore := hasDocument && (closedAt.IsZero() || !restoredAt.After(closedAt))
-	if !hasActive && !documentNeedsRestore {
+	if !hasActive {
 		return
 	}
 	reopened, err := registry.ReopenRecipient(recipient, now)

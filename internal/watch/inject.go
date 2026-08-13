@@ -157,7 +157,7 @@ type Injector struct {
 	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
 	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
 	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
-	onTurnConfirmed           func(recipient string)                  // optional: actual pane accepted a turn; may reopen recipient quarantine
+	onTurnConfirmed           func(recipient string)                  // optional: eligible work/send accepted a turn; may reopen recipient quarantine
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
@@ -220,8 +220,9 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 // dispatch in the recipient's inbound ledger (#472). Must be set before Start.
 func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 
-// SetTurnConfirmed installs a hook called after any confirmed pane delivery, keyed to the actual
-// pane recipient (not an intended recipient hidden behind coordinator ingress).
+// SetTurnConfirmed installs a hook called only after an eligible confirmed operator/work delivery
+// (a relay kind or KindSend), keyed to the actual pane recipient. Internal detector/heartbeat wakes
+// are deliberately excluded: their composer confirmation is not provider-restoration evidence.
 func (in *Injector) SetTurnConfirmed(fn func(recipient string)) { in.onTurnConfirmed = fn }
 
 // SetCoordinatorIngress installs #533 adjutant front-office ingress aliasing before coordinator delivery.
@@ -334,7 +335,7 @@ func (in *Injector) deliver(j Job) {
 		in.resetFutileAttempts(j.Agent)
 		in.noteRelayDone(j)
 		in.logDelivered(j)
-		if in.onTurnConfirmed != nil {
+		if in.onTurnConfirmed != nil && (isRelay(j.Kind) || j.Kind == KindSend) {
 			in.onTurnConfirmed(j.Agent)
 		}
 		if isRelay(j.Kind) && j.MessageID != "" {
