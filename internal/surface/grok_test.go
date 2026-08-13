@@ -306,6 +306,35 @@ func TestGrok45ComposerFixturesArePositionallyBound(t *testing.T) {
 	}
 }
 
+func TestGrok46ComposerCapturePartitions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fixture string
+		cursorY int
+	}{
+		{name: "working-seat opt-in chrome", fixture: "testdata/grok-46-opt-in-cleared.txt", cursorY: 5},
+		{name: "previously uncertain off-cursor render", fixture: "testdata/grok-46-off-cursor-cleared.txt", cursorY: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captured, err := os.ReadFile(tc.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := parseGrokState(string(captured)); got != StateIdle {
+				t.Fatalf("parseGrokState = %v, want Idle", got)
+			}
+			if got := classifyGrokComposerLine(string(captured), tc.cursorY); got != ComposerCleared {
+				t.Fatalf("classifyGrokComposerLine = %v, want Cleared", got)
+			}
+			if tc.name == "previously uncertain off-cursor render" {
+				if got := classifyComposerLine(string(captured), tc.cursorY); got != ComposerUndetermined {
+					t.Fatalf("stale Claude classifier = %v, want Undetermined on Grok chrome", got)
+				}
+			}
+		})
+	}
+}
+
 // TestGrokComposerStateWiring: ComposerState threads cursorState + capturePane → classifyGrokComposerLine,
 // and fails safe (Undetermined) on a cursor read error or a tmux copy/view mode.
 func TestGrokComposerStateWiring(t *testing.T) {

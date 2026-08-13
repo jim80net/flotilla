@@ -7,6 +7,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -99,5 +100,40 @@ func TestAgentSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "data", Surface: "grok"}}}
 	if got := agentSurface(cfg, "data"); got != "grok" {
 		t.Errorf("agentSurface(torn overlay) = %q, want the roster surface grok (fail-safe)", got)
+	}
+}
+
+func TestResolveWatchDeliveryDriverPrefersLiveHarness(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+
+	drv, err := resolveWatchDeliveryDriver(cfg, "coordinator", "%42", func(pane string) (string, error) {
+		if pane != "%42" {
+			t.Fatalf("pane = %q, want %%42", pane)
+		}
+		return "grok", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drv.Name() != "grok" {
+		t.Fatalf("delivery driver = %q, want live grok driver", drv.Name())
+	}
+	if _, ok := drv.(surface.ComposerStateProbe); !ok {
+		t.Fatal("live delivery driver must retain Grok's composer-state gate")
+	}
+}
+
+func TestResolveWatchDeliveryDriverFailsClosedToConfiguredSurfaceOnCommandError(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	drv, err := resolveWatchDeliveryDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drv.Name() != "claude-code" {
+		t.Fatalf("delivery driver = %q, want configured fallback claude-code", drv.Name())
 	}
 }

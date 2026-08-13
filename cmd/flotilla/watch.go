@@ -295,11 +295,11 @@ func cmdWatch(args []string) error {
 	// submit and its Enter-only retry / self-heal.
 	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
 		return func(agent, message string) error {
-			drv, ok := surface.Get(agentSurface(cfg, agent))
-			if !ok {
-				return fmt.Errorf("unknown surface for agent %q", agent)
-			}
 			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+			if err != nil {
+				return err
+			}
+			drv, err := resolveWatchDeliveryDriver(cfg, agent, pane, deliver.PaneCommand)
 			if err != nil {
 				return err
 			}
@@ -2385,6 +2385,24 @@ func agentSurface(cfg *roster.Config, name string) string {
 		return a.Surface
 	}
 	return ""
+}
+
+// resolveWatchDeliveryDriver binds confirmed delivery to the harness actually
+// running in the resolved pane. The daemon keeps long-lived closures over its
+// startup roster; after an external roster/overlay reconciliation that snapshot
+// can lag even though the pane has already moved. Driving a live Grok pane with
+// the stale Claude classifier makes Grok's off-cursor composer look undetermined.
+// ResolveDriver preserves the configured surface as fallback when the live
+// command cannot be read, but lets the known live command win when it can.
+func resolveWatchDeliveryDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
+	drv, liveSurface, drift, err := surface.ResolveDriver(agentSurface(cfg, agent), pane, paneCommand)
+	if err != nil {
+		return nil, fmt.Errorf("resolve live surface for agent %q: %w", agent, err)
+	}
+	if drift {
+		log.Printf("flotilla watch: delivery driver drift — %s configured surface differs from live pane harness %q; using live harness", agent, liveSurface)
+	}
+	return drv, nil
 }
 
 // adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval
