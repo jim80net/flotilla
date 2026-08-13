@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -301,9 +302,23 @@ func cmdWatch(args []string) error {
 				return err
 			}
 			defer txn.Release()
-			return submitWithWatchLiveDriver(current, agent, pane, deliver.PaneCommand, func(drv surface.Driver) error {
-				return submit(temporalClassifier.Temporal(drv, pane), pane, message)
-			})
+			liveCommand, err := deliver.PaneCommand(pane)
+			if err != nil {
+				return fmt.Errorf("resolve live surface for agent %q: read pane command: %w", agent, err)
+			}
+			drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
+			if err != nil {
+				return err
+			}
+			temporal := temporalClassifier.Temporal(drv, pane)
+			if err := submit(temporal, pane, message); !errors.Is(err, surface.ErrTransient) {
+				return err
+			}
+			deps := watchOfficerRouteDeps(rosterDir)
+			deps.submit = func(surface.Driver, string, string) error {
+				return confirm.SubmitOfficerProvenIdle(temporal, pane, message)
+			}
+			return deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", agent, pane, liveSurface, liveCommand, message, "", false, "ErrTransient", deps)
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
@@ -773,19 +788,42 @@ func cmdWatch(args []string) error {
 			Interval:          interval,
 			ReferenceInterval: referenceInterval,
 			Assess: func(agent string) surface.State {
-				return assessWatchAgent(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand)
+				current := currentRoster()
+				pane, err := deliver.ResolvePane(agentTitle(current, agent))
+				if err != nil {
+					return surface.StateShell
+				}
+				liveCommand, err := deliver.PaneCommand(pane)
+				if err != nil {
+					return surface.StateUnknown
+				}
+				drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
+				if err != nil {
+					return surface.StateUnknown
+				}
+				state := surface.AssessForFleet(drv, pane)
+				if state == surface.StateUnknown && officerDetectorIdleOverride(drv, agent, pane, liveSurface, liveCommand, watchOfficerRouteDeps(rosterDir)) {
+					return surface.StateIdle
+				}
+				return state
 			},
 			RateLimitMaterial: rateLimitMaterial(currentRoster),
-			Usage:             usageObservation(cfg, flatLaunch),
+			Usage:             usageObservation(currentRoster, flatLaunch),
 			UsageDispatch:     func(run func()) { go run() },
 			RateLimitReset:    rateLimitReset(currentRoster),
 			RateLimitDispatch: func(run func()) { go run() },
 			RateLimitAutoSwitchEligible: func(agent string) bool {
-				if !cfg.AutoSwitchEligible(agent) {
+				current := currentRoster()
+				if !current.AutoSwitchEligible(agent) {
 					return false
 				}
 				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
-				return agentSurface(cfg, agent) == surface.DefaultSurface
+				pane, err := deliver.ResolvePane(agentTitle(current, agent))
+				if err != nil {
+					return false
+				}
+				_, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, deliver.PaneCommand)
+				return err == nil && liveSurface == surface.DefaultSurface
 			},
 			SignalHash:   signalHash,
 			AckAge:       ack.Age,
@@ -894,15 +932,16 @@ func cmdWatch(args []string) error {
 			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
 			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, endFlight, autoSwitchHooks{
 				afterSuccess: func(agent string) {
-					if !cfg.IsCoordinator(agent) {
+					current := currentRoster()
+					if !current.IsCoordinator(agent) {
 						return
 					}
-					toSurface := agentSurface(cfg, agent)
+					toSurface := agentSurface(current, agent)
 					body := coordinatorResuscitationNotifyBody(agent, toSurface)
-					for _, sub := range cfg.AgentsBelow(agent) {
+					for _, sub := range current.AgentsBelow(agent) {
 						injector.Enqueue(watch.Job{Agent: sub, Message: body, Kind: watch.KindDetector})
 					}
-					if adj := cfg.AdjutantFor(agent); adj != "" {
+					if adj := current.AdjutantFor(agent); adj != "" {
 						injector.Enqueue(watch.Job{
 							Agent:   adj,
 							Message: body + "\n(Adjutant: confirm leader is live on the new tier; re-brief if needed.)",
@@ -1867,18 +1906,19 @@ func rateLimitMaterialResolved(cfg *roster.Config, agent, pane string, paneComma
 // usageObservation wires the optional read-only UsageProbe. Provider identity
 // comes from the active launch slot, the same source auto-switch trusts; missing
 // chrome/capability/slot metadata remains honest absence where applicable.
-func usageObservation(cfg *roster.Config, launches *launch.Config) func(string) (surface.UsageReport, string, string, bool) {
+func usageObservation(currentRoster func() *roster.Config, launches *launch.Config) func(string) (surface.UsageReport, string, string, bool) {
 	return func(agent string) (surface.UsageReport, string, string, bool) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
+		cfg := currentRoster()
+		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+		if err != nil {
+			return surface.UsageReport{}, "", "", false
+		}
+		drv, err := resolveWatchLiveDriver(cfg, agent, pane, deliver.PaneCommand)
+		if err != nil {
 			return surface.UsageReport{}, "", "", false
 		}
 		probe, ok := surface.UsageSupport(drv)
 		if !ok {
-			return surface.UsageReport{}, "", "", false
-		}
-		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-		if err != nil {
 			return surface.UsageReport{}, "", "", false
 		}
 		report, ok := probe.Usage(pane)
@@ -1957,12 +1997,13 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 	if err != nil {
 		return "", false, err
 	}
-	rr, _, liveSurface, drift, err := surface.ResolveResultReader(agentSurface(cfg, agent), pane, deliver.PaneCommand)
+	drv, liveSurface, drift, err := surface.ResolveLiveDriver(agentSurface(cfg, agent), pane, deliver.PaneCommand)
 	if err != nil {
-		if strings.Contains(err.Error(), "has no session-store result reader") {
-			return "", false, nil
-		}
 		return "", false, err
+	}
+	rr, ok := drv.(surface.ResultReader)
+	if !ok {
+		return "", false, nil
 	}
 	if drift {
 		log.Printf("flotilla watch: result read drift — %s roster surface differs from live pane harness %q", agent, liveSurface)
@@ -2393,18 +2434,7 @@ func agentSurface(cfg *roster.Config, name string) string {
 // A command-read error is also unknown: no classifier may run without proving
 // which harness owns the live pane.
 func resolveWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
-	if paneCommand == nil {
-		return nil, fmt.Errorf("resolve live surface for agent %q: pane command reader unavailable", agent)
-	}
-	liveCommand, commandErr := paneCommand(pane)
-	if commandErr != nil {
-		return nil, fmt.Errorf("resolve live surface for agent %q: read pane command: %w", agent, commandErr)
-	}
-	if _, ok := surface.SurfaceFromPaneCommand(liveCommand); !ok {
-		return nil, fmt.Errorf("resolve live surface for agent %q: unrecognized pane command %q", agent, strings.TrimSpace(liveCommand))
-	}
-	oneRead := func(string) (string, error) { return liveCommand, nil }
-	drv, liveSurface, drift, err := surface.ResolveDriver(agentSurface(cfg, agent), pane, oneRead)
+	drv, liveSurface, drift, err := surface.ResolveLiveDriver(agentSurface(cfg, agent), pane, paneCommand)
 	if err != nil {
 		return nil, fmt.Errorf("resolve live surface for agent %q: %w", agent, err)
 	}

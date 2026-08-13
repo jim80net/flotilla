@@ -54,6 +54,33 @@ func ResolveDriver(rosterSurface, pane string, paneCommand func(string) (string,
 	return drv, liveSurface, drift, nil
 }
 
+// ResolveLiveDriver is the fail-closed live-decision resolver. Unlike the
+// compatibility ResolveDriver reader seam, it never falls back to roster state
+// when the pane command cannot be read or mapped: actuation and live assessment
+// must prove which harness owns the pane at the moment of use.
+func ResolveLiveDriver(rosterSurface, pane string, paneCommand func(string) (string, error)) (Driver, string, bool, error) {
+	if pane == "" || paneCommand == nil {
+		return nil, "", false, fmt.Errorf("live surface resolution requires a pane and command reader")
+	}
+	cmd, err := paneCommand(pane)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("read live command for pane %q: %w", pane, err)
+	}
+	liveSurface, ok := SurfaceFromPaneCommand(cmd)
+	if !ok {
+		return nil, "", false, fmt.Errorf("unrecognized live command %q for pane %q", cmd, pane)
+	}
+	want := rosterSurface
+	if want == "" {
+		want = DefaultSurface
+	}
+	drv, ok := Get(liveSurface)
+	if !ok {
+		return nil, liveSurface, liveSurface != want, fmt.Errorf("unknown live surface %q for pane %q", liveSurface, pane)
+	}
+	return drv, liveSurface, liveSurface != want, nil
+}
+
 // ResolveResultReader picks the ResultReader for a desk pane. Live harness wins on drift —
 // same policy as ResolveDriver — so `flotilla result` reads the session store that actually
 // exists (e.g. grok store while roster still says claude-code).

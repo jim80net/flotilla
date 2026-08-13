@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestResolveLiveDriverFailClosedAndLiveWins(t *testing.T) {
+	drv, live, drift, err := ResolveLiveDriver("claude-code", "%1", func(string) (string, error) { return "grok", nil })
+	if err != nil || drv == nil || live != "grok" || !drift {
+		t.Fatalf("live grok over configured claude = drv=%v live=%q drift=%t err=%v", drv, live, drift, err)
+	}
+	for name, read := range map[string]func(string) (string, error){
+		"read error": func(string) (string, error) { return "", errors.New("tmux unavailable") },
+		"unknown":    func(string) (string, error) { return "mystery", nil },
+		"shell":      func(string) (string, error) { return "bash", nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, _, _, err := ResolveLiveDriver("claude-code", "%1", read); err == nil || got != nil {
+				t.Fatalf("got driver=%v err=%v, want nil/error", got, err)
+			}
+		})
+	}
+}
+
 func TestSurfaceFromPaneCommand(t *testing.T) {
 	tests := []struct {
 		cmd  string

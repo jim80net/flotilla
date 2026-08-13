@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -125,6 +126,8 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla send --from <officer> --officer-capture-sha <sha256> --officer-confirm-clean-composer <agent> <message>
+                                                      audited route around an uncertain classifier; coordinator-only
   flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
@@ -392,6 +395,8 @@ func cmdSend(args []string) error {
 	noMirror := fs.Bool("no-mirror", false, "force-skip the Discord audit mirror")
 	doMirror := fs.Bool("mirror", false, "force-enable the Discord audit mirror (overrides a default-off roster)")
 	crossVenture := fs.Bool("cross-venture", false, "allow and audit a desk-to-foreign-desk send")
+	officerCaptureSHA := fs.String("officer-capture-sha", "", "route around an uncertain classifier using this officer-reviewed exact pane capture SHA-256")
+	officerCleanComposer := fs.Bool("officer-confirm-clean-composer", false, "confirm the exact officer capture shows an idle clean main composer")
 	var attachPaths attachPathsFlag
 	fs.Var(&attachPaths, "attach", "attach a file to the audit mirror Discord post (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -399,6 +404,9 @@ func cmdSend(args []string) error {
 	}
 	if *noMirror && *doMirror {
 		return fmt.Errorf("--mirror and --no-mirror are mutually exclusive")
+	}
+	if (*officerCaptureSHA == "") != (!*officerCleanComposer) {
+		return fmt.Errorf("--officer-capture-sha and --officer-confirm-clean-composer must be supplied together")
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -454,13 +462,6 @@ func cmdSend(args []string) error {
 	if decision.Audit {
 		fmt.Fprintf(os.Stderr, "flotilla send: AUDIT --cross-venture override: %s → %s (%s)\n", *from, agentName, decision.Reason)
 	}
-	// Resolve the agent's surface driver (how this surface submits a turn).
-	// Unknown surface is a clear error, never a silent mis-drive.
-	drv, ok := surface.Get(agent.Surface)
-	if !ok {
-		return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", agentName, agent.Surface)
-	}
-
 	// Deliver = wake: submit the message into the agent's pane via its driver and CONFIRM a
 	// turn started (idle-gate → submit → confirm the Idle→Working edge → Enter-only retry),
 	// rather than assuming success from the tmux exit code (the relay silent-drop bug). This is
@@ -470,14 +471,43 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
-	queued, err := deliverOrQueueSend(cfg, resolvedRoster, *from, agentName, drv, pane, message)
+	// Every live delivery resolves the pane's harness at the moment of use. A
+	// stale roster surface, unreadable command, unknown command, or shell can
+	// never authorize submission through a configured classifier.
+	liveCommand, err := deliver.PaneCommand(pane)
 	if err != nil {
-		return err
+		return fmt.Errorf("agent %q: read live command: %w", agentName, err)
 	}
-	if queued {
-		// Queued ≠ delivered — skip audit mirror and ledger (watch delivers later).
-		return nil
+	drv, liveSurface, _, err := surface.ResolveLiveDriver(agent.Surface, pane, func(string) (string, error) { return liveCommand, nil })
+	if err != nil {
+		return fmt.Errorf("agent %q: %w", agentName, err)
+	}
+	if *officerCaptureSHA != "" {
+		if !cfg.IsCoordinator(*from) {
+			return fmt.Errorf("officer route requires coordinator authority; %q is not a coordinator", *from)
+		}
+		confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+		deps := officerRouteDeps{
+			capture: deliver.CapturePane, cursor: deliver.CursorSnapshot, sleep: time.Sleep, now: time.Now,
+			empty: func(surface.Driver, string) (bool, string) { return true, "officer-confirmed exact capture" },
+			audit: func(record officerRouteAudit) error {
+				return appendOfficerRouteAudit(filepath.Join(filepath.Dir(resolvedRoster), "flotilla-officer-delivery-audit.jsonl"), record)
+			},
+			submit: confirm.SubmitOfficerProvenIdle,
+		}
+		if err := deliverOfficerRoute(drv, *from, "roster-coordinator", "cli-send", agentName, pane, liveSurface, liveCommand, message, *officerCaptureSHA, *officerCleanComposer, "ComposerUndetermined", deps); err != nil {
+			return err
+		}
+	} else {
+		// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
+		queued, err := deliverOrQueueSend(cfg, resolvedRoster, *from, agentName, drv, pane, message)
+		if err != nil {
+			return err
+		}
+		if queued {
+			// Queued ≠ delivered — skip audit mirror and ledger (watch delivers later).
+			return nil
+		}
 	}
 
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent

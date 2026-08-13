@@ -374,6 +374,19 @@ func TestGrokComposerStateWiring(t *testing.T) {
 	})
 }
 
+func TestGrokUnseenFooterVariantRemainsUncertainForOfficerBypassControl(t *testing.T) {
+	// Deliberately outside grokComposerFooter: the officer route test proves
+	// this next-variant class can move via independent idle proof without
+	// teaching the Grok expert classifier another footer.
+	captured := "transcript\n  │ ❯                         │\n  ╰── future-model [novel controls] ──╯"
+	if grokComposerFooter.MatchString("  ╰── future-model [novel controls] ──╯") {
+		t.Fatal("invented footer unexpectedly matched grokComposerFooter")
+	}
+	if got := classifyGrokComposerLine(captured, 1); got != ComposerUndetermined {
+		t.Fatalf("classifyGrokComposerLine = %s, want Undetermined", got)
+	}
+}
+
 func TestGrokLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {
 		g := grok{

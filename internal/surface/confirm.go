@@ -169,7 +169,16 @@ const (
 // retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
 // read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, false)
+	return c.submit(d, pane, text, false, false)
+}
+
+// SubmitOfficerProvenIdle is the narrowly-scoped route around a failed
+// ComposerState pre-paste classification. The caller MUST first establish and
+// audit an independent, officer-confirmed idle proof for the exact pane frame.
+// This method skips only the two pre-paste classifier gates; submission and the
+// normal post-submit confirmation remain unchanged.
+func (c Confirm) SubmitOfficerProvenIdle(d Driver, pane, text string) error {
+	return c.submit(d, pane, text, false, true)
 }
 
 // SubmitInterrupt delivers a verified operator message even while the target is Working.
@@ -177,66 +186,68 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 // A Working pane must expose a positively cleared main composer; queued/pending/overlay or
 // undetermined composers fail closed before paste. Confirmation after paste is identical to Submit.
 func (c Confirm) SubmitInterrupt(d Driver, pane, text string) error {
-	return c.submit(d, pane, text, true)
+	return c.submit(d, pane, text, true, false)
 }
 
-func (c Confirm) submit(d Driver, pane, text string, allowWorking bool) error {
-	// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
-	state := d.Assess(pane)
-	switch state {
-	case StateWorking:
-		if !allowWorking {
-			return ErrBusy
-		}
-	case StateShell:
-		return ErrCrashed
-	case StateWedge:
-		return ErrWedge
-	case StateIdle:
-		// proceed
-	default: // Unknown, AwaitingInput, AwaitingApproval, Errored
-		if reason := composerBlockReason(d, pane); reason != "" {
-			logPanelBlocked(pane, "gate:"+reason)
-			return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
-		}
-		return ErrTransient
-	}
-
-	// 1b. pre-paste carve-out — the ONLY place the cursor/glyph gates (affirmed by the reviewing XO):
-	//     if the cursor is on a per-agent message SUB-COMPOSER ("Message @<agent>") or an agent-list
-	//     row, REFUSE before pasting. A paste there would MIS-DELIVER the body to a background agent
-	//     AND the post-submit check would FALSE-CONFIRM it (the composer clears) — a silent wrong-
-	//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. An
-	//     Undetermined probe also fails closed because a
-	//     highlighted selector row can share the composer's prompt glyph. The
-	//     post-submit composer state remains the delivery authority after a
-	//     positively identified composer passes this gate.
+func (c Confirm) submit(d Driver, pane, text string, allowWorking, officerProvenIdle bool) error {
 	var sp ComposerStateProbe
 	if p, ok := d.(ComposerStateProbe); ok {
 		sp = p
 	}
-	if sp != nil {
-		composer := sp.ComposerState(pane)
-		switch composer {
-		case ComposerSubAgent:
-			logPanelBlocked(pane, "gate:sub-composer")
-			return ErrPanelBlocked
-		case ComposerListNav:
-			logPanelBlocked(pane, "gate:list-nav")
-			return ErrPanelBlocked
-		case ComposerUndetermined:
+	if !officerProvenIdle {
+		// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
+		state := d.Assess(pane)
+		switch state {
+		case StateWorking:
+			if !allowWorking {
+				return ErrBusy
+			}
+		case StateShell:
+			return ErrCrashed
+		case StateWedge:
+			return ErrWedge
+		case StateIdle:
+			// proceed
+		default: // Unknown, AwaitingInput, AwaitingApproval, Errored
 			if reason := composerBlockReason(d, pane); reason != "" {
 				logPanelBlocked(pane, "gate:"+reason)
 				return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
 			}
 			return ErrTransient
 		}
-		if state == StateWorking && composer != ComposerCleared {
-			logPanelBlocked(pane, "gate:working-composer-not-clear")
-			return ErrPanelBlocked
+
+		// 1b. pre-paste carve-out — the ONLY place the cursor/glyph gates (affirmed by the reviewing XO):
+		//     if the cursor is on a per-agent message SUB-COMPOSER ("Message @<agent>") or an agent-list
+		//     row, REFUSE before pasting. A paste there would MIS-DELIVER the body to a background agent
+		//     AND the post-submit check would FALSE-CONFIRM it (the composer clears) — a silent wrong-
+		//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. An
+		//     Undetermined probe also fails closed because a
+		//     highlighted selector row can share the composer's prompt glyph. The
+		//     post-submit composer state remains the delivery authority after a
+		//     positively identified composer passes this gate.
+		if sp != nil {
+			composer := sp.ComposerState(pane)
+			switch composer {
+			case ComposerSubAgent:
+				logPanelBlocked(pane, "gate:sub-composer")
+				return ErrPanelBlocked
+			case ComposerListNav:
+				logPanelBlocked(pane, "gate:list-nav")
+				return ErrPanelBlocked
+			case ComposerUndetermined:
+				if reason := composerBlockReason(d, pane); reason != "" {
+					logPanelBlocked(pane, "gate:"+reason)
+					return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
+				}
+				return ErrTransient
+			}
+			if state == StateWorking && composer != ComposerCleared {
+				logPanelBlocked(pane, "gate:working-composer-not-clear")
+				return ErrPanelBlocked
+			}
+		} else if state == StateWorking {
+			return ErrTransient
 		}
-	} else if state == StateWorking {
-		return ErrTransient
 	}
 
 	// 2. attempt 1 — full paste + Enter. Capture Submit's error: a paste that did NOT land

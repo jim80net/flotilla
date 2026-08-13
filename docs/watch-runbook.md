@@ -182,6 +182,16 @@ retry. A passive limit banner above that normal footer is only a notice: deliver
 switch phase 0 may proceed. Exact rate-limit overlay prose remains pending a live
 capture under #690; safety depends on the selector/composer structure, not those words.
 
+**Officer route around classifier uncertainty.** When the selected live driver is
+uncertain but the pane is actually idle, watch may proceed only after two byte-stable
+pane/cursor samples show a visible cursor outside copy mode, the live driver's raw idle
+assessment, and an independent registered driver reports an empty main composer; any
+Working report vetoes. CLI use is coordinator-only and requires the SHA-256 of an exact,
+officer-reviewed clean-composer capture plus
+`--officer-confirm-clean-composer`. Both paths write authorization before sending and
+append the confirmed outcome to `<roster-dir>/flotilla-officer-delivery-audit.jsonl`.
+This is an audited override of an uncertain mechanic, not a new surface-marker regex.
+
 Heartbeat / change-detector ticks flow through the same confirmed delivery (so they too
 recover a dropped Enter), but they are **time-relative**: a tick that arrives while the XO
 is busy is dropped, not deferred (the next tick re-evaluates), and a failed tick never
