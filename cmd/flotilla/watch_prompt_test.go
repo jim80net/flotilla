@@ -177,27 +177,44 @@ func TestDeskWarrantedGate_FutureNextPreWallIsNotDue(t *testing.T) {
 	}
 }
 
-type heartbeatResultDriver struct{ state surface.State }
-
-func (d heartbeatResultDriver) Name() string                        { return "heartbeat-result" }
-func (d heartbeatResultDriver) Submit(string, string) error         { return nil }
-func (d heartbeatResultDriver) Assess(string) surface.State         { return d.state }
-func (d heartbeatResultDriver) Rotate(string) error                 { return nil }
-func (d heartbeatResultDriver) RotateStrategy() surface.Strategy    { return surface.SlashCommand }
-func (d heartbeatResultDriver) Close(string) error                  { return nil }
-func (d heartbeatResultDriver) LatestResult(string) (string, error) { return "MID-TURN", nil }
-
-func TestDeskHeartbeatResultStateUsesIndependentResultPath(t *testing.T) {
+func TestDeskHeartbeatLiveStateFailsClosedOnUnreadableOrUnknownCommand(t *testing.T) {
 	cfg := loadWarrantCfg(t)
-	got := deskHeartbeatResultState(cfg, "backend",
+	for _, tc := range []struct {
+		name    string
+		command func(string) (string, error)
+	}{
+		{name: "command-read-error", command: func(string) (string, error) { return "", errors.New("tmux read failed") }},
+		{name: "unrecognized-command", command: func(string) (string, error) { return "not-a-harness", nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assessed := false
+			got := deskHeartbeatLiveState(cfg, "backend",
+				func(string) (string, error) { return "%42", nil }, tc.command,
+				resolveWatchLiveDriver,
+				func(surface.Driver, string) surface.State {
+					assessed = true
+					return surface.StateIdle
+				})
+			if got != surface.StateUnknown || assessed {
+				t.Fatalf("fail-closed live state = %v assessed=%v, want unknown without stale-driver assessment", got, assessed)
+			}
+		})
+	}
+}
+
+func TestDeskHeartbeatLiveStateReadableDriftUsesLiveDriver(t *testing.T) {
+	cfg := loadWarrantCfg(t) // backend is rostered on claude-code
+	var assessedDriver string
+	got := deskHeartbeatLiveState(cfg, "backend",
 		func(string) (string, error) { return "%42", nil },
 		func(string) (string, error) { return "grok", nil },
-		func(rosterSurface, pane string, paneCommand func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error) {
-			drv := heartbeatResultDriver{state: surface.StateWorking}
-			return drv, drv, "grok", false, nil
+		resolveWatchLiveDriver,
+		func(drv surface.Driver, _ string) surface.State {
+			assessedDriver = drv.Name()
+			return surface.StateWorking
 		})
-	if got != surface.StateWorking {
-		t.Fatalf("result path live state = %v, want working even when the detector pane snapshot is idle", got)
+	if got != surface.StateWorking || assessedDriver != "grok" {
+		t.Fatalf("readable drift state=%v driver=%q, want working from live grok driver", got, assessedDriver)
 	}
 }
 
@@ -214,12 +231,14 @@ func TestDeskHeartbeatWedgeRequiresPositiveBacklogObligation(t *testing.T) {
 		liveIdle      bool
 		wantNoBeat    bool
 		futureNext    bool
+		liveReadError bool
 	}{
 		{name: "absent", exists: false, wantContinues: true, liveIdle: true},
 		{name: "empty", exists: true, content: "", wantContinues: true, liveIdle: true},
 		{name: "sectionless", exists: true, content: "# Notes\nparked\n", wantContinues: true, liveIdle: true},
 		{name: "actionable", exists: true, content: "## Backlog\n- [in-flight] owed work\n", wantEscalate: 1, liveIdle: true},
 		{name: "pane-idle-live-busy", exists: true, content: "## Backlog\n- [in-flight] owed work\n", wantNoBeat: true},
+		{name: "pane-idle-live-command-unreadable", exists: true, content: "## Backlog\n- [in-flight] owed work\n", wantNoBeat: true, liveReadError: true},
 		{name: "future-next-pre-wall", exists: true, liveIdle: true, wantNoBeat: true, futureNext: true},
 	}
 	for _, tc := range tests {
@@ -246,12 +265,19 @@ func TestDeskHeartbeatWedgeRequiresPositiveBacklogObligation(t *testing.T) {
 					if tc.liveIdle {
 						return surface.StateIdle
 					}
-					return deskHeartbeatResultState(rcfg, "backend",
+					paneCommand := func(string) (string, error) { return "grok", nil }
+					if tc.liveReadError {
+						paneCommand = func(string) (string, error) { return "", errors.New("tmux read failed") }
+					}
+					return deskHeartbeatLiveState(rcfg, "backend",
 						func(string) (string, error) { return "%42", nil },
-						func(string) (string, error) { return "grok", nil },
-						func(string, string, func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error) {
-							drv := heartbeatResultDriver{state: surface.StateWorking}
-							return drv, drv, "grok", false, nil
+						paneCommand,
+						resolveWatchLiveDriver,
+						func(surface.Driver, string) surface.State {
+							if tc.liveReadError {
+								return surface.StateIdle // stale roster fallback would wrongly authorize the cap
+							}
+							return surface.StateWorking
 						})
 				},
 				WakeDeskHeartbeat: func(agent string) { beats = append(beats, agent) },

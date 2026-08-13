@@ -924,11 +924,11 @@ func cmdWatch(args []string) error {
 			HeartbeatEnabled:   deskHeartbeatEnabled,
 			HeartbeatWarranted: deskHeartbeatWarranted,
 			HeartbeatLiveState: func(agent string) surface.State {
-				// Fresh, non-debounced result-path join. This is the exact live-driver assessment
-				// used by `flotilla result`'s mid-turn warning (and by delivery's busy gate), not
-				// the detector's pane assessment or its officer override. Only proven live Idle
-				// from this independent observation may advance the wedge cap.
-				return deskHeartbeatResultState(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand, surface.ResolveResultReader)
+				// Fresh, non-debounced fail-closed live join. Live identity must be readable and
+				// recognized; uncertainty returns Unknown and cannot authorize a beat or wedge.
+				return deskHeartbeatLiveState(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand, resolveWatchLiveDriver, func(drv surface.Driver, pane string) surface.State {
+					return drv.Assess(pane) // the same MID-TURN signal used by `flotilla result`
+				})
 			},
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
@@ -2564,21 +2564,21 @@ func assessWatchAgent(cfg *roster.Config, agent string, resolvePane func(string)
 	return assessWatchResolvedPane(cfg, agent, pane, paneCommand, surface.AssessForFleet)
 }
 
-type resultReaderResolver func(string, string, func(string) (string, error)) (surface.ResultReader, surface.Driver, string, bool, error)
+type heartbeatLiveDriverResolver func(*roster.Config, string, string, func(string) (string, error)) (surface.Driver, error)
 
-// deskHeartbeatResultState observes the result command's independent live path. The ResultReader
-// resolution binds to the pane's actual harness, then Driver.Assess supplies the same MID-TURN signal
-// printed by `flotilla result`. Resolution/read failures are Unknown and therefore cap-neutral.
-func deskHeartbeatResultState(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error), resolveResult resultReaderResolver) surface.State {
+// deskHeartbeatLiveState observes a fresh fail-closed live identity. Unlike ResolveResultReader's
+// compatibility path, resolveWatchLiveDriver refuses an unreadable or unrecognized pane command;
+// those failures become Unknown before any stale roster driver can be assessed.
+func deskHeartbeatLiveState(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error), resolveLive heartbeatLiveDriverResolver, assess func(surface.Driver, string) surface.State) surface.State {
 	pane, err := resolvePane(agentTitle(cfg, agent))
 	if err != nil {
 		return surface.StateUnknown
 	}
-	_, drv, _, _, err := resolveResult(agentSurface(cfg, agent), pane, paneCommand)
+	drv, err := resolveLive(cfg, agent, pane, paneCommand)
 	if err != nil {
 		return surface.StateUnknown
 	}
-	return drv.Assess(pane)
+	return assess(drv, pane)
 }
 
 func assessWatchResolvedPane(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) surface.State {
