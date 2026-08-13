@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -322,6 +323,20 @@ func cmdWatch(args []string) error {
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
+	// The injector starts before the detector is constructed. Keep the detector-owned
+	// evidence callback behind a small lock so early startup refusals fail closed without
+	// racing the later binding.
+	var recipientProgressMu sync.RWMutex
+	var recipientProgress func(string, time.Time) (outbox.RecipientClass, bool)
+	injector.SetRecipientProgress(func(recipient string, since time.Time) (outbox.RecipientClass, bool) {
+		recipientProgressMu.RLock()
+		progress := recipientProgress
+		recipientProgressMu.RUnlock()
+		if progress == nil {
+			return outbox.RecipientUnknown, false
+		}
+		return progress(recipient, since)
+	})
 	injector.SetCoordinatorIngress(watch.NewCoordinatorIngressDynamic(currentRoster))
 	arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
 	injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
@@ -340,12 +355,17 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
+	coordinatorAlert := func(coordinator, msg, claimKey string) {
+		injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
+	}
 	injector.SetOutboxStaleEscalate(
 		func(sender string) string { return currentRoster().OwningXO(sender, xo) },
-		func(coordinator, msg, claimKey string) {
-			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
-		},
+		coordinatorAlert,
 	)
+	internalWedgeAlert := newInternalWedgeAlert(currentRoster, xo, func(coordinator, msg string) {
+		coordinatorAlert(coordinator, msg, "")
+	})
+	injector.SetInternalWedgeAlert(internalWedgeAlert)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(currentRoster(), sender, recipient, message)
@@ -631,7 +651,7 @@ func cmdWatch(args []string) error {
 		deskSettled := watch.NewSettledMarkerSet(rosterDir)
 		deskHeartbeatEnabled := func(agent string) bool { return currentRoster().HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
-		deskEscalate := func(agent string) { newDeskEscalate(currentRoster(), xo, alert)(agent) }
+		deskEscalate := func(agent string) { newDeskEscalate(currentRoster(), xo, internalWedgeAlert)(agent) }
 		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
 		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
 		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
@@ -1004,6 +1024,9 @@ func cmdWatch(args []string) error {
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
+		recipientProgressMu.Lock()
+		recipientProgress = det.RecipientDeliveryEvidence
+		recipientProgressMu.Unlock()
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight
 		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, func() {
@@ -1802,15 +1825,29 @@ func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) st
 }
 
 // newDeskEscalate builds the detector's DeskEscalate seam (#183 §8e): when a desk is capped (idle +
-// un-progressing across N beats), it raises ONE LOUD operator-visible alert to the desk's OWNING XO —
-// the channel the desk is a member of / its parent (roster.OwningXO), falling back to the primary XO.
-// It uses the LOUD alert path (operator-visible), NOT a quiet WakeAgent to a possibly-idle parent: a
-// wedged desk must surface loudly, not be poked further. The detector fires this ONCE on the ==capN
-// edge then stops beating the desk; a re-arm (AgentWake) resumes the cadence.
-func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) func(string) {
+// un-progressing across N beats), it emits one internal lifecycle alert through the desk's owning-
+// coordinator resolver. The shared KindDetector enqueue then applies normal coordinator ingress,
+// including the existing adjutant alias. The detector fires this once on the ==capN edge and stops
+// beating the desk; AgentWake re-arms the cadence.
+func newDeskEscalate(cfg *roster.Config, primaryXO string, internalAlert func(string, string)) func(string) {
 	return func(agent string) {
 		owner := cfg.OwningXO(agent, primaryXO)
-		alert(fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+		internalAlert(agent, fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+	}
+}
+
+// newInternalWedgeAlert is the single swappable destination for both delivery-wedge and
+// desk-heartbeat wedge lifecycle notices. The primary implementation resolves the affected
+// seat's owning coordinator from the live roster and enqueues to that pane; it never reaches
+// the operator webhook used by alert().
+func newInternalWedgeAlert(currentRoster func() *roster.Config, primaryXO string, coordinatorAlert func(string, string)) func(string, string) {
+	return func(recipient, message string) {
+		cfg := currentRoster()
+		owner := cfg.OwningXO(recipient, primaryXO)
+		if owner == "" {
+			return
+		}
+		coordinatorAlert(owner, message)
 	}
 }
 

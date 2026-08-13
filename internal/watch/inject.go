@@ -160,7 +160,10 @@ type Injector struct {
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
-	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
+	recipientProgress         func(recipient string, since time.Time) (outbox.RecipientClass, bool)
+	internalWedgeAlert        func(recipient, message string) // optional: wedge/recovery notice to owning coordinator surface
+	internalWedgeDispatch     func(func())                    // off-worker dispatch; injectable for deterministic tests
+	coordinatorIngress        *CoordinatorIngress             // optional: #533 adjutant front-office ingress before delivery
 	// optional: #593 durable operator buffer append (+ B1 channel/operator for arc keying)
 	onOperatorRelayBuffer func(leader, messageID, body, channelID, operatorID string) error
 	relayPendingMu        sync.Mutex
@@ -234,6 +237,22 @@ func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string)
 	in.outboxCoordinatorEscalate = escalate
 }
 
+// SetRecipientProgress installs the detector-owned recipient evidence seam used by the
+// futile-attempt guard. The returned class uses the shared outbox taxonomy; progressed
+// reports whether the detector observed recipient progress since the supplied window start.
+// A nil hook fails closed toward counting the refusal.
+func (in *Injector) SetRecipientProgress(progress func(string, time.Time) (outbox.RecipientClass, bool)) {
+	in.recipientProgress = progress
+}
+
+// SetInternalWedgeAlert installs the non-operator destination for delivery-wedge alarms and
+// recovery notices. Production resolves the recipient's owning coordinator and enqueues a
+// KindDetector job to that pane. It is deliberately distinct from SetEscalate, which remains
+// the operator-critical relay-failure path.
+func (in *Injector) SetInternalWedgeAlert(alert func(recipient, message string)) {
+	in.internalWedgeAlert = alert
+}
+
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
 	in := &Injector{
@@ -247,6 +266,7 @@ func NewInjector(send SendFunc, buffer int) *Injector {
 	// worker stays free for other desks. Enqueue drops safely after Stop, so a late timer is a
 	// no-op (Stop does not cancel pending timers; they fire ≤delay later and drop — bounded).
 	in.reEnqueue = func(j Job, delay time.Duration) { time.AfterFunc(delay, func() { in.Enqueue(j) }) }
+	in.internalWedgeDispatch = func(run func()) { time.AfterFunc(0, run) }
 	return in
 }
 
@@ -443,7 +463,7 @@ func intendedRecipient(j Job) string {
 // and swept inter-agent sends are never dropped: short transient re-assess, then durable
 // disk-backed retry at the busy cadence until deliverable (#286, #475).
 func (in *Injector) handleBusy(j Job, cause error) {
-	in.noteFutileAttempt(j.Agent)
+	in.noteFutileAttempt(j.Agent, outboxRecipientClass(cause))
 	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		in.abortDetectorClaim(j)

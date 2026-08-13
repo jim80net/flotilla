@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -416,9 +417,10 @@ type Detector struct {
 	awaitingEscalated    map[string]bool      // desk → this awaiting episode already emitted its one sweep wake
 	rateLimitLastProbeAt map[string]time.Time
 	usageLastProbeAt     map[string]time.Time
-	deskNoProgress       map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
-	deskStopped          map[string]bool // capped + escalated → stop heartbeating until re-armed
-	deskProgressed       map[string]bool // desk went Working since its last heartbeat → resets the cap
+	deskNoProgress       map[string]int       // consecutive heartbeats with no intervening progress (the cap counter)
+	deskStopped          map[string]bool      // capped + escalated → stop heartbeating until re-armed
+	deskProgressed       map[string]bool      // desk went Working since its last heartbeat → resets the cap
+	deskLastProgressAt   map[string]time.Time // last detector observation proving the desk was Working
 
 	// rateLimitActive suppresses repeat wakes for the same throttle episode (#204).
 	rateLimitActive map[string]bool
@@ -580,6 +582,7 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		deskNoProgress:       map[string]int{},
 		deskStopped:          map[string]bool{},
 		deskProgressed:       map[string]bool{},
+		deskLastProgressAt:   map[string]time.Time{},
 		rateLimitActive:      map[string]bool{},
 		rateLimitClearStreak: map[string]int{},
 		rateLimitPending:     map[string]rateLimitProbeResult{},
@@ -837,6 +840,28 @@ func (d *Detector) AgentWake(agent string) {
 	d.notifyOperatorActivity()
 }
 
+// RecipientDeliveryEvidence exposes the detector's current per-recipient state and
+// progress observation to the injector without pane I/O. The class deliberately reuses
+// outbox.RecipientClass so delivery staleness and futile-attempt policy cannot drift into
+// competing notions of "Working". Progress is positive only when a Working observation
+// occurred at or after the caller's attempt-window start.
+func (d *Detector) RecipientDeliveryEvidence(agent string, since time.Time) (outbox.RecipientClass, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	state := d.snap.DeskStates[agent]
+	class := outbox.RecipientUnknown
+	switch state {
+	case surface.StateWorking:
+		class = outbox.RecipientWorking
+	case surface.StateWedge, surface.StateAwaitingInput, surface.StateAwaitingApproval, surface.StateErrored, surface.StateShell:
+		class = outbox.RecipientWedge
+	case surface.StateUnknown:
+		class = outbox.RecipientTransient
+	}
+	progressAt := d.deskLastProgressAt[agent]
+	return class, !progressAt.IsZero() && !progressAt.Before(since)
+}
+
 func (d *Detector) notifyOperatorActivity() {
 	if d.cfg.Activity == nil {
 		return
@@ -846,19 +871,25 @@ func (d *Detector) notifyOperatorActivity() {
 
 // ingestActivity records tick assess output and tick-diff turn-ends OFF d.mu.
 func (d *Detector) ingestActivity(pendingTurnEnds []string) {
-	if d.cfg.Activity == nil {
-		return
-	}
+	now := d.now()
 	d.mu.Lock()
 	states := make(map[string]surface.State, len(d.snap.DeskStates))
 	for k, v := range d.snap.DeskStates {
 		states[k] = v
+		if v == surface.StateWorking {
+			// The same assessed-state snapshot fed to Activity is the positive progress
+			// signal consumed by delivery-wedge suppression. Record every monitored seat,
+			// including the primary XO (which deskHeartbeatLocked intentionally skips).
+			d.deskLastProgressAt[k] = now
+		}
 	}
 	xoSettled := d.snap.XOSettled
 	xoAgent := d.cfg.XOAgent
 	d.mu.Unlock()
 
-	now := d.now()
+	if d.cfg.Activity == nil {
+		return
+	}
 	d.cfg.Activity.OnTickIngest(now, xoAgent, states, xoSettled)
 	for _, agent := range pendingTurnEnds {
 		d.cfg.Activity.OnTurnEnd(agent, now)
@@ -1582,6 +1613,7 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 			// toward the cap), un-wedge it (progress clears a stop), and restart both the cadence and
 			// the cap — a freshly-idle desk gets a full cadence before its next beat.
 			d.deskProgressed[name] = true
+			d.deskLastProgressAt[name] = now
 			delete(d.deskStopped, name)
 			d.deskNoProgress[name] = 0
 			delete(d.deskBeatEligibleAt, name)

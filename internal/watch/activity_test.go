@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -26,6 +27,27 @@ func TestActivityWorkingDeskElevatesActive(t *testing.T) {
 	snap := at.Snapshot(now)
 	if snap.Level != ActivityActive || snap.WorkingDesks != 1 {
 		t.Fatalf("working desk ⇒ Active, got level=%v working=%d", snap.Level, snap.WorkingDesks)
+	}
+}
+
+func TestDetectorRecipientDeliveryEvidenceUsesActivitySnapshotForXOProgress(t *testing.T) {
+	now := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+	d := NewDetector(DetectorConfig{
+		XOAgent:  "coordinator",
+		Now:      func() time.Time { return now },
+		Activity: NewActivityTracker(testActivityConfig()),
+		Persist:  func(Snapshot) error { return nil },
+	}, "")
+	d.snap.DeskStates = map[string]surface.State{"coordinator": surface.StateWorking}
+	d.ingestActivity(nil)
+
+	class, progressed := d.RecipientDeliveryEvidence("coordinator", now.Add(-time.Second))
+	if class != outbox.RecipientWorking || !progressed {
+		t.Fatalf("XO evidence = (%q, %v), want Working+progress", class, progressed)
+	}
+	class, progressed = d.RecipientDeliveryEvidence("coordinator", now.Add(time.Second))
+	if class != outbox.RecipientWorking || progressed {
+		t.Fatalf("future-window evidence = (%q, %v), want Working without progress", class, progressed)
 	}
 }
 
