@@ -98,6 +98,39 @@ func TestResolveDriverStaleClaudeUsesLiveGrokRateLimitParser(t *testing.T) {
 	}
 }
 
+func TestResolveDriverUsesLiveHarnessRotationCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name, configured, command, want string
+	}{
+		{"stale Claude to Grok", "claude-code", "grok", "/new"},
+		{"stale Grok to Claude", "grok", "claude", "/clear"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drv, _, _, err := ResolveDriver(tc.configured, "p", func(string) (string, error) { return tc.command, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			switch d := drv.(type) {
+			case grok:
+				d.inject = func(_ string, command string) error { got = command; return nil }
+				drv = d
+			case claudeCode:
+				d.clear = func(string) error { got = "/clear"; return nil }
+				drv = d
+			default:
+				t.Fatalf("resolved rotation driver = %T", drv)
+			}
+			if err := RotateContext(drv, "p"); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("rotation command = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveResultReaderPrefersLiveHarness(t *testing.T) {
 	paneCommand := func(string) (string, error) { return "claude", nil }
 

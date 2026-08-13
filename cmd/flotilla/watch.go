@@ -171,10 +171,6 @@ func cmdWatch(args []string) error {
 	if xo == "" {
 		xo = cfg.Agents[0].Name
 	}
-	// The XO's driver (for state assessment in the gate). Surfaces are validated
-	// above, so this lookup succeeds.
-	xoDrv, _ := surface.Get(agentSurface(cfg, xo))
-
 	interval := cfg.HeartbeatDur() // parsed + validated at load
 	intervalStr := strings.TrimSpace(*intervalFlag)
 	if intervalStr == "" {
@@ -796,15 +792,16 @@ func cmdWatch(args []string) error {
 			Wake:         wake,
 			RotatePolicy: xoRotate,
 			Rotate: func() error {
+				current := currentRoster()
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
-				// target (the same key every other transaction writer uses), so the /clear rotate
+				// target (the same key every other transaction writer uses), so the harness-specific rotate
 				// never interleaves between any confirmed delivery's submit and its Enter-only retry
 				// — across processes (a dash control action, a `flotilla send`), not just the
 				// in-process Injector. The detector invokes Rotate from runTail, OUTSIDE detector.mu,
 				// so this bounded acquire cannot stall the tick loop (see Detector.Tick). A txn-lock
 				// timeout surfaces as a rotate error (logged, non-fatal — the continuation still
 				// proceeds, just in un-rotated context this tick).
-				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+				pane, err := deliver.ResolvePane(agentTitle(current, xo))
 				if err != nil {
 					return err
 				}
@@ -813,7 +810,7 @@ func cmdWatch(args []string) error {
 					return err
 				}
 				defer txn.Release()
-				return surface.RotateContext(xoDrv, pane)
+				return rotateWatchXOResolved(current, xo, pane, deliver.PaneCommand, surface.RotateContext)
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir, flatLaunch),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir, flatLaunch),
@@ -1017,7 +1014,8 @@ func cmdWatch(args []string) error {
 		// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
 		// failure is treated as "down", never fatal to the daemon.
 		gate := func() bool {
-			pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, xo))
 			if err != nil {
 				wd.Observe(ack.Acked(), true)
 				return true
@@ -1027,7 +1025,15 @@ func cmdWatch(args []string) error {
 			// ⇒ Unknown since #55, converging all drivers; here in the legacy gate Idle
 			// and Unknown are equivalent — both are not-Shell and not-Working, so the
 			// tick fires either way.)
-			st := xoDrv.Assess(pane)
+			st, err := assessWatchXOResolved(current, xo, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) surface.State {
+				return drv.Assess(pane)
+			})
+			if err != nil {
+				// The live harness could not be established. Do not classify with a
+				// stale driver and do not send a heartbeat into the unknown pane.
+				wd.Observe(ack.Acked(), false)
+				return true
+			}
 			wd.Observe(ack.Acked(), st == surface.StateShell)
 			if wd.Down() {
 				return true
@@ -2430,6 +2436,22 @@ func assessWatchResolvedPane(cfg *roster.Config, agent, pane string, paneCommand
 		return surface.StateUnknown
 	}
 	return assess(drv, pane)
+}
+
+func assessWatchXOResolved(cfg *roster.Config, xo, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) (surface.State, error) {
+	drv, err := resolveWatchLiveDriver(cfg, xo, pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown, err
+	}
+	return assess(drv, pane), nil
+}
+
+func rotateWatchXOResolved(cfg *roster.Config, xo, pane string, paneCommand func(string) (string, error), rotate func(surface.Driver, string) error) error {
+	drv, err := resolveWatchLiveDriver(cfg, xo, pane, paneCommand)
+	if err != nil {
+		return err
+	}
+	return rotate(drv, pane)
 }
 
 // adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval

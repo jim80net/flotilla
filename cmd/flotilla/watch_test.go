@@ -262,3 +262,66 @@ func TestRateLimitActuationUsesLiveGrokAndFailsClosedUnreadable(t *testing.T) {
 		t.Fatal("unreadable rate-limit reset must fail closed before reset")
 	}
 }
+
+func TestWatchXOLiveDriverAssessmentAndRotation(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	staleClaude := &roster.Config{Agents: []roster.Agent{{Name: "xo", Surface: "claude-code"}}}
+	assessed := false
+	state, err := assessWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) surface.State {
+		assessed = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("legacy gate got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+		return surface.StateWorking
+	})
+	if err != nil || !assessed || state != surface.StateWorking {
+		t.Fatalf("legacy live-Grok gate = (%v,%v) assessed=%v", state, err, assessed)
+	}
+
+	for _, tc := range []struct {
+		name, configured, command, want string
+	}{
+		{"stale Claude to Grok", "claude-code", "grok", "grok"},
+		{"stale Grok to Claude", "grok", "claude", "claude-code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &roster.Config{Agents: []roster.Agent{{Name: "xo", Surface: tc.configured}}}
+			rotated := false
+			err := rotateWatchXOResolved(cfg, "xo", "%42", func(string) (string, error) {
+				return tc.command, nil
+			}, func(drv surface.Driver, pane string) error {
+				rotated = true
+				if drv.Name() != tc.want || pane != "%42" {
+					t.Fatalf("rotation got driver=%q pane=%q, want %s/%%42", drv.Name(), pane, tc.want)
+				}
+				return nil
+			})
+			if err != nil || !rotated {
+				t.Fatalf("rotation err=%v rotated=%v", err, rotated)
+			}
+		})
+	}
+
+	assessed = false
+	state, err = assessWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) surface.State {
+		assessed = true
+		return surface.StateIdle
+	})
+	if err == nil || state != surface.StateUnknown || assessed {
+		t.Fatalf("unreadable legacy gate: state=%v err=%v assessed=%v", state, err, assessed)
+	}
+	rotated := false
+	err = rotateWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) error {
+		rotated = true
+		return nil
+	})
+	if err == nil || rotated {
+		t.Fatalf("unreadable rotation: err=%v rotated=%v, want error/false", err, rotated)
+	}
+}
