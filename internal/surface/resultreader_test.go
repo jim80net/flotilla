@@ -23,6 +23,90 @@ func TestResolveLiveDriverFailClosedAndLiveWins(t *testing.T) {
 	}
 }
 
+func TestResolveLiveDriverGenericRuntimeArgvAndRosterFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		command   string
+		roster    string
+		argv      []string
+		argvErr   error
+		want      string
+		wantDrift bool
+	}{
+		{"codex bin", "node", "claude-code", []string{"node", "/opt/tools/bin/codex", "--flag"}, nil, "codex", true},
+		{"claude package", "node", "codex", []string{"node", "/opt/node_modules/@anthropic-ai/claude-code/cli.js"}, nil, "claude-code", true},
+		{"python class", "python", "codex", []string{"python", "/opt/tools/bin/aider"}, nil, "aider", true},
+		{"python3 class", "python3", "codex", []string{"python3", "/opt/tools/bin/aider"}, nil, "aider", true},
+		{"bun class", "bun", "claude-code", []string{"bun", "/opt/tools/bin/codex"}, nil, "codex", true},
+		{"deno class", "deno", "claude-code", []string{"deno", "/opt/tools/bin/codex"}, nil, "codex", true},
+		{"unreadable argv roster fallback", "node", "codex", nil, errors.New("proc denied"), "codex", false},
+		{"unnamed argv roster fallback", "node", "codex", []string{"node", "/srv/app.js"}, nil, "codex", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drv, live, drift, err := ResolveLiveDriverWithArgv(tc.roster, "%1", func(string) (string, error) { return tc.command, nil }, func(string) ([]string, error) {
+				return tc.argv, tc.argvErr
+			})
+			if err != nil || drv == nil || drv.Name() != tc.want || live != tc.want || drift != tc.wantDrift {
+				t.Fatalf("drv=%v live=%q drift=%t err=%v, want %q drift=%t", drv, live, drift, err, tc.want, tc.wantDrift)
+			}
+		})
+	}
+}
+
+func TestNodeCodexArgvAuthorizesSelectedDriverAtSubmitBoundary(t *testing.T) {
+	drv, _, _, err := ResolveLiveDriverWithArgv("claude-code", "%1",
+		func(string) (string, error) { return "node", nil },
+		func(string) ([]string, error) {
+			return []string{"node", "/opt/harness/bin/codex", "--model", "gpt"}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted := false
+	submit := func(selected Driver) {
+		submitted = true
+		if selected.Name() != "codex" {
+			t.Fatalf("submitted through %q, want codex", selected.Name())
+		}
+	}
+	submit(drv)
+	if !submitted {
+		t.Fatal("node + codex argv did not reach submit boundary")
+	}
+}
+
+func TestResolveLiveDriverGenericRuntimeAndUnknownFailClosedControls(t *testing.T) {
+	for _, cmd := range []string{"mystery-agent", "bash", "", "   "} {
+		t.Run(cmd, func(t *testing.T) {
+			drv, _, _, err := ResolveLiveDriverWithArgv("codex", "%1", func(string) (string, error) { return cmd, nil }, func(string) ([]string, error) {
+				return []string{"node", "/opt/tools/bin/codex"}, nil
+			})
+			if err == nil || drv != nil {
+				t.Fatalf("command %q driver=%v err=%v, want nil/error", cmd, drv, err)
+			}
+		})
+	}
+}
+
+func TestSurfaceFromProcessArgvExactComponents(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+		ok   bool
+	}{
+		{[]string{"node", "/usr/local/bin/codex"}, "codex", true},
+		{[]string{"node", "/pkg/claude-code/cli.js"}, "claude-code", true},
+		{[]string{"python3", "/usr/local/bin/aider"}, "aider", true},
+		{[]string{"node", "/srv/my-codex-helper.js"}, "", false},
+		{[]string{"node", "/usr/local/bin/codex", "/usr/local/bin/grok"}, "", false},
+	} {
+		got, ok := SurfaceFromProcessArgv(tc.argv)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("argv=%q got=(%q,%t), want=(%q,%t)", tc.argv, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestSurfaceFromPaneCommand(t *testing.T) {
 	tests := []struct {
 		cmd  string

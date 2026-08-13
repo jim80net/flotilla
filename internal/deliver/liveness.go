@@ -1,8 +1,12 @@
 package deliver
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +28,37 @@ func PaneCommand(target string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// PaneArgv returns the pane process's NUL-delimited argv. Generic runtime
+// foreground names such as node/python do not identify the harness; argv does.
+func PaneArgv(target string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{pane_pid}").Output()
+	if err != nil {
+		return nil, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || pid <= 0 {
+		return nil, fmt.Errorf("invalid pane pid %q", strings.TrimSpace(string(out)))
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return nil, err
+	}
+	return parseProcessArgv(raw), nil
+}
+
+func parseProcessArgv(raw []byte) []string {
+	parts := bytes.Split(raw, []byte{0})
+	argv := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) > 0 {
+			argv = append(argv, string(part))
+		}
+	}
+	return argv
 }
 
 // IsShell reports whether a pane_current_command indicates a shell (the agent is

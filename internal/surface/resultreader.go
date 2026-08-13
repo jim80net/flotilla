@@ -3,17 +3,24 @@ package surface
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jim80net/flotilla/internal/deliver"
 )
 
 // paneCommandSurfaces maps tmux pane_current_command values to registered surface names.
 // Keys are lowercase foreground commands observed on live desks.
 var paneCommandSurfaces = map[string]string{
-	"claude":   "claude-code",
-	"grok":     "grok",
-	"codex":    "codex",
-	"opencode": "opencode",
-	"pi":       "pi",
-	"aider":    "aider",
+	"claude":      "claude-code",
+	"claude-code": "claude-code",
+	"grok":        "grok",
+	"codex":       "codex",
+	"opencode":    "opencode",
+	"pi":          "pi",
+	"aider":       "aider",
+}
+
+var genericRuntimeCommands = map[string]bool{
+	"node": true, "python": true, "python3": true, "bun": true, "deno": true,
 }
 
 // SurfaceFromPaneCommand maps a pane's foreground command to a registered surface name.
@@ -59,6 +66,13 @@ func ResolveDriver(rosterSurface, pane string, paneCommand func(string) (string,
 // when the pane command cannot be read or mapped: actuation and live assessment
 // must prove which harness owns the pane at the moment of use.
 func ResolveLiveDriver(rosterSurface, pane string, paneCommand func(string) (string, error)) (Driver, string, bool, error) {
+	return ResolveLiveDriverWithArgv(rosterSurface, pane, paneCommand, deliver.PaneArgv)
+}
+
+// ResolveLiveDriverWithArgv is the injectable form of ResolveLiveDriver.
+// Generic runtimes do not name a harness, so their argv is the primary live
+// identity and a registered roster surface is the bounded fallback.
+func ResolveLiveDriverWithArgv(rosterSurface, pane string, paneCommand func(string) (string, error), paneArgv func(string) ([]string, error)) (Driver, string, bool, error) {
 	if pane == "" || paneCommand == nil {
 		return nil, "", false, fmt.Errorf("live surface resolution requires a pane and command reader")
 	}
@@ -66,19 +80,61 @@ func ResolveLiveDriver(rosterSurface, pane string, paneCommand func(string) (str
 	if err != nil {
 		return nil, "", false, fmt.Errorf("read live command for pane %q: %w", pane, err)
 	}
-	liveSurface, ok := SurfaceFromPaneCommand(cmd)
-	if !ok {
-		return nil, "", false, fmt.Errorf("unrecognized live command %q for pane %q", cmd, pane)
-	}
 	want := rosterSurface
 	if want == "" {
 		want = DefaultSurface
+	}
+	liveSurface, ok := SurfaceFromPaneCommand(cmd)
+	if !ok {
+		normalized := strings.ToLower(strings.TrimSpace(cmd))
+		if !genericRuntimeCommands[normalized] {
+			return nil, "", false, fmt.Errorf("unrecognized live command %q for pane %q", cmd, pane)
+		}
+		if paneArgv != nil {
+			if argv, argvErr := paneArgv(pane); argvErr == nil {
+				liveSurface, ok = SurfaceFromProcessArgv(argv)
+			}
+		}
+		if !ok {
+			if _, registered := Get(want); !registered {
+				return nil, "", false, fmt.Errorf("generic live command %q for pane %q has no harness argv and roster surface %q is not registered", cmd, pane, want)
+			}
+			liveSurface = want
+		}
 	}
 	drv, ok := Get(liveSurface)
 	if !ok {
 		return nil, liveSurface, liveSurface != want, fmt.Errorf("unknown live surface %q for pane %q", liveSurface, pane)
 	}
 	return drv, liveSurface, liveSurface != want, nil
+}
+
+// SurfaceFromProcessArgv identifies a registered harness named by a runtime's
+// argv. It matches exact argv tokens or exact path components, never substrings.
+func SurfaceFromProcessArgv(argv []string) (string, bool) {
+	found := ""
+	for _, arg := range argv {
+		components := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(arg)), func(r rune) bool {
+			return r == '/' || r == '\\'
+		})
+		for _, component := range components {
+			component = strings.TrimSuffix(component, ".js")
+			if name, ok := SurfaceFromPaneCommand(component); ok {
+				if found != "" && found != name {
+					return "", false
+				}
+				found = name
+				continue
+			}
+			if _, ok := Get(component); ok {
+				if found != "" && found != component {
+					return "", false
+				}
+				found = component
+			}
+		}
+	}
+	return found, found != ""
 }
 
 // ResolveResultReader picks the ResultReader for a desk pane. Live harness wins on drift —
