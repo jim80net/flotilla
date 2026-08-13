@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -201,6 +203,52 @@ func TestWriteDurableOfficerAuditRequiresCompleteWriteSyncAndClose(t *testing.T)
 				t.Fatalf("err=%v closed=%t", err, f.closed)
 			}
 		})
+	}
+}
+
+func TestAppendOfficerRouteAuditFirstUseCreatesAndSyncsContainingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-officer-delivery-audit.jsonl")
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("first-use precondition stat err=%v, want absent", err)
+	}
+	dirSyncs := 0
+	err := appendOfficerRouteAuditWithDirOpen(path, officerRouteAudit{Outcome: "attempt-owned-durable"}, func(got string) (officerAuditFile, error) {
+		if got != dir {
+			t.Fatalf("opened directory %q, want %q", got, dir)
+		}
+		dirSyncs++
+		return os.Open(got)
+	})
+	if err != nil {
+		t.Fatalf("first-use append: %v", err)
+	}
+	if dirSyncs != 1 {
+		t.Fatalf("directory opens=%d, want 1", dirSyncs)
+	}
+	if body, err := os.ReadFile(path); err != nil || len(body) == 0 {
+		t.Fatalf("created audit body=%q err=%v", body, err)
+	}
+}
+
+func TestDirectorySyncFailurePreventsOfficerSubmit(t *testing.T) {
+	const capture = "idle"
+	drv := &officerRouteDriver{states: []surface.State{surface.StateIdle, surface.StateIdle}, disposition: surface.ComposerUndetermined}
+	submitted := false
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-officer-delivery-audit.jsonl")
+	deps := officerDeps(capture, new([]officerRouteAudit), &submitted)
+	deps.audit = func(record officerRouteAudit) error {
+		return appendOfficerRouteAuditWithDirOpen(path, record, func(string) (officerAuditFile, error) {
+			return &auditFileStub{syncErr: errors.New("directory sync failed")}, nil
+		})
+	}
+	err := deliverOfficerRoute(drv, "xo", "roster-coordinator", "cli-send", "desk", "%1", "grok", "grok", "work", captureDigest(capture), true, "ComposerUndetermined", deps)
+	if err == nil || submitted {
+		t.Fatalf("directory-sync failure err=%v submitted=%t, want error/false", err, submitted)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("control must exercise first-use creation before directory sync failure: %v", statErr)
 	}
 }
 

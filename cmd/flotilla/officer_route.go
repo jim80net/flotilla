@@ -257,6 +257,12 @@ func officerDetectorIdleOverride(d surface.Driver, agent, pane, liveSurface, liv
 }
 
 func appendOfficerRouteAudit(path string, record officerRouteAudit) error {
+	return appendOfficerRouteAuditWithDirOpen(path, record, func(path string) (officerAuditFile, error) {
+		return os.Open(path)
+	})
+}
+
+func appendOfficerRouteAuditWithDirOpen(path string, record officerRouteAudit, openDir func(string) (officerAuditFile, error)) error {
 	line, err := json.Marshal(record)
 	if err != nil {
 		return err
@@ -266,7 +272,20 @@ func appendOfficerRouteAudit(path string, record officerRouteAudit) error {
 	if err != nil {
 		return err
 	}
-	return writeDurableOfficerAudit(f, line)
+	if err := writeDurableOfficerAudit(f, line); err != nil {
+		return err
+	}
+	// The file's contents are durable, but a first-use O_CREATE also introduced
+	// a directory entry. Sync the containing directory before authorization can
+	// return, so a crash cannot erase the only reachable no-replay record.
+	dir, err := openDir(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open officer audit directory: %w", err)
+	}
+	if err := syncAndCloseOfficerAuditDir(dir); err != nil {
+		return fmt.Errorf("sync officer audit directory: %w", err)
+	}
+	return nil
 }
 
 type officerAuditFile interface {
@@ -286,6 +305,12 @@ func writeDurableOfficerAudit(f officerAuditFile, line []byte) error {
 	}
 	closeErr := f.Close()
 	return errors.Join(writeErr, syncErr, closeErr)
+}
+
+func syncAndCloseOfficerAuditDir(dir officerAuditFile) error {
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
 func watchOfficerRouteDeps(rosterDir string) officerRouteDeps {
