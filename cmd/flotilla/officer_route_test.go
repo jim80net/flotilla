@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func TestOfficerRouteDeliversClassifierMissWithIndependentIdleProofAndAudit(t *t
 	if !submitted {
 		t.Fatal("classifier miss with officer-confirmed stable idle proof did not submit")
 	}
-	if len(audits) != 2 || audits[0].Officer != "fleet-xo" || audits[0].Outcome != "authorized-before-submit" || audits[1].Outcome != "delivered-confirmed" || audits[0].CaptureSHA != captureDigest(capture) {
+	if len(audits) != 2 || audits[0].Officer != "fleet-xo" || audits[0].Outcome != "attempt-owned-durable" || audits[0].TerminalOutcome != "delivery-status-unknown-no-replay" || audits[1].TerminalOutcome != "delivered-confirmed" || audits[0].CaptureSHA != captureDigest(capture) {
 		t.Fatalf("audit = %+v", audits)
 	}
 }
@@ -83,8 +84,31 @@ func TestWatchOfficerRouteDeliversUnseenFooterWithoutAddingRegex(t *testing.T) {
 	if err != nil || !submitted {
 		t.Fatalf("unseen-footer route err=%v submitted=%t", err, submitted)
 	}
-	if len(audits) != 2 || audits[0].Path != "watch-submit" || audits[0].ProbeFailed != "ErrTransient" || audits[1].Outcome != "delivered-confirmed" {
+	if len(audits) != 2 || audits[0].Path != "watch-submit" || audits[0].ProbeFailed != "ErrTransient" || audits[1].TerminalOutcome != "delivered-confirmed" {
 		t.Fatalf("audit = %+v", audits)
+	}
+}
+
+func TestOfficerRouteStableUnknownIsDecidedByIndependentIdleProof(t *testing.T) {
+	const capture = "stable unknown expert frame"
+	drv := &officerRouteDriver{states: []surface.State{surface.StateUnknown, surface.StateUnknown}, disposition: surface.ComposerUndetermined}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(surface.Driver, string) (bool, string) { return true, "independent-idle-cleared:control-driver" }
+	if err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "desk", "%12", "grok", "grok", "work", "", false, "StateUnknown", deps); err != nil {
+		t.Fatalf("stable Unknown + independent idle proof: %v", err)
+	}
+	if !submitted {
+		t.Fatal("stable Unknown + independent idle proof did not submit")
+	}
+
+	drv = &officerRouteDriver{states: []surface.State{surface.StateUnknown}, disposition: surface.ComposerUndetermined}
+	submitted = false
+	deps = officerDeps(capture, new([]officerRouteAudit), &submitted)
+	deps.empty = func(surface.Driver, string) (bool, string) { return false, "working-veto:control-driver" }
+	if err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "desk", "%12", "grok", "grok", "work", "", false, "StateUnknown", deps); err == nil || submitted {
+		t.Fatalf("stable Unknown + working veto err=%v submitted=%t, want refusal", err, submitted)
 	}
 }
 
@@ -116,6 +140,70 @@ func TestOfficerRouteAuditFailurePreventsSubmit(t *testing.T) {
 	}
 }
 
+func TestOfficerRouteOutcomeAuditFailureDoesNotReplay(t *testing.T) {
+	const capture = "idle"
+	drv := &officerRouteDriver{states: []surface.State{surface.StateIdle, surface.StateIdle}, disposition: surface.ComposerUndetermined}
+	submits := 0
+	auditCalls := 0
+	deps := officerDeps(capture, new([]officerRouteAudit), new(bool))
+	deps.submit = func(surface.Driver, string, string) error { submits++; return nil }
+	deps.audit = func(record officerRouteAudit) error {
+		auditCalls++
+		if auditCalls == 1 {
+			if record.TerminalOutcome != "delivery-status-unknown-no-replay" || record.ReplayDisposition != "never-replay-after-submit-begins" {
+				t.Fatalf("pre-submit record = %+v", record)
+			}
+			return nil
+		}
+		return errors.New("outcome disk failure")
+	}
+	if err := deliverOfficerRoute(drv, "xo", "roster-coordinator", "cli-send", "desk", "%1", "grok", "grok", "work", captureDigest(capture), true, "ComposerUndetermined", deps); err != nil {
+		t.Fatalf("confirmed delivery must not become retryable on outcome audit failure: %v", err)
+	}
+	if submits != 1 || auditCalls != 2 {
+		t.Fatalf("submits=%d auditCalls=%d, want 1/2", submits, auditCalls)
+	}
+}
+
+type auditFileStub struct {
+	writeN   int
+	writeErr error
+	syncErr  error
+	closeErr error
+	synced   bool
+	closed   bool
+}
+
+func (f *auditFileStub) Write(p []byte) (int, error) {
+	if f.writeN == 0 && f.writeErr == nil {
+		return len(p), nil
+	}
+	return f.writeN, f.writeErr
+}
+func (f *auditFileStub) Sync() error  { f.synced = true; return f.syncErr }
+func (f *auditFileStub) Close() error { f.closed = true; return f.closeErr }
+
+func TestWriteDurableOfficerAuditRequiresCompleteWriteSyncAndClose(t *testing.T) {
+	good := &auditFileStub{}
+	if err := writeDurableOfficerAudit(good, []byte("record\n")); err != nil || !good.synced || !good.closed {
+		t.Fatalf("durable write err=%v synced=%t closed=%t", err, good.synced, good.closed)
+	}
+	short := &auditFileStub{writeN: 2}
+	if err := writeDurableOfficerAudit(short, []byte("record\n")); !errors.Is(err, io.ErrShortWrite) || short.synced || !short.closed {
+		t.Fatalf("short write err=%v synced=%t closed=%t", err, short.synced, short.closed)
+	}
+	for name, f := range map[string]*auditFileStub{
+		"sync":  {syncErr: errors.New("sync")},
+		"close": {closeErr: errors.New("close")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := writeDurableOfficerAudit(f, []byte("record\n")); err == nil || !f.closed {
+				t.Fatalf("err=%v closed=%t", err, f.closed)
+			}
+		})
+	}
+}
+
 func TestCrossDriverEmptyProofRequiresIdleClearedAndWorkingVetoes(t *testing.T) {
 	selected := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateIdle}, disposition: surface.ComposerUndetermined}
 	control := &officerRouteDriver{name: "claude-code", states: []surface.State{surface.StateIdle}, disposition: surface.ComposerCleared}
@@ -125,6 +213,21 @@ func TestCrossDriverEmptyProofRequiresIdleClearedAndWorkingVetoes(t *testing.T) 
 	working := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateWorking}, disposition: surface.ComposerUndetermined}
 	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{control, working}); ok || detail != "working-veto:codex" {
 		t.Fatalf("working veto = ok=%t detail=%q", ok, detail)
+	}
+	for _, tc := range []struct {
+		name  string
+		state surface.State
+		want  string
+	}{
+		{"approval modal", surface.StateAwaitingApproval, "awaiting-approval-veto:modal"},
+		{"input modal", surface.StateAwaitingInput, "awaiting-input-veto:modal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modal := &officerRouteDriver{name: "modal", states: []surface.State{tc.state}, disposition: surface.ComposerUndetermined}
+			if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{modal, control}); ok || detail != tc.want {
+				t.Fatalf("modal veto = ok=%t detail=%q want %q", ok, detail, tc.want)
+			}
+		})
 	}
 }
 

@@ -184,9 +184,10 @@ capture under #690; safety depends on the selector/composer structure, not those
 
 **Officer route around classifier uncertainty.** When the selected live driver is
 uncertain but the pane is actually idle, watch may proceed only after two byte-stable
-pane/cursor samples show a visible cursor outside copy mode, the live driver's raw idle
-assessment, and an independent registered driver reports an empty main composer; any
-Working report vetoes. CLI use is coordinator-only and requires the SHA-256 of an exact,
+pane/cursor samples show a visible cursor outside copy mode and an independent registered
+driver reports an empty main composer. A stable Unknown from the failed selected expert
+may be overridden; any Working, approval/input, wedge, error, or shell report vetoes.
+CLI use is coordinator-only and requires the SHA-256 of an exact,
 officer-reviewed clean-composer capture plus
 `--officer-confirm-clean-composer`. Both paths write authorization before sending and
 append the confirmed outcome to `<roster-dir>/flotilla-officer-delivery-audit.jsonl`.

@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -33,6 +35,7 @@ type officerIdleProof struct {
 	CursorX    int
 	CursorY    int
 	EmptyProof string
+	PreState   surface.State
 }
 
 type officerRouteAudit struct {
@@ -53,6 +56,8 @@ type officerRouteAudit struct {
 	PreState              string    `json:"pre_state"`
 	ClassifierDisposition string    `json:"classifier_disposition"`
 	Outcome               string    `json:"outcome"`
+	TerminalOutcome       string    `json:"terminal_outcome"`
+	ReplayDisposition     string    `json:"replay_disposition"`
 }
 
 type officerRouteDeps struct {
@@ -83,8 +88,8 @@ func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, cand
 	clearedBy := ""
 	for _, candidate := range candidates {
 		state := candidate.Assess(pane)
-		if state == surface.StateWorking {
-			return false, "working-veto:" + candidate.Name()
+		if officerUnsafeState(state) {
+			return false, state.String() + "-veto:" + candidate.Name()
 		}
 		if candidate.Name() == selected.Name() || state != surface.StateIdle {
 			continue
@@ -98,6 +103,16 @@ func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, cand
 		return false, "no-independent-idle-cleared-driver"
 	}
 	return true, "independent-idle-cleared:" + clearedBy
+}
+
+func officerUnsafeState(state surface.State) bool {
+	switch state {
+	case surface.StateWorking, surface.StateAwaitingApproval, surface.StateAwaitingInput,
+		surface.StateWedge, surface.StateErrored, surface.StateShell:
+		return true
+	default:
+		return false
+	}
 }
 
 func sampleOfficerIdle(d surface.Driver, pane string, deps officerRouteDeps) (officerIdleSample, error) {
@@ -145,7 +160,10 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 		return officerIdleProof{}, err
 	}
 	for i, sample := range []officerIdleSample{first, second} {
-		if sample.state != surface.StateIdle {
+		// StateUnknown is the expert failure this independent proof exists to
+		// route around. It is neither positive-idle evidence nor a veto; the
+		// stable cursor/capture + independent empty-composer proof decides it.
+		if sample.state != surface.StateIdle && sample.state != surface.StateUnknown {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported %s", i+1, sample.state)
 		}
 		if sample.inMode || !sample.visible {
@@ -161,7 +179,7 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 	if first.captureSHA != second.captureSHA || first.cursorX != second.cursorX || first.cursorY != second.cursorY || first.visible != second.visible || first.inMode != second.inMode || first.state != second.state || first.emptyProof != second.emptyProof {
 		return officerIdleProof{}, fmt.Errorf("pane changed during officer idle settle interval")
 	}
-	return officerIdleProof{CaptureSHA: first.captureSHA, CursorX: first.cursorX, CursorY: first.cursorY, EmptyProof: first.emptyProof}, nil
+	return officerIdleProof{CaptureSHA: first.captureSHA, CursorX: first.cursorX, CursorY: first.cursorY, EmptyProof: first.emptyProof, PreState: first.state}, nil
 }
 
 func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane, liveSurface, liveCommand, message, expectedCaptureSHA string, cleanComposerConfirmed bool, probeFailed string, deps officerRouteDeps) error {
@@ -179,9 +197,15 @@ func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane
 	record := officerRouteAudit{
 		At: deps.now().UTC(), Officer: officer, Authority: authority, Path: path, Agent: agent, Pane: pane,
 		LiveSurface: liveSurface, LiveCommand: liveCommand, SelectedDriver: d.Name(), CaptureSHA: proof.CaptureSHA, CursorX: proof.CursorX, CursorY: proof.CursorY,
-		Proof: "two idle/stable visible-cursor samples + " + proof.EmptyProof, ProbeFailed: probeFailed, PreState: surface.StateIdle.String(), ClassifierDisposition: disposition,
-		Outcome: "authorized-before-submit",
+		Proof: "two idle/stable visible-cursor samples + " + proof.EmptyProof, ProbeFailed: probeFailed, PreState: proof.PreState.String(), ClassifierDisposition: disposition,
+		Outcome: "attempt-owned-durable", TerminalOutcome: "delivery-status-unknown-no-replay",
+		ReplayDisposition: "never-replay-after-submit-begins",
 	}
+	// This durable row transfers ownership of the attempt before injection. Its
+	// terminal status is deliberately "unknown/no-replay": if the process dies
+	// or the result append fails after keys are sent, reconciliation may inspect
+	// the pane but automation must never repeat the message. A successful result
+	// append refines that conservative terminal status below.
 	if err := deps.audit(record); err != nil {
 		return fmt.Errorf("officer route audit refused delivery: %w", err)
 	}
@@ -190,9 +214,11 @@ func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane
 	result := record
 	result.At = deps.now().UTC()
 	if submitErr != nil {
-		result.Outcome = "delivery-failed: " + submitErr.Error()
+		result.Outcome = "delivery-failed"
+		result.TerminalOutcome = "delivery-failed: " + submitErr.Error()
 	} else {
-		result.Outcome = "delivered-confirmed"
+		result.Outcome = "delivery-finished"
+		result.TerminalOutcome = "delivered-confirmed"
 	}
 	if err := deps.audit(result); err != nil {
 		// The pre-submit authorization record is already durable, so a confirmed
@@ -224,7 +250,8 @@ func officerDetectorIdleOverride(d surface.Driver, agent, pane, liveSurface, liv
 		CaptureSHA: proof.CaptureSHA, CursorX: proof.CursorX, CursorY: proof.CursorY,
 		Proof:       "two idle/stable visible-cursor samples + " + proof.EmptyProof,
 		ProbeFailed: "AssessForFleet=Unknown", PreState: surface.StateUnknown.String(), ClassifierDisposition: disposition,
-		Outcome: "detector-idle-override",
+		Outcome: "detector-idle-override", TerminalOutcome: "detector-idle-override",
+		ReplayDisposition: "not-a-delivery",
 	}
 	return deps.audit(record) == nil
 }
@@ -239,9 +266,26 @@ func appendOfficerRouteAudit(path string, record officerRouteAudit) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(line)
-	return err
+	return writeDurableOfficerAudit(f, line)
+}
+
+type officerAuditFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+func writeDurableOfficerAudit(f officerAuditFile, line []byte) error {
+	n, writeErr := f.Write(line)
+	if writeErr == nil && n != len(line) {
+		writeErr = io.ErrShortWrite
+	}
+	var syncErr error
+	if writeErr == nil {
+		syncErr = f.Sync()
+	}
+	closeErr := f.Close()
+	return errors.Join(writeErr, syncErr, closeErr)
 }
 
 func watchOfficerRouteDeps(rosterDir string) officerRouteDeps {
