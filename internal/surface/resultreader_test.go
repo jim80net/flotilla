@@ -76,6 +76,28 @@ func TestResolveDriverStaleClaudeToLiveGrokDetectorFrames(t *testing.T) {
 	}
 }
 
+func TestResolveDriverStaleClaudeUsesLiveGrokRateLimitParser(t *testing.T) {
+	drv, _, _, err := ResolveDriver("claude-code", "p", func(string) (string, error) { return "grok", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := drv.(grok)
+	if !ok {
+		t.Fatalf("resolved driver = %T, want grok", drv)
+	}
+	g.capturePane = func(string) (string, error) {
+		return "  ⠙ Rate limit exceeded; sleeping.", nil
+	}
+	pane := "resolved-live-grok-rate-limit"
+	if limited, _, _ := g.RateLimited(pane); limited {
+		t.Fatal("first Grok throttle read must not yet be material")
+	}
+	limited, scope, detail := g.RateLimited(pane)
+	if !limited || scope != RateLimitAccountSide || detail != "Rate limit exceeded" {
+		t.Fatalf("live Grok parser = (%v,%v,%q), want material account-side Grok throttle", limited, scope, detail)
+	}
+}
+
 func TestResolveResultReaderPrefersLiveHarness(t *testing.T) {
 	paneCommand := func(string) (string, error) { return "claude", nil }
 

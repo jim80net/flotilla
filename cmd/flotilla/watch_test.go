@@ -130,17 +130,28 @@ func TestResolveWatchLiveDriverAllConfiguredToLiveDirections(t *testing.T) {
 	}
 }
 
-func TestResolveWatchLiveDriverFallsBackOnCommandReadError(t *testing.T) {
+func TestWatchLiveDriverCommandReadErrorFailsClosed(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
-	drv, err := resolveWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+	submitted := false
+	err := submitWithWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
 		return "", os.ErrNotExist
+	}, func(surface.Driver) error {
+		submitted = true
+		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || submitted {
+		t.Fatalf("unreadable submit: err=%v submitted=%v, want error/false", err, submitted)
 	}
-	if drv.Name() != "claude-code" {
-		t.Fatalf("delivery driver = %q, want configured fallback claude-code", drv.Name())
+	assessed := false
+	got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) surface.State {
+		assessed = true
+		return surface.StateIdle
+	})
+	if got != surface.StateUnknown || assessed {
+		t.Fatalf("unreadable assess: state=%v assessed=%v, want unknown/false", got, assessed)
 	}
 }
 
@@ -199,5 +210,55 @@ func TestAssessWatchResolvedPaneUnknownCommandIsUnknown(t *testing.T) {
 	})
 	if got != surface.StateUnknown || called {
 		t.Fatalf("unknown command detector = %v assessCalled=%v, want unknown/false", got, called)
+	}
+}
+
+func TestRateLimitActuationUsesLiveGrokAndFailsClosedUnreadable(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+
+	called := false
+	limited, scope, detail, ok := rateLimitMaterialResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) (bool, surface.RateLimitScope, string, bool) {
+		called = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("rate-limit probe got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+		return true, surface.RateLimitAccountSide, "grok throttle", true
+	})
+	if !called || !limited || !ok || scope != surface.RateLimitAccountSide || detail != "grok throttle" {
+		t.Fatalf("live Grok rate limit = (%v,%v,%q,%v) called=%v", limited, scope, detail, ok, called)
+	}
+
+	called = false
+	_, _, _, ok = rateLimitMaterialResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) (bool, surface.RateLimitScope, string, bool) {
+		called = true
+		return true, surface.RateLimitServerSide, "wrong", true
+	})
+	if ok || called {
+		t.Fatalf("unreadable rate-limit material: ok=%v probed=%v, want false/false", ok, called)
+	}
+
+	reset := false
+	rateLimitResetResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) {
+		reset = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("rate-limit reset got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+	})
+	if !reset {
+		t.Fatal("live Grok rate-limit reset did not run")
+	}
+	reset = false
+	rateLimitResetResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) { reset = true })
+	if reset {
+		t.Fatal("unreadable rate-limit reset must fail closed before reset")
 	}
 }

@@ -779,10 +779,10 @@ func cmdWatch(args []string) error {
 			Assess: func(agent string) surface.State {
 				return assessWatchAgent(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand)
 			},
-			RateLimitMaterial: rateLimitMaterial(cfg),
+			RateLimitMaterial: rateLimitMaterial(currentRoster),
 			Usage:             usageObservation(cfg, flatLaunch),
 			UsageDispatch:     func(run func()) { go run() },
-			RateLimitReset:    rateLimitReset(cfg),
+			RateLimitReset:    rateLimitReset(currentRoster),
 			RateLimitDispatch: func(run func()) { go run() },
 			RateLimitAutoSwitchEligible: func(agent string) bool {
 				if !cfg.AutoSwitchEligible(agent) {
@@ -888,7 +888,7 @@ func cmdWatch(args []string) error {
 			}
 		}
 		if autoSwitchOn {
-			probeMaterial := rateLimitMaterial(cfg)
+			probeMaterial := rateLimitMaterial(currentRoster)
 			endFlight := func(agent string) {
 				if endAutoSwitch != nil {
 					endAutoSwitch(agent)
@@ -1832,23 +1832,30 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 // rateLimitMaterial returns a DetectorConfig callback that probes a desk for a
 // material provider throttle (#204). ok=false when the surface lacks RateLimitProbe.
 // Invoked OFF d.mu from runRateLimitProbes — never under tickLocked.
-func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
+func rateLimitMaterial(currentRoster func() *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
 	return func(agent string) (bool, surface.RateLimitScope, string, bool) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return false, 0, "", false
-		}
-		probe, ok := surface.RateLimitSupport(drv)
-		if !ok {
-			return false, 0, "", false
-		}
+		cfg := currentRoster()
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
 			return false, 0, "", false
 		}
-		limited, scope, detail := probe.RateLimited(pane)
-		return limited, scope, detail, true
+		return rateLimitMaterialResolved(cfg, agent, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) (bool, surface.RateLimitScope, string, bool) {
+			probe, ok := surface.RateLimitSupport(drv)
+			if !ok {
+				return false, 0, "", false
+			}
+			limited, scope, detail := probe.RateLimited(pane)
+			return limited, scope, detail, true
+		})
 	}
+}
+
+func rateLimitMaterialResolved(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), probe func(surface.Driver, string) (bool, surface.RateLimitScope, string, bool)) (bool, surface.RateLimitScope, string, bool) {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return false, 0, "", false
+	}
+	return probe(drv, pane)
 }
 
 // usageObservation wires the optional read-only UsageProbe. Provider identity
@@ -1914,21 +1921,27 @@ func activeUsageSlotMeta(agent string, launches *launch.Config) (provider, subsc
 
 // rateLimitReset clears a desk's consecutive-read streak when it leaves the probe
 // candidate states (Idle/Errored).
-func rateLimitReset(cfg *roster.Config) func(agent string) {
+func rateLimitReset(currentRoster func() *roster.Config) func(agent string) {
 	return func(agent string) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return
-		}
-		if _, ok := surface.RateLimitSupport(drv); !ok {
-			return
-		}
+		cfg := currentRoster()
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
 			return
 		}
-		surface.ClearRateLimitStreak(pane)
+		rateLimitResetResolved(cfg, agent, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) {
+			if _, ok := surface.RateLimitSupport(drv); ok {
+				surface.ClearRateLimitStreak(pane)
+			}
+		})
 	}
+}
+
+func rateLimitResetResolved(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), reset func(surface.Driver, string)) {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return
+	}
+	reset(drv, pane)
 }
 
 // readDeskTurnFinal returns a desk's substantive turn-final via the shared
@@ -2371,19 +2384,20 @@ func agentSurface(cfg *roster.Config, name string) string {
 // resolveWatchLiveDriver is the single pane-first driver resolver for watch
 // delivery and detector assessment. A readable live command is authoritative;
 // an unknown command is an error, never permission to use a stale classifier.
-// A command-read error retains the configured fail-closed fallback.
+// A command-read error is also unknown: no classifier may run without proving
+// which harness owns the live pane.
 func resolveWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
-	var liveCommand string
-	var commandErr error
-	if paneCommand != nil {
-		liveCommand, commandErr = paneCommand(pane)
-		if commandErr == nil {
-			if _, ok := surface.SurfaceFromPaneCommand(liveCommand); !ok {
-				return nil, fmt.Errorf("resolve live surface for agent %q: unrecognized pane command %q", agent, strings.TrimSpace(liveCommand))
-			}
-		}
+	if paneCommand == nil {
+		return nil, fmt.Errorf("resolve live surface for agent %q: pane command reader unavailable", agent)
 	}
-	oneRead := func(string) (string, error) { return liveCommand, commandErr }
+	liveCommand, commandErr := paneCommand(pane)
+	if commandErr != nil {
+		return nil, fmt.Errorf("resolve live surface for agent %q: read pane command: %w", agent, commandErr)
+	}
+	if _, ok := surface.SurfaceFromPaneCommand(liveCommand); !ok {
+		return nil, fmt.Errorf("resolve live surface for agent %q: unrecognized pane command %q", agent, strings.TrimSpace(liveCommand))
+	}
+	oneRead := func(string) (string, error) { return liveCommand, nil }
 	drv, liveSurface, drift, err := surface.ResolveDriver(agentSurface(cfg, agent), pane, oneRead)
 	if err != nil {
 		return nil, fmt.Errorf("resolve live surface for agent %q: %w", agent, err)
