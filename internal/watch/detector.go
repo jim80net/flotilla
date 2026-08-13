@@ -420,7 +420,7 @@ type Detector struct {
 	deskNoProgress       map[string]int       // consecutive heartbeats with no intervening progress (the cap counter)
 	deskStopped          map[string]bool      // capped + escalated → stop heartbeating until re-armed
 	deskProgressed       map[string]bool      // desk went Working since its last heartbeat → resets the cap
-	deskLastProgressAt   map[string]time.Time // last detector observation proving the desk was Working
+	deskLastProgressAt   map[string]time.Time // last detector transition proving turn start/completion
 
 	// rateLimitActive suppresses repeat wakes for the same throttle episode (#204).
 	rateLimitActive map[string]bool
@@ -876,12 +876,6 @@ func (d *Detector) ingestActivity(pendingTurnEnds []string) {
 	states := make(map[string]surface.State, len(d.snap.DeskStates))
 	for k, v := range d.snap.DeskStates {
 		states[k] = v
-		if v == surface.StateWorking {
-			// The same assessed-state snapshot fed to Activity is the positive progress
-			// signal consumed by delivery-wedge suppression. Record every monitored seat,
-			// including the primary XO (which deskHeartbeatLocked intentionally skips).
-			d.deskLastProgressAt[k] = now
-		}
 	}
 	xoSettled := d.snap.XOSettled
 	xoAgent := d.cfg.XOAgent
@@ -1366,6 +1360,17 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	}
 
 	prev := d.snap
+	// Progress is event-based, never observation-based. A transition into Working
+	// proves a turn started; Working→Idle proves a turn completed. Re-reading the
+	// same Working state carries no new evidence and must not refresh the delivery-
+	// wedge suppression window.
+	progressAt := d.now()
+	for _, name := range d.cfg.Desks {
+		before, after := prev.DeskStates[name], cur.DeskStates[name]
+		if before != after && (after == surface.StateWorking || (before == surface.StateWorking && after == surface.StateIdle)) {
+			d.deskLastProgressAt[name] = progressAt
+		}
+	}
 
 	applyPrimaryMaterialClock := func(reasons []string) {
 		if !d.cfg.StackableWakes || d.cfg.OwningXO == nil {
@@ -1481,7 +1486,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//     early-return above, so the cold baseline owes NO beats — exactly like the mirror/synth
 	//     sections get cold-start suppression for free. Fully inert when HeartbeatEnabled is nil (the
 	//     loop is skipped), so the detector is byte-identical to before #183.
-	pendingDeskBeats, pendingDeskEscalations = d.deskHeartbeatLocked(cur, warrant)
+	pendingDeskBeats, pendingDeskEscalations = d.deskHeartbeatLocked(prev, cur, warrant)
 
 	// 6. Max-quiet liveness ping (layer 3). Any wake above already refreshes
 	//    liveness (L1), so only an entirely-quiet tick advances the quiet counter.
@@ -1596,7 +1601,7 @@ func (d *Detector) deskWarrantSnapshot() map[string]bool {
 //
 // Inert when HeartbeatEnabled is nil — the whole loop is skipped, so the detector is byte-identical to
 // before #183 (the regression-lock).
-func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (beats, escalations []string) {
+func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]bool) (beats, escalations []string) {
 	if d.cfg.HeartbeatEnabled == nil {
 		return nil, nil // feature OFF ⇒ byte-inert
 	}
@@ -1609,15 +1614,15 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 		}
 		switch cur.DeskStates[name] {
 		case surface.StateWorking:
-			// Progress: the desk re-engaged. Latch progressed (so an owed beat after this never counts
-			// toward the cap), un-wedge it (progress clears a stop), and restart both the cadence and
-			// the cap — a freshly-idle desk gets a full cadence before its next beat.
-			d.deskProgressed[name] = true
-			d.deskLastProgressAt[name] = now
-			delete(d.deskStopped, name)
-			d.deskNoProgress[name] = 0
-			delete(d.deskBeatEligibleAt, name)
-			delete(d.deskSettled, name)
+			if prev.DeskStates[name] != surface.StateWorking {
+				// A transition into Working is the progress event. Re-observing an
+				// unchanged Working snapshot does not manufacture progress.
+				d.deskProgressed[name] = true
+				delete(d.deskStopped, name)
+				d.deskNoProgress[name] = 0
+				delete(d.deskBeatEligibleAt, name)
+				delete(d.deskSettled, name)
+			}
 		case surface.StateIdle:
 			// Consume the per-agent settle marker (fail-safe → not-settled). A desk that touched its
 			// marker is settled until re-armed.

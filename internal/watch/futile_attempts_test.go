@@ -2,6 +2,7 @@ package watch
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,45 @@ func TestWorkingRecipientWithDetectorProgressNeverAccruesFutileAttempts(t *testi
 	}
 	if _, ok := in.futileAttempts["working-seat"]; ok {
 		t.Fatal("Working+progress must not increment or retain the futile counter")
+	}
+}
+
+func TestStaticWorkingDetectorProductionSeamAlarmsAsUnprogressing(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	d := NewDetector(DetectorConfig{
+		XOAgent: "coordinator",
+		Desks:   []string{"stalled-seat"},
+		Assess:  func(string) surface.State { return surface.StateWorking },
+		Now:     func() time.Time { return now },
+		AckAge:  func() time.Duration { return 0 },
+		Persist: func(Snapshot) error { return nil },
+	}, filepath.Join(t.TempDir(), "missing-snapshot.json"))
+
+	in := NewInjector(func(string, string) error { return surface.ErrBusy }, 1)
+	in.now = func() time.Time { return now }
+	in.internalWedgeDispatch = func(run func()) { run() }
+	in.SetRecipientProgress(d.RecipientDeliveryEvidence)
+	var internal, operator []string
+	in.SetInternalWedgeAlert(func(_ string, msg string) { internal = append(internal, msg) })
+	in.SetEscalate(func(msg string) { operator = append(operator, msg) })
+
+	// Cold-seed the unchanged Working baseline, then run 65 real detector ingests
+	// and injector refusals at the production five-second retry cadence. No state
+	// transition, turn-end, or output delta occurs.
+	d.Tick()
+	for i := 0; i < futileAttemptThreshold+5; i++ {
+		d.Tick()
+		in.deliver(Job{Agent: "stalled-seat", Kind: KindDetector})
+		now = now.Add(5 * time.Second)
+	}
+	if len(internal) != 1 || !strings.Contains(internal[0], "delivery wedge") {
+		t.Fatalf("static Working production seam alerts = %v, want one internal wedge", internal)
+	}
+	if len(operator) != 0 {
+		t.Fatalf("static Working wedge leaked to operator destination: %v", operator)
+	}
+	if class, progressed := d.RecipientDeliveryEvidence("stalled-seat", now.Add(-futileAttemptWindow)); class != outbox.RecipientWorking || progressed {
+		t.Fatalf("static Working final evidence = (%q, %v), want Working without progress", class, progressed)
 	}
 }
 

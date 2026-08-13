@@ -30,24 +30,34 @@ func TestActivityWorkingDeskElevatesActive(t *testing.T) {
 	}
 }
 
-func TestDetectorRecipientDeliveryEvidenceUsesActivitySnapshotForXOProgress(t *testing.T) {
+func TestDetectorRecipientDeliveryEvidenceDoesNotTreatRepeatedWorkingObservationAsProgress(t *testing.T) {
 	now := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+	state := surface.StateIdle
 	d := NewDetector(DetectorConfig{
 		XOAgent:  "coordinator",
+		Desks:    []string{"coordinator"},
+		Assess:   func(string) surface.State { return state },
 		Now:      func() time.Time { return now },
+		AckAge:   func() time.Duration { return 0 },
 		Activity: NewActivityTracker(testActivityConfig()),
 		Persist:  func(Snapshot) error { return nil },
-	}, "")
-	d.snap.DeskStates = map[string]surface.State{"coordinator": surface.StateWorking}
-	d.ingestActivity(nil)
+	}, filepath.Join(t.TempDir(), "missing-snapshot.json"))
+	d.Tick() // cold idle baseline
 
-	class, progressed := d.RecipientDeliveryEvidence("coordinator", now.Add(-time.Second))
+	now = now.Add(5 * time.Second)
+	transitionAt := now
+	state = surface.StateWorking
+	d.Tick() // Idle→Working is a genuine progress event
+	class, progressed := d.RecipientDeliveryEvidence("coordinator", transitionAt)
 	if class != outbox.RecipientWorking || !progressed {
-		t.Fatalf("XO evidence = (%q, %v), want Working+progress", class, progressed)
+		t.Fatalf("Working transition evidence = (%q, %v), want Working+progress", class, progressed)
 	}
-	class, progressed = d.RecipientDeliveryEvidence("coordinator", now.Add(time.Second))
+
+	now = now.Add(5 * time.Second)
+	d.Tick() // unchanged Working observation: no event
+	class, progressed = d.RecipientDeliveryEvidence("coordinator", transitionAt.Add(time.Second))
 	if class != outbox.RecipientWorking || progressed {
-		t.Fatalf("future-window evidence = (%q, %v), want Working without progress", class, progressed)
+		t.Fatalf("unchanged Working evidence = (%q, %v), want Working without progress", class, progressed)
 	}
 }
 
