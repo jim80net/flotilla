@@ -13,6 +13,10 @@ func TestSurfaceFromPaneCommand(t *testing.T) {
 	}{
 		{"claude", "claude-code", true},
 		{"grok", "grok", true},
+		{"codex", "codex", true},
+		{"opencode", "opencode", true},
+		{"pi", "pi", true},
+		{"aider", "aider", true},
 		{"bash", "", false},
 		{"", "", false},
 		{" Claude ", "claude-code", true},
@@ -45,6 +49,30 @@ func TestResolveDriverPrefersLiveHarness586(t *testing.T) {
 	}
 	if _, ok := RecycleSupport(drv); !ok {
 		t.Fatal("live grok driver must expose RecycleBridge for handoff paths")
+	}
+}
+
+func TestResolveDriverStaleClaudeToLiveGrokDetectorFrames(t *testing.T) {
+	drv, _, _, err := ResolveDriver("claude-code", "p", func(string) (string, error) { return "grok", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := drv.(grok)
+	if !ok {
+		t.Fatalf("resolved driver = %T, want grok", drv)
+	}
+	frames := []struct {
+		name string
+		cap  string
+		want State
+	}{
+		{"working", "  ⠙ Waiting… 0.4s ⇣127k [✗]", StateWorking},
+		{"idle", "  │ ❯                         │\n  ╰──── Grok 4.6 (high) · always-approve ─╯", StateIdle},
+	}
+	for _, tc := range frames {
+		if got := g.classify(tc.cap); got != tc.want {
+			t.Errorf("live Grok %s frame = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

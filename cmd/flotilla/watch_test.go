@@ -103,31 +103,37 @@ func TestAgentSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
 	}
 }
 
-func TestResolveWatchDeliveryDriverPrefersLiveHarness(t *testing.T) {
+func TestResolveWatchLiveDriverAllConfiguredToLiveDirections(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
-	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
-
-	drv, err := resolveWatchDeliveryDriver(cfg, "coordinator", "%42", func(pane string) (string, error) {
-		if pane != "%42" {
-			t.Fatalf("pane = %q, want %%42", pane)
+	surfaces := []struct{ surface, command string }{
+		{"claude-code", "claude"}, {"grok", "grok"}, {"codex", "codex"},
+		{"opencode", "opencode"}, {"pi", "pi"}, {"aider", "aider"},
+	}
+	for _, configured := range surfaces {
+		for _, live := range surfaces {
+			t.Run(configured.surface+"_to_"+live.surface, func(t *testing.T) {
+				cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: configured.surface}}}
+				drv, err := resolveWatchLiveDriver(cfg, "coordinator", "%42", func(pane string) (string, error) {
+					if pane != "%42" {
+						t.Fatalf("pane = %q, want %%42", pane)
+					}
+					return live.command, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if drv.Name() != live.surface {
+					t.Fatalf("delivery driver = %q, want live %q driver", drv.Name(), live.surface)
+				}
+			})
 		}
-		return "grok", nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if drv.Name() != "grok" {
-		t.Fatalf("delivery driver = %q, want live grok driver", drv.Name())
-	}
-	if _, ok := drv.(surface.ComposerStateProbe); !ok {
-		t.Fatal("live delivery driver must retain Grok's composer-state gate")
 	}
 }
 
-func TestResolveWatchDeliveryDriverFailsClosedToConfiguredSurfaceOnCommandError(t *testing.T) {
+func TestResolveWatchLiveDriverFallsBackOnCommandReadError(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
-	drv, err := resolveWatchDeliveryDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+	drv, err := resolveWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
 		return "", os.ErrNotExist
 	})
 	if err != nil {
@@ -135,5 +141,63 @@ func TestResolveWatchDeliveryDriverFailsClosedToConfiguredSurfaceOnCommandError(
 	}
 	if drv.Name() != "claude-code" {
 		t.Fatalf("delivery driver = %q, want configured fallback claude-code", drv.Name())
+	}
+}
+
+func TestSubmitWithWatchLiveDriverUnknownCommandDoesNotSubmit(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	for _, command := range []string{"mystery-agent", "bash", "", "   "} {
+		t.Run("command="+command, func(t *testing.T) {
+			called := false
+			err := submitWithWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+				return command, nil
+			}, func(surface.Driver) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("unknown/ambiguous live command must fail closed")
+			}
+			if called {
+				t.Fatal("submit was called through an unknown/ambiguous live command")
+			}
+		})
+	}
+}
+
+func TestAssessWatchResolvedPaneUsesLiveDriverForWorkingAndIdle(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	for _, want := range []surface.State{surface.StateWorking, surface.StateIdle} {
+		got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+			return "grok", nil
+		}, func(drv surface.Driver, pane string) surface.State {
+			if drv.Name() != "grok" {
+				t.Fatalf("detector assessed with %q, want live grok driver", drv.Name())
+			}
+			if pane != "%42" {
+				t.Fatalf("detector pane = %q, want %%42", pane)
+			}
+			return want
+		})
+		if got != want {
+			t.Fatalf("detector state = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestAssessWatchResolvedPaneUnknownCommandIsUnknown(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	called := false
+	got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "ambiguous", nil
+	}, func(surface.Driver, string) surface.State {
+		called = true
+		return surface.StateIdle
+	})
+	if got != surface.StateUnknown || called {
+		t.Fatalf("unknown command detector = %v assessCalled=%v, want unknown/false", got, called)
 	}
 }

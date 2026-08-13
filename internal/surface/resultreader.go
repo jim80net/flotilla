@@ -12,6 +12,8 @@ var paneCommandSurfaces = map[string]string{
 	"grok":     "grok",
 	"codex":    "codex",
 	"opencode": "opencode",
+	"pi":       "pi",
+	"aider":    "aider",
 }
 
 // SurfaceFromPaneCommand maps a pane's foreground command to a registered surface name.

@@ -295,11 +295,8 @@ func cmdWatch(args []string) error {
 	// submit and its Enter-only retry / self-heal.
 	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
 		return func(agent, message string) error {
-			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-			if err != nil {
-				return err
-			}
-			drv, err := resolveWatchDeliveryDriver(cfg, agent, pane, deliver.PaneCommand)
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, agent))
 			if err != nil {
 				return err
 			}
@@ -308,7 +305,9 @@ func cmdWatch(args []string) error {
 				return err
 			}
 			defer txn.Release()
-			return submit(temporalClassifier.Temporal(drv, pane), pane, message)
+			return submitWithWatchLiveDriver(current, agent, pane, deliver.PaneCommand, func(drv surface.Driver) error {
+				return submit(temporalClassifier.Temporal(drv, pane), pane, message)
+			})
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
@@ -778,25 +777,7 @@ func cmdWatch(args []string) error {
 			Interval:          interval,
 			ReferenceInterval: referenceInterval,
 			Assess: func(agent string) surface.State {
-				drv, ok := surface.Get(agentSurface(cfg, agent))
-				if !ok {
-					return surface.StateUnknown
-				}
-				pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-				if err != nil {
-					// The pane titled for this agent is gone (the session died and
-					// the pane closed, or its title no longer matches) — that is a
-					// crash, equivalent to a pane that dropped back to a shell. Map
-					// it to Shell so the detector's two-consecutive debounce absorbs a
-					// transient resolve blip but a persistent vanish still crash-alerts
-					// the XO immediately (preserving — and bettering — the legacy gate,
-					// which alerted on the very first resolve failure).
-					return surface.StateShell
-				}
-				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
-				// list-nav / queued) elevates so status does not claim plain idle when
-				// recycle's idle∧cleared gate would refuse (#557).
-				return surface.AssessForFleet(drv, pane)
+				return assessWatchAgent(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand)
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			Usage:             usageObservation(cfg, flatLaunch),
@@ -2387,15 +2368,23 @@ func agentSurface(cfg *roster.Config, name string) string {
 	return ""
 }
 
-// resolveWatchDeliveryDriver binds confirmed delivery to the harness actually
-// running in the resolved pane. The daemon keeps long-lived closures over its
-// startup roster; after an external roster/overlay reconciliation that snapshot
-// can lag even though the pane has already moved. Driving a live Grok pane with
-// the stale Claude classifier makes Grok's off-cursor composer look undetermined.
-// ResolveDriver preserves the configured surface as fallback when the live
-// command cannot be read, but lets the known live command win when it can.
-func resolveWatchDeliveryDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
-	drv, liveSurface, drift, err := surface.ResolveDriver(agentSurface(cfg, agent), pane, paneCommand)
+// resolveWatchLiveDriver is the single pane-first driver resolver for watch
+// delivery and detector assessment. A readable live command is authoritative;
+// an unknown command is an error, never permission to use a stale classifier.
+// A command-read error retains the configured fail-closed fallback.
+func resolveWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
+	var liveCommand string
+	var commandErr error
+	if paneCommand != nil {
+		liveCommand, commandErr = paneCommand(pane)
+		if commandErr == nil {
+			if _, ok := surface.SurfaceFromPaneCommand(liveCommand); !ok {
+				return nil, fmt.Errorf("resolve live surface for agent %q: unrecognized pane command %q", agent, strings.TrimSpace(liveCommand))
+			}
+		}
+	}
+	oneRead := func(string) (string, error) { return liveCommand, commandErr }
+	drv, liveSurface, drift, err := surface.ResolveDriver(agentSurface(cfg, agent), pane, oneRead)
 	if err != nil {
 		return nil, fmt.Errorf("resolve live surface for agent %q: %w", agent, err)
 	}
@@ -2403,6 +2392,30 @@ func resolveWatchDeliveryDriver(cfg *roster.Config, agent, pane string, paneComm
 		log.Printf("flotilla watch: delivery driver drift — %s configured surface differs from live pane harness %q; using live harness", agent, liveSurface)
 	}
 	return drv, nil
+}
+
+func submitWithWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), submit func(surface.Driver) error) error {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return err
+	}
+	return submit(drv)
+}
+
+func assessWatchAgent(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error)) surface.State {
+	pane, err := resolvePane(agentTitle(cfg, agent))
+	if err != nil {
+		return surface.StateShell
+	}
+	return assessWatchResolvedPane(cfg, agent, pane, paneCommand, surface.AssessForFleet)
+}
+
+func assessWatchResolvedPane(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) surface.State {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown
+	}
+	return assess(drv, pane)
 }
 
 // adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval
