@@ -104,6 +104,28 @@ func TestHarnessExitConfirmationChoice(t *testing.T) {
 				"Are you sure you want to exit?\n1. Exit anyway\n2. Cancel\nEnter to confirm",
 			"", false,
 		},
+		{
+			"prose ending in task glyph does not bridge menu",
+			"background agents still running (1)\nThe report says migration ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+		{
+			"six task rows remain inside twelve-line coverage",
+			"background agents still running (6)\n" +
+				"task-1  ● running\ntask-2  ● running\ntask-3  ● running\n" +
+				"task-4  ● running\ntask-5  ● running\ntask-6  ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
+			"seven task rows exceed documented twelve-line coverage",
+			"background agents still running (7)\n" +
+				"task-1  ● running\ntask-2  ● running\ntask-3  ● running\n" +
+				"task-4  ● running\ntask-5  ● running\ntask-6  ● running\ntask-7  ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

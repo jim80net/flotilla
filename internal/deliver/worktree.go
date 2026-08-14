@@ -9,7 +9,10 @@ import (
 )
 
 // WorktreeExitTailLines bounds the scan for Claude Code's worktree-exit menu to the
-// live footer (the prompt renders at the bottom of the pane during /exit).
+// live footer (the prompt renders at the bottom of the pane during /exit). Measured
+// coverage for the standard two-action background-work menu is at most six task-detail
+// rows when it includes one spacer; seven rows push the status summary outside this
+// 12-line window and deliberately fail closed. No checked-in live frame exceeds two.
 const WorktreeExitTailLines = 12
 
 // HarnessExitConfirmationChoice recognizes the unattended-close confirmation shown when
@@ -142,8 +145,23 @@ func parenthesizedCount(value string) bool {
 }
 
 func backgroundTaskDetail(line string) bool {
-	fields := strings.Fields(strings.TrimSpace(line))
-	return len(fields) >= 3 && fields[len(fields)-2] == "●" && fields[len(fields)-1] == "running"
+	const renderedStatus = "● running"
+	line = strings.TrimSpace(line)
+	if !strings.HasSuffix(line, renderedStatus) {
+		return false
+	}
+	prefix := strings.TrimSuffix(line, renderedStatus)
+	name := strings.TrimRight(prefix, " ")
+	separatorWidth := len(prefix) - len(name)
+	if separatorWidth < 2 || len(name) == 0 || len(name) > 32 || strings.ContainsAny(name, " \t") {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func allASCIIInteger(value string) bool {
