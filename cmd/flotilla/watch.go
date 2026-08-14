@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -99,6 +100,41 @@ const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idl
 // Chain warnings recur slowly: loud enough that an unprotected fleet cannot
 // look healthy indefinitely, without repeating on every heartbeat tick.
 const launchChainNoticeInterval = 6 * time.Hour
+
+func resolveAlertWebhook(secrets *roster.Secrets, xo string) string {
+	if secrets == nil {
+		return ""
+	}
+	if hook, err := secrets.Webhook("alerts"); err == nil && hook != "" {
+		return hook
+	}
+	if hook, err := secrets.Webhook(xo); err == nil {
+		return hook
+	}
+	return ""
+}
+
+type watchPoster interface {
+	Post(transport.Destination, string, string) error
+}
+
+func newWatchPosters(poster watchPoster, operatorDest, alertDest transport.Destination, stderr io.Writer) (post func(string, string), alert func(string)) {
+	post = func(username, msg string) {
+		if poster != nil && operatorDest != nil {
+			_ = poster.Post(operatorDest, username, msg)
+		} else {
+			fmt.Fprintln(stderr, "flotilla watch: "+msg)
+		}
+	}
+	alert = func(msg string) {
+		if poster != nil && alertDest != nil {
+			_ = poster.Post(alertDest, "flotilla-watch", "⚠️ "+msg)
+		} else {
+			fmt.Fprintln(stderr, "flotilla watch: ⚠️ "+msg)
+		}
+	}
+	return post, alert
+}
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
@@ -219,7 +255,7 @@ func cmdWatch(args []string) error {
 	// mirror time (a webhook is channel-bound, so posting under a desk's webhook lands in its
 	// channel). A configured-but-broken secrets file is fatal — don't silently degrade to clock-only
 	// (the operator set --secrets expecting the relay).
-	var alertHook, botToken string
+	var alertHook, operatorHook, botToken string
 	var secrets *roster.Secrets
 	if *secretsPath != "" {
 		s, err := roster.LoadSecrets(*secretsPath)
@@ -228,9 +264,10 @@ func cmdWatch(args []string) error {
 		}
 		secrets = s
 		botToken = secrets.BotToken()
-		if h, err := secrets.Webhook(xo); err == nil {
-			alertHook = h
+		if hook, err := secrets.Webhook(xo); err == nil {
+			operatorHook = hook
 		}
+		alertHook = resolveAlertWebhook(secrets, xo)
 	}
 	if alertHook == "" {
 		fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — no alert webhook; down-alerts go to stderr (journald) only")
@@ -260,21 +297,21 @@ func cmdWatch(args []string) error {
 			defer func() { _ = tr.Close() }()
 		}
 	}
-	// alertDest is the fixed down-alert webhook target (the XO's webhook), wrapped as a
-	// transport Destination so the post path is medium-agnostic. nil when there is no
-	// alert webhook OR no transport — post then degrades to stderr.
+	// alertDest is the fixed down-alert webhook target (the dedicated alerts webhook when
+	// provisioned, otherwise the legacy XO webhook), wrapped as a transport Destination so the post
+	// path is medium-agnostic. nil when there is no alert webhook OR no transport — post then
+	// degrades to stderr. Relay mirrors and hotline replies resolve their own destinations below.
 	var alertDest transport.Destination
 	if tr != nil && alertHook != "" {
 		alertDest = transport.NewWebhookDestination(alertHook)
 	}
-	post := func(username, msg string) {
-		if tr != nil && alertDest != nil {
-			_ = tr.Post(alertDest, username, msg)
-		} else {
-			fmt.Fprintln(os.Stderr, "flotilla watch: "+msg)
-		}
+	// operatorDest remains the XO webhook. Operator-relay mirrors, hotline/catch-up notices, and
+	// intentional operator traffic must not follow the dedicated warning destination.
+	var operatorDest transport.Destination
+	if tr != nil && operatorHook != "" {
+		operatorDest = transport.NewWebhookDestination(operatorHook)
 	}
-	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
+	post, alert := newWatchPosters(tr, operatorDest, alertDest, os.Stderr)
 
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
