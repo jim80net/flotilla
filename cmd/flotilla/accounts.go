@@ -32,13 +32,22 @@ func cmdAccounts(args []string) error {
 	}
 }
 
+type credentialProbeState string
+type accountAuthState string
+
+const (
+	credentialProbeOK          credentialProbeState = "ok"
+	credentialProbeUnavailable credentialProbeState = "unavailable"
+	authStateUnknown           accountAuthState     = "unknown"
+)
+
 type accountRefreshReport struct {
-	SubscriptionID string `json:"subscription_id"`
-	Credential     string `json:"credential_status"`
-	ExpiresAt      string `json:"expires_at,omitempty"`
-	LoggedIn       *bool  `json:"logged_in,omitempty"`
-	Probe          string `json:"probe"`
-	Warning        string `json:"warning,omitempty"`
+	SubscriptionID  string               `json:"subscription_id"`
+	Credential      string               `json:"credential_status"`
+	CredentialProbe credentialProbeState `json:"credential_probe"`
+	AuthState       accountAuthState     `json:"auth_state"`
+	ExpiresAt       string               `json:"expires_at,omitempty"`
+	Warning         string               `json:"warning,omitempty"`
 }
 
 var runClaudeAuthLogin = func(configDir string) error {
@@ -101,16 +110,17 @@ func cmdAccountsRefresh(args []string) error {
 func probeAccountRefresh(id string, now time.Time) accountRefreshReport {
 	h, _ := accounts.ProbeHealth(id, now)
 	report := accountRefreshReport{
-		SubscriptionID: id,
-		Credential:     h.Status,
-		Probe:          "ok",
-		Warning:        accountCredentialWarning(h.Status),
+		SubscriptionID:  id,
+		Credential:      h.Status,
+		CredentialProbe: credentialProbeOK,
+		AuthState:       authStateUnknown,
+		Warning:         accountCredentialWarning(h.Status),
 	}
 	if !h.ExpiresAt.IsZero() {
 		report.ExpiresAt = h.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	if h.Status == accounts.StatusUnreadable {
-		report.Probe = "unavailable"
+		report.CredentialProbe = credentialProbeUnavailable
 	}
 	return report
 }
@@ -191,7 +201,13 @@ func allowedOAuthURL(line string) string {
 			continue
 		}
 		u, err := url.Parse(candidate)
-		if err != nil || u.Scheme != "https" || u.Hostname() == "" || !allowedOAuthHost(u.Hostname()) {
+		// The interactive contract needs only an HTTPS URL on an approved
+		// provider host, with an absolute path and optional OAuth query.
+		// Userinfo, explicit ports, and fragments are neither required nor
+		// safe to relay, so reject the entire URL when any is present.
+		if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil ||
+			u.Hostname() == "" || u.Port() != "" || !allowedOAuthHost(u.Hostname()) ||
+			u.Path == "" || !strings.HasPrefix(u.Path, "/") || strings.Contains(candidate, "#") {
 			continue
 		}
 		return u.String()
@@ -246,10 +262,8 @@ func printAccountRefreshReport(report accountRefreshReport, asJSON bool) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	}
-	fmt.Printf("account=%s credential=%s auth_probe=%s", report.SubscriptionID, report.Credential, report.Probe)
-	if report.LoggedIn != nil {
-		fmt.Printf(" logged_in=%t", *report.LoggedIn)
-	}
+	fmt.Printf("account=%s credential=%s credential_probe=%s auth_state=%s",
+		report.SubscriptionID, report.Credential, report.CredentialProbe, report.AuthState)
 	if report.ExpiresAt != "" {
 		fmt.Printf(" expires=%s", report.ExpiresAt)
 	}

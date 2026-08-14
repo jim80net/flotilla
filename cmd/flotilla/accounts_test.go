@@ -97,8 +97,46 @@ func TestCmdAccountsRefreshProbeOnlySanitizesProviderOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("probe JSON: %v body=%q", err, out)
 	}
-	if report.Probe != "ok" || report.LoggedIn != nil || report.Warning == "" {
+	if report.CredentialProbe != "ok" || report.AuthState != "unknown" || report.Warning == "" {
 		t.Fatalf("report = %+v, want read-only file health without guessed login state", report)
+	}
+}
+
+func TestCmdAccountsRefreshNoCredentialsReportsSeparateProbeAndAuthFacts(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_ACCOUNTS_ROOT", root)
+	if _, err := accounts.Init("anthropic-work"); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonOut, _ := captureStdoutStderr(t, func() {
+		if err := cmdAccountsRefresh([]string{"--probe-only", "--json", "anthropic-work"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var report accountRefreshReport
+	if err := json.Unmarshal([]byte(jsonOut), &report); err != nil {
+		t.Fatalf("probe JSON: %v body=%q", err, jsonOut)
+	}
+	if report.Credential != accounts.StatusNoCredsFile || report.CredentialProbe != "ok" || report.AuthState != "unknown" {
+		t.Fatalf("no-credentials JSON facts = %+v", report)
+	}
+	if strings.Contains(jsonOut, `"probe"`) || strings.Contains(jsonOut, `"logged_in"`) {
+		t.Fatalf("JSON retained misleading auth-probe fields: %s", jsonOut)
+	}
+
+	textOut, _ := captureStdoutStderr(t, func() {
+		if err := cmdAccountsRefresh([]string{"--probe-only", "anthropic-work"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, fact := range []string{"credential=no-creds-file", "credential_probe=ok", "auth_state=unknown"} {
+		if !strings.Contains(textOut, fact) {
+			t.Fatalf("text report missing %q: %s", fact, textOut)
+		}
+	}
+	if strings.Contains(textOut, "auth_probe=") {
+		t.Fatalf("text retained misleading auth probe label: %s", textOut)
 	}
 }
 
@@ -150,7 +188,7 @@ func TestCmdAccountsRefreshRequiresExplicitConsent(t *testing.T) {
 	if loginCalls != 0 {
 		t.Fatalf("login called %d times without consent", loginCalls)
 	}
-	if !strings.Contains(out, "auth_probe=ok") || strings.Contains(out, "claude.ai") {
+	if !strings.Contains(out, "credential_probe=ok auth_state=unknown") || strings.Contains(out, "claude.ai") {
 		t.Fatalf("preview output should be minimal and sanitized: %q", out)
 	}
 }
@@ -162,7 +200,7 @@ func TestProbeAccountRefreshDoesNotGuessLoginState(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := probeAccountRefresh("anthropic-work", time.Now())
-	if report.Probe != "ok" || report.LoggedIn != nil {
+	if report.CredentialProbe != "ok" || report.AuthState != "unknown" {
 		t.Fatalf("credential-file probe must not guess provider login state: %+v", report)
 	}
 }
@@ -261,6 +299,26 @@ func TestOAuthOutputBrokerEmitsNonNewlinePromptImmediately(t *testing.T) {
 	}
 	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
 		t.Fatalf("brokered prompt = %q", got)
+	}
+}
+
+func TestOAuthOutputBrokerRejectsUserinfoAndUnneededURLComponents(t *testing.T) {
+	for _, input := range []string{
+		"Open https://PROVIDER_SECRET@claude.ai/oauth",
+		"Open https://claude.ai:443/oauth",
+		"Open https://claude.ai/oauth#PROVIDER_SECRET",
+		"Open https://claude.ai",
+	} {
+		t.Run(input, func(t *testing.T) {
+			var out bytes.Buffer
+			broker := newOAuthOutputBroker(&out)
+			if _, err := broker.Write([]byte(input + "\n")); err != nil {
+				t.Fatal(err)
+			}
+			if got := out.String(); got != "" {
+				t.Fatalf("unsafe OAuth URL crossed output boundary: %q", got)
+			}
+		})
 	}
 }
 
