@@ -237,7 +237,10 @@ mirrors the wake to the audit channel. Without --chunk the message must be ≤ 2
 characters (Discord's hard limit); a longer body is rejected (nothing is posted).
 With --chunk the full body is delivered across multiple messages. --attach delivers
 files as Discord attachments (multipart webhook POST); oversize or unreadable paths
-fail closed (nothing is posted).
+fail closed (nothing is posted). Attachment requests use a 30s timeout with bounded
+retry/backoff; set FLOTILLA_NOTIFY_ATTACH_TIMEOUT to a positive Go duration to tune it.
+Repeated image-upload timeouts trigger a bounded-dimension JPEG fallback, and any final
+failure is returned loudly.
 
 flags for 'synthesis publish':
   --from <name>     publishing XO (default $FLOTILLA_SELF)
