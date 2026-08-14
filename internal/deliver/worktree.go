@@ -53,8 +53,11 @@ func HarnessExitConfirmationChoice(captured string) (string, bool) {
 	// The exit question must immediately introduce that action block (one visual
 	// spacer is allowed), and a genuine background-work status line must occur in
 	// the same small menu region above it. Exact line shapes reject quoted prose.
-	for i >= 0 && strings.TrimSpace(lines[i]) == "" {
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
 		i--
+		if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+			return "", false
+		}
 	}
 	if i < 0 || !exitConfirmationQuestion(lines[i]) {
 		return "", false
@@ -100,11 +103,36 @@ func exitConfirmationQuestion(line string) bool {
 
 func backgroundWorkStatus(line string) bool {
 	line = strings.TrimSpace(line)
-	if strings.ContainsAny(line, "\"'`:") {
+	if line == "background work is still running" {
+		return true
+	}
+
+	fields := strings.Fields(line)
+	if len(fields) != 4 && len(fields) != 5 {
 		return false
 	}
-	return (strings.Contains(line, "background work") || strings.Contains(line, "background agent") || strings.Contains(line, "background task")) &&
-		(strings.Contains(line, "running") || strings.Contains(line, "still running"))
+	if !allASCIIInteger(fields[0]) || fields[1] != "background" {
+		return false
+	}
+	if fields[2] != "agent" && fields[2] != "agents" && fields[2] != "task" && fields[2] != "tasks" {
+		return false
+	}
+	if len(fields) == 4 {
+		return fields[3] == "running"
+	}
+	return fields[3] == "still" && fields[4] == "running"
+}
+
+func allASCIIInteger(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func exitConfirmationAction(label string) bool {

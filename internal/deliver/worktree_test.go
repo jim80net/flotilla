@@ -62,6 +62,11 @@ func TestHarnessExitConfirmationChoice(t *testing.T) {
 			"2", true,
 		},
 		{
+			"one visual spacer is allowed",
+			"1 background task running\nAre you sure you want to exit?\n\n1. Exit anyway\n2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
 			"ordinary numbered prompt is untouched",
 			"Choose a deployment\n1. Exit staging\n2. Production\nEnter to confirm",
 			"", false,
@@ -76,6 +81,18 @@ func TestHarnessExitConfirmationChoice(t *testing.T) {
 			"Earlier output quoted: \"4 background agents still running\"\n" +
 				"Earlier question: \"Are you sure you want to exit?\"\n" +
 				"1. Exit staging\n2. Production\nEnter to confirm",
+			"", false,
+		},
+		{
+			"more than one spacer does not bind a menu",
+			"4 background agents still running\nAre you sure you want to exit?\n\n\n\n" +
+				"1. Exit anyway\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+		{
+			"background status embedded in prose does not bind a menu",
+			"The report says 4 background agents still running\n" +
+				"Are you sure you want to exit?\n1. Exit anyway\n2. Cancel\nEnter to confirm",
 			"", false,
 		},
 	}
