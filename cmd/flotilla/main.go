@@ -124,8 +124,9 @@ func usage() {
 	fmt.Println(`flotilla — coordinate a fleet of AI coding agents
 
 usage:
-  flotilla send --from <sender> <agent> <message>     inline message
-  flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla send --from <sender> <agent> [<one-line-message>]
+                                                      send body; defaults to piped stdin
+  flotilla send --from <sender> --file <path> <agent> lossless body from a file ('-' = stdin)
   flotilla send --from <officer> --officer-capture-sha <sha256> --officer-confirm-clean-composer <agent> <message>
                                                       audited route around an uncertain classifier; coordinator-only
   flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
@@ -410,7 +411,7 @@ func cmdSend(args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		return fmt.Errorf("usage: flotilla send --from <sender> <agent> <message>  (or --file <path> <agent>)")
+		return fmt.Errorf("usage: flotilla send --from <sender> [--file <path>] <agent> [<single-line-message>] (body defaults to piped stdin)")
 	}
 	if *from == "" {
 		return fmt.Errorf("--from is required (or set $FLOTILLA_SELF)")
@@ -424,14 +425,15 @@ func cmdSend(args []string) error {
 			return fmt.Errorf("unexpected %q after the agent name: put flags before the agent, or use --file for a message that starts with '-'", a)
 		}
 	}
-	// --file - reads stdin; if stdin is an interactive terminal nothing is piped
-	// and io.ReadAll would block forever. Fail fast instead of hanging.
-	if *file == "-" {
-		if fi, statErr := os.Stdin.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
-			return fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
-		}
+	stdinTerminal := false
+	if fi, statErr := os.Stdin.Stat(); statErr == nil {
+		stdinTerminal = fi.Mode()&os.ModeCharDevice != 0
 	}
-	message, err := resolveMessage(*file, rest[1:], os.Stdin)
+	messageFile, inlineMessage, err := safeSendMessageSource(*file, rest[1:], stdinTerminal)
+	if err != nil {
+		return err
+	}
+	message, err := resolveMessage(messageFile, inlineMessage, os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -771,6 +773,32 @@ func cmdSpeak(args []string) error {
 // from that file ("-" reads stdin) and trailing newlines are trimmed; inline
 // positional words are then disallowed (mutually exclusive). Without filePath,
 // the positional words are joined with spaces.
+// safeSendMessageSource prevents the shell-loss incident from recurring at the CLI
+// boundary. A missing body defaults to stdin. Inline text is retained only for one
+// single-line argv value; word-split or multiline bodies must use
+// --file so whitespace and shell syntax never become command input.
+func safeSendMessageSource(filePath string, inline []string, stdinTerminal bool) (string, []string, error) {
+	if filePath != "" {
+		if filePath == "-" && stdinTerminal {
+			return "", nil, fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
+		}
+		return filePath, inline, nil
+	}
+	if len(inline) == 0 {
+		if stdinTerminal {
+			return "", nil, fmt.Errorf("message body defaults to stdin, but stdin is a terminal; pipe the body or use --file <path>")
+		}
+		return "-", nil, nil
+	}
+	if len(inline) != 1 {
+		return "", nil, fmt.Errorf("refusing a word-split inline message: pass one quoted single-line argument, or use --file <path> / piped stdin for lossless transport")
+	}
+	if strings.ContainsAny(inline[0], "\r\n") {
+		return "", nil, fmt.Errorf("refusing an inline multiline message: use --file <path> or piped stdin so line breaks and shell syntax are preserved")
+	}
+	return "", inline, nil
+}
+
 func resolveMessage(filePath string, inline []string, stdin io.Reader) (string, error) {
 	if filePath != "" {
 		if len(inline) > 0 {

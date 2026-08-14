@@ -130,12 +130,20 @@ cannot confirm a turn — the message is never silently dropped:
 > delivered`. That refusal *is* the feature — flotilla never types into a pane
 > whose agent has died.
 
-Long or multi-line bodies are easier from a file or stdin (no shell quoting):
+Long or multi-line bodies must use a file or safely constructed stdin so the body
+is not placed on the `send` command line. Backticks, dollar syntax, and line breaks
+already present in that source reach flotilla literally. With no inline body,
+`send` defaults to piped stdin:
 
 ```sh
 flotilla send --from me --file ./instructions.txt infra
 echo "deploy when green" | flotilla send --from me --file - infra
+printf '%s\n' "$instructions" | flotilla send --from me infra
 ```
+
+Inline messages must arrive as exactly one quoted, single-line argument. Flotilla
+refuses word-split or literal multiline inline bodies and points to the lossless
+file/stdin forms instead.
 
 Inter-agent mirroring is **default-off**, so by default a send just delivers to
 the pane (no Discord post). See §4 to enable it; `--no-mirror` also forces it off.

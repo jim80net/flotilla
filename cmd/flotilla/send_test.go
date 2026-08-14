@@ -36,3 +36,17 @@ func TestCmdSendRejectsBothMirrorFlags(t *testing.T) {
 		t.Fatalf("cmdSend(--mirror --no-mirror) = %v, want a mutually-exclusive error", err)
 	}
 }
+
+func TestCmdSendRefusesWordSplitBodyBeforeDelivery(t *testing.T) {
+	err := cmdSend([]string{"--from", "x", "agent", "first line", "`touch", "marker`", "value"})
+	if err == nil || !strings.Contains(err.Error(), "word-split") || !strings.Contains(err.Error(), "lossless") {
+		t.Fatalf("cmdSend(word-split body) = %v, want pre-delivery lossless-transport refusal", err)
+	}
+}
+
+func TestCmdSendRefusesLiteralMultilineBeforeDelivery(t *testing.T) {
+	err := cmdSend([]string{"--from", "x", "agent", "first line\n`touch marker`\nvalue=$THING"})
+	if err == nil || !strings.Contains(err.Error(), "inline multiline") {
+		t.Fatalf("cmdSend(multiline body) = %v, want pre-delivery multiline refusal", err)
+	}
+}

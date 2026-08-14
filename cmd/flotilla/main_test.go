@@ -17,6 +17,48 @@ func TestResolveMessageInline(t *testing.T) {
 	}
 }
 
+func TestSafeSendMessageSourceRefusesWordSplitMultiline(t *testing.T) {
+	_, _, err := safeSendMessageSource("", []string{"first line", "value", "stripped", "`touch", "marker`"}, false)
+	if err == nil || !strings.Contains(err.Error(), "word-split") || !strings.Contains(err.Error(), "--file") {
+		t.Fatalf("safeSendMessageSource error = %v, want lossless transport refusal", err)
+	}
+}
+
+func TestSafeSendMessageSourceRefusesLiteralMultiline(t *testing.T) {
+	_, _, err := safeSendMessageSource("", []string{"first line\n`touch marker`\nvalue=$THING"}, false)
+	if err == nil || !strings.Contains(err.Error(), "multiline") || !strings.Contains(err.Error(), "piped stdin") {
+		t.Fatalf("safeSendMessageSource error = %v, want multiline refusal", err)
+	}
+}
+
+func TestSafeSendMessageSourceDefaultsToStdin(t *testing.T) {
+	filePath, inline, err := safeSendMessageSource("", nil, false)
+	if err != nil || filePath != "-" || len(inline) != 0 {
+		t.Fatalf("safeSendMessageSource = (%q, %v, %v), want stdin", filePath, inline, err)
+	}
+	got, err := resolveMessage(filePath, inline, strings.NewReader("line one\n`literal backticks`\nvalue=$THING\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "line one\n`literal backticks`\nvalue=$THING" {
+		t.Fatalf("stdin body changed: %q", got)
+	}
+}
+
+func TestSafeSendMessageSourceAllowsOneQuotedSingleLine(t *testing.T) {
+	filePath, inline, err := safeSendMessageSource("", []string{"ship it now"}, true)
+	if err != nil || filePath != "" || len(inline) != 1 || inline[0] != "ship it now" {
+		t.Fatalf("safeSendMessageSource = (%q, %v, %v)", filePath, inline, err)
+	}
+}
+
+func TestSafeSendMessageSourceNeverBlocksOnTerminalStdin(t *testing.T) {
+	_, _, err := safeSendMessageSource("", nil, true)
+	if err == nil || !strings.Contains(err.Error(), "terminal") {
+		t.Fatalf("terminal stdin error = %v", err)
+	}
+}
+
 func TestResolveMessageFileTrimsTrailingNewline(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "msg.txt")
 	if err := os.WriteFile(p, []byte("line one\nline two\n"), 0o600); err != nil {
