@@ -195,6 +195,12 @@ var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
 // Working (live-captured 2026-06-16, #58 — structural parity with "⠙ Waiting… 0.4s").
 var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate limit exceeded\b`)
 
+// grokComposerFooter is the bottom border of the Grok 4.x composer. The live
+// renderer places the model and approval mode on this row, immediately below
+// the prompt row. Requiring that adjacency distinguishes actual TUI chrome from
+// an agent quoting a prompt-shaped line in conversation.
+var grokComposerFooter = regexp.MustCompile(`^[ \t]*╰─+[ \t]+Grok [^·\r\n]+ · [^·\r\n]+ ─╯[ \t]*$`)
+
 // grokWeeklyUsage is the authoritative weekly-usage row from `/usage show`.
 // PROVENANCE: LIVE-CAPTURED 2026-07-13 from the official Grok CLI 0.2.93
 // (f00f96316d), and SOURCE-VERIFIED in that installed binary from the adjacent
@@ -279,22 +285,34 @@ func (g grok) ComposerState(pane string) ComposerDisposition {
 
 // classifyGrokComposerLine scans the captured pane for the composer input row and classifies it.
 // It strips grok's LEFT box border (│) before the ❯ prompt — claude's CutPrefix("❯") alone fails on
-// grok's "│ ❯". Cursor position is only a hint in live tmux output: the cursor can sit on a different
-// line while the composer remains visible, so we search for the prompt row instead of assuming cursorY
-// indexes it. A pane with no "│ ❯" prompt row anywhere (the tool-approval modal; multi-line
-// continuation rows carry no ❯) is Undetermined (pre-paste fail-closed; post-paste may use the
-// spinner). The trailing right border + spaces are stripped so an EMPTY composer reads Cleared
-// (the load-bearing gate-safety case).
+// grok's "│ ❯". The prompt row is accepted only when the immediately following row is the
+// model+approval footer written by the Grok TUI. Cursor position is a fast path, not the sole proof:
+// tmux can report the cursor on another row while the composer remains visible, so the fallback scans
+// for the same ADJACENT prompt/footer pair. Quoted prompt or footer prose cannot satisfy that pair.
+// A pane with no structurally vouched pair is Undetermined (pre-paste fail-closed; post-paste may use
+// the spinner). The trailing right border + spaces are stripped so an EMPTY composer reads Cleared.
 func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	if cursorY >= 0 && cursorY < len(lines) {
-		if disp := classifyGrokComposerLineAt(lines[cursorY]); disp != ComposerUndetermined {
-			return disp
+	for footer := 1; footer < len(lines); footer++ {
+		if !grokComposerFooter.MatchString(lines[footer]) {
+			continue
 		}
-	}
-	for _, line := range lines {
-		if disp := classifyGrokComposerLineAt(line); disp != ComposerUndetermined {
-			return disp
+		// Every composer body row carries a left │ border. Walk only that
+		// contiguous box body; ordinary prose between a quoted prompt and footer
+		// breaks the proof. Prefer cursorY when it identifies a row in this box.
+		bodyStart := footer
+		for bodyStart > 0 && strings.HasPrefix(trimSpace(lines[bodyStart-1]), grokBoxBorder) {
+			bodyStart--
+		}
+		if cursorY >= bodyStart && cursorY < footer {
+			if disp := classifyGrokComposerLineAt(lines[cursorY]); disp != ComposerUndetermined {
+				return disp
+			}
+		}
+		for row := bodyStart; row < footer; row++ {
+			if disp := classifyGrokComposerLineAt(lines[row]); disp != ComposerUndetermined {
+				return disp
+			}
 		}
 	}
 	return ComposerUndetermined

@@ -133,7 +133,10 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 		}
 		f.Pending = append(f.Pending, e)
 		id = e.ID
-		return s.save(f)
+		if err := s.save(f); err != nil {
+			return err
+		}
+		return RecordStage(filepath.Dir(s.path), e, StageQueued, "durable outbox insert", e.EnqueuedAt)
 	})
 	if err != nil {
 		return "", false, err
@@ -210,7 +213,10 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 			next = append(next, p)
 		}
 		f.Pending = next
-		return st.save(f)
+		if err := st.save(f); err != nil {
+			return err
+		}
+		return RecordStage(rosterDir, canceled, StageCanceled, "canceled by exact outbox id", time.Now().UTC())
 	})
 	if err != nil {
 		return CancelResult{}, fmt.Errorf("outbox cancel: %w", err)
@@ -316,10 +322,27 @@ func AttemptCurrent(rosterDir string, e Entry, attempt func() error) (bool, erro
 		if index < 0 {
 			return nil
 		}
+		// A prior callback may have submitted successfully before queue cleanup
+		// failed. Reconcile that durable fact without submitting the body twice.
+		submitted, err := HasDeliveryStage(rosterDir, e.ID, StageSubmitted)
+		if err != nil {
+			return err
+		}
+		if submitted {
+			attempted = true
+			f.Pending = append(f.Pending[:index], f.Pending[index+1:]...)
+			return st.save(f)
+		}
 		attempted = true
 		attemptErr = attempt()
 		if attemptErr != nil {
-			return nil
+			return RecordStage(rosterDir, e, StageAttemptedRefused, attemptErr.Error(), time.Now().UTC())
+		}
+		// Submission is a transport fact produced by the callback. Persist it
+		// before removing the queue row: if either later write fails, status still
+		// says the body was submitted and a reconciler can refuse a duplicate.
+		if err := RecordStage(rosterDir, e, StageSubmitted, "paste+enter confirmed", time.Now().UTC()); err != nil {
+			return err
 		}
 		f.Pending = append(f.Pending[:index], f.Pending[index+1:]...)
 		return st.save(f)

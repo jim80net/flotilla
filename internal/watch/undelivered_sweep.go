@@ -118,6 +118,9 @@ type UndeliveredHooks struct {
 	IsMerged dispatch.RecipientMergedChecker
 	// IsCommitOnMain confirms explicitly terminal SHA citations locally.
 	IsCommitOnMain dispatch.RecipientCommitChecker
+	// RecipientClosedOut reports a durable recipient-unavailable disposition. Closed recipients'
+	// reports are durably quarantined and never age-escalated; nil preserves legacy behavior.
+	RecipientClosedOut func(recipient string) bool
 	// MaxL2PerTick overrides MaxOperatorL2PerTick when > 0 (tests).
 	MaxL2PerTick int
 }
@@ -153,8 +156,43 @@ func UndeliveredDispatchSweep(rosterDir string, h UndeliveredHooks) int {
 	n := 0
 	l2Emitted := 0
 	l2Deferred := 0
+	quarantine := dispatch.NewQuarantineRegistry(rosterDir)
 	for _, r := range dispatch.ScanUndelivered(rosterDir, now) {
-		base := r.Kind + "/" + r.ID
+		active, qerr := quarantine.IsQuarantined(r.Kind, r.ID, r.Recipient)
+		if qerr != nil {
+			// Registry uncertainty cannot authorize escalation; preserve the source report and retry.
+			log.Printf("flotilla watch: undelivered quarantine read failed for %s/%s: %v (escalation suppressed)", r.Kind, r.ID, qerr)
+			continue
+		}
+		closed := h.RecipientClosedOut != nil && h.RecipientClosedOut(r.Recipient)
+		if active || closed {
+			if closed && !active {
+				inserted, err := quarantine.Quarantine(dispatch.QuarantineEntry{
+					Kind: r.Kind, RowID: r.ID, Nonce: r.Nonce, Sender: r.Sender,
+					Recipient: r.Recipient, PayloadHash: r.PayloadHash, QuarantinedAt: now.UTC(), Reason: dispatch.ReasonRecipientClosedOut,
+				})
+				if err != nil {
+					log.Printf("flotilla watch: quarantine undelivered %s/%s failed: %v (escalation suppressed)", r.Kind, r.ID, err)
+				} else if inserted {
+					log.Printf("flotilla watch: quarantined undelivered %s/%s recipient=%s reason=%s (source row preserved; NOT acknowledged)", r.Kind, r.ID, r.Recipient, dispatch.ReasonRecipientClosedOut)
+				}
+				// If a confirmed restoration won between the predicate read and durable mark,
+				// lift the stale marker immediately. The production predicate joins the durable
+				// restoration transition, so uncertainty never strands a restored recipient.
+				if h.RecipientClosedOut != nil && !h.RecipientClosedOut(r.Recipient) {
+					if _, err := quarantine.ReopenRecipient(r.Recipient, now); err != nil {
+						log.Printf("flotilla watch: reopen raced quarantine for %s: %v", r.Recipient, err)
+					}
+				}
+			}
+			continue
+		}
+		generation, err := quarantine.Generation(r.Recipient)
+		if err != nil {
+			log.Printf("flotilla watch: undelivered quarantine generation failed for %s: %v (escalation suppressed)", r.Recipient, err)
+			continue
+		}
+		base := fmt.Sprintf("%s/%s/g%d", r.Kind, r.ID, generation)
 		l1Key := "l1/" + base
 		l2Key := "l2/" + base
 		adj := ""

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -26,6 +27,37 @@ func TestActivityWorkingDeskElevatesActive(t *testing.T) {
 	snap := at.Snapshot(now)
 	if snap.Level != ActivityActive || snap.WorkingDesks != 1 {
 		t.Fatalf("working desk ⇒ Active, got level=%v working=%d", snap.Level, snap.WorkingDesks)
+	}
+}
+
+func TestDetectorRecipientDeliveryEvidenceDoesNotTreatRepeatedWorkingObservationAsProgress(t *testing.T) {
+	now := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+	state := surface.StateIdle
+	d := NewDetector(DetectorConfig{
+		XOAgent:  "coordinator",
+		Desks:    []string{"coordinator"},
+		Assess:   func(string) surface.State { return state },
+		Now:      func() time.Time { return now },
+		AckAge:   func() time.Duration { return 0 },
+		Activity: NewActivityTracker(testActivityConfig()),
+		Persist:  func(Snapshot) error { return nil },
+	}, filepath.Join(t.TempDir(), "missing-snapshot.json"))
+	d.Tick() // cold idle baseline
+
+	now = now.Add(5 * time.Second)
+	transitionAt := now
+	state = surface.StateWorking
+	d.Tick() // Idle→Working is a genuine progress event
+	class, progressed := d.RecipientDeliveryEvidence("coordinator", transitionAt)
+	if class != outbox.RecipientWorking || !progressed {
+		t.Fatalf("Working transition evidence = (%q, %v), want Working+progress", class, progressed)
+	}
+
+	now = now.Add(5 * time.Second)
+	d.Tick() // unchanged Working observation: no event
+	class, progressed = d.RecipientDeliveryEvidence("coordinator", transitionAt.Add(time.Second))
+	if class != outbox.RecipientWorking || progressed {
+		t.Fatalf("unchanged Working evidence = (%q, %v), want Working without progress", class, progressed)
 	}
 }
 

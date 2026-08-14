@@ -157,14 +157,20 @@ type Injector struct {
 	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
 	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
 	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
+	onTurnConfirmed           func(recipient string)                  // optional: eligible work/send accepted a turn; may reopen recipient quarantine
+	recipientClosedOut        func(recipient string) bool             // optional: fail-closed routing hold for internal wakes
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
-	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
+	recipientProgress         func(recipient string, since time.Time) (outbox.RecipientClass, bool)
+	internalWedgeAlert        func(recipient, message string) // optional: wedge/recovery notice to owning coordinator surface
+	internalWedgeDispatch     func(func())                    // off-worker dispatch; injectable for deterministic tests
+	coordinatorIngress        *CoordinatorIngress             // optional: #533 adjutant front-office ingress before delivery
 	// optional: #593 durable operator buffer append (+ B1 channel/operator for arc keying)
 	onOperatorRelayBuffer func(leader, messageID, body, channelID, operatorID string) error
 	relayPendingMu        sync.Mutex
 	relayPending          map[string]int // in-flight KindRelay per agent (#523)
+	futileAttempts        map[string]futileAttemptState
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -215,6 +221,15 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 // dispatch in the recipient's inbound ledger (#472). Must be set before Start.
 func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 
+// SetTurnConfirmed installs a hook called only after an eligible confirmed operator/work delivery
+// (a relay kind or KindSend), keyed to the actual pane recipient. Internal detector/heartbeat wakes
+// are deliberately excluded: their composer confirmation is not provider-restoration evidence.
+func (in *Injector) SetTurnConfirmed(fn func(recipient string)) { in.onTurnConfirmed = fn }
+
+// SetRecipientClosedOut installs the shared routing-hold predicate. It suppresses only internal
+// detector/heartbeat deliveries; eligible operator/work sends remain the controlled restore edge.
+func (in *Injector) SetRecipientClosedOut(fn func(recipient string) bool) { in.recipientClosedOut = fn }
+
 // SetCoordinatorIngress installs #533 adjutant front-office ingress aliasing before coordinator delivery.
 func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) { in.coordinatorIngress = g }
 
@@ -233,6 +248,22 @@ func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string)
 	in.outboxCoordinatorEscalate = escalate
 }
 
+// SetRecipientProgress installs the detector-owned recipient evidence seam used by the
+// futile-attempt guard. The returned class uses the shared outbox taxonomy; progressed
+// reports whether the detector observed recipient progress since the supplied window start.
+// A nil hook fails closed toward counting the refusal.
+func (in *Injector) SetRecipientProgress(progress func(string, time.Time) (outbox.RecipientClass, bool)) {
+	in.recipientProgress = progress
+}
+
+// SetInternalWedgeAlert installs the non-operator destination for delivery-wedge alarms and
+// recovery notices. Production resolves the recipient's owning coordinator and enqueues a
+// KindDetector job to that pane. It is deliberately distinct from SetEscalate, which remains
+// the operator-critical relay-failure path.
+func (in *Injector) SetInternalWedgeAlert(alert func(recipient, message string)) {
+	in.internalWedgeAlert = alert
+}
+
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
 	in := &Injector{
@@ -246,6 +277,7 @@ func NewInjector(send SendFunc, buffer int) *Injector {
 	// worker stays free for other desks. Enqueue drops safely after Stop, so a late timer is a
 	// no-op (Stop does not cancel pending timers; they fire ≤delay later and drop — bounded).
 	in.reEnqueue = func(j Job, delay time.Duration) { time.AfterFunc(delay, func() { in.Enqueue(j) }) }
+	in.internalWedgeDispatch = func(run func()) { time.AfterFunc(0, run) }
 	return in
 }
 
@@ -276,6 +308,11 @@ func (in *Injector) Start() {
 // tick). Any other error is a real delivery failure: a relay escalates LOUDLY (never silent),
 // a tick logs only. A failed delivery never kills the worker.
 func (in *Injector) deliver(j Job) {
+	if (j.Kind == KindDetector || j.Kind == KindHeartbeat) && in.recipientClosedOut != nil && in.recipientClosedOut(j.Agent) {
+		log.Printf("flotilla watch: %s to %q suppressed — recipient is closed out/routing held", deliveryKind(j.Kind), j.Agent)
+		in.abortDetectorClaim(j)
+		return
+	}
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send
@@ -305,8 +342,12 @@ func (in *Injector) deliver(j Job) {
 	}
 	switch {
 	case err == nil:
+		in.resetFutileAttempts(j.Agent)
 		in.noteRelayDone(j)
 		in.logDelivered(j)
+		if in.onTurnConfirmed != nil && (isRelay(j.Kind) || j.Kind == KindSend) {
+			in.onTurnConfirmed(j.Agent)
+		}
 		if isRelay(j.Kind) && j.MessageID != "" {
 			in.queue.remove(j.MessageID)
 		}
@@ -333,6 +374,9 @@ func (in *Injector) deliver(j Job) {
 	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
 		in.handleBusy(j, err)
+	case errors.Is(err, surface.ErrWedge):
+		in.noteKnownWedge(j.Agent)
+		in.handleBusy(j, err)
 	case errors.Is(err, surface.ErrPanelBlocked):
 		// The desk's composer did NOT accept the message (#152): either a per-agent message
 		// sub-composer / agent-panel held focus (a paste would mis-deliver — refused before pasting),
@@ -347,6 +391,7 @@ func (in *Injector) deliver(j Job) {
 		in.noteRelayDone(j)
 		log.Printf("flotilla watch: deliver to %q INPUT-BLOCKED — composer did not accept the message (needs attention at its pane): %v", j.Agent, err)
 		if j.Kind == KindSend {
+			in.recordTerminalStage(j, outbox.StageFailed, err)
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
@@ -358,10 +403,25 @@ func (in *Injector) deliver(j Job) {
 		}
 		in.noteRelayDone(j)
 		if j.Kind == KindSend {
+			in.recordTerminalStage(j, outbox.StageFailed, err)
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+	}
+}
+
+func (in *Injector) recordTerminalStage(j Job, stage outbox.DeliveryStage, cause error) {
+	if !j.OutboxBound || in.rosterDir == "" {
+		return
+	}
+	evidence := "terminal delivery failure"
+	if cause != nil {
+		evidence = cause.Error()
+	}
+	if err := outbox.RecordStage(in.rosterDir, outbox.Entry{ID: j.MessageID, Sender: j.Sender,
+		Recipient: intendedRecipient(j), Message: j.Message}, stage, evidence, time.Now().UTC()); err != nil {
+		log.Printf("flotilla watch: record terminal stage for %s failed: %v", j.MessageID, err)
 	}
 }
 
@@ -422,6 +482,7 @@ func intendedRecipient(j Job) string {
 // and swept inter-agent sends are never dropped: short transient re-assess, then durable
 // disk-backed retry at the busy cadence until deliverable (#286, #475).
 func (in *Injector) handleBusy(j Job, cause error) {
+	in.noteFutileAttempt(j.Agent, outboxRecipientClass(cause))
 	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		in.abortDetectorClaim(j)
@@ -473,6 +534,8 @@ func outboxRecipientClass(cause error) outbox.RecipientClass {
 	switch {
 	case errors.Is(cause, surface.ErrBusy):
 		return outbox.RecipientWorking
+	case errors.Is(cause, surface.ErrWedge):
+		return outbox.RecipientWedge
 	case errors.Is(cause, surface.ErrTransient):
 		return outbox.RecipientTransient
 	case errors.Is(cause, surface.ErrPanelBlocked), errors.Is(cause, surface.ErrCrashed):

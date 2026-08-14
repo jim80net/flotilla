@@ -2,6 +2,8 @@ package surface
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -112,8 +114,8 @@ func TestClaudeAssessParity(t *testing.T) {
 		{"panecommand error → unknown (transient glitch, not a crash)", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
 		{"capture error → unknown (#55: non-material, not a false finish)", "node", nil, false, "", boom, StateUnknown},
-		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)", nil, StateWorking},
-		{"esc-to-interrupt → working", "node", nil, false, "doing\nesc to interrupt", nil, StateWorking},
+		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)\n❯ ", nil, StateWorking},
+		{"legacy esc-to-interrupt prose → idle", "node", nil, false, "doing\nesc to interrupt\n❯ ", nil, StateIdle},
 		{"idle composer → idle", "node", nil, false, "❯ \n  ⏵⏵ auto mode on", nil, StateIdle},
 		{"worktree-exit prompt → awaiting-input", "node", nil, false, "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm", nil, StateAwaitingInput},
 	}
@@ -123,12 +125,96 @@ func TestClaudeAssessParity(t *testing.T) {
 				paneCommand: func(string) (string, error) { return tc.cmd, tc.cmdErr },
 				isShell:     func(string) bool { return tc.isShell },
 				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
-				parseBusy:   deliver.ParseBusy,
+				parseBusyAt: deliver.ParseBusyAt,
+				cursorState: func(string) (int, bool, error) {
+					lines := strings.Split(strings.TrimRight(tc.captured, "\n"), "\n")
+					return len(lines) - 1, false, nil
+				},
 			}
 			if got := c.Assess("0:0.0"); got != tc.want {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClaudeAssessHistoricalSpinnerPromptPairIsNotWorking(t *testing.T) {
+	captured := "✻ Historical… (3s · ↓ 25 tokens)\n❯ old prompt\n● current response"
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return captured, nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("historical spinner+prompt pair Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 0, false, errors.New("cursor unavailable") }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("cursor-error degraded arm Assess = %v, want idle", got)
+	}
+	c.cursorState = func(string) (int, bool, error) { return 1, true, nil }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("copy-mode degraded arm Assess = %v, want idle", got)
+	}
+}
+
+func TestClaudeAssessStructuralInterruptStatusExactStates(t *testing.T) {
+	working := "✻ Deliberating… (3m 14s · thinking)\none\ntwo\nthree\nfour\nfive\nsix\nseven\n" +
+		"──────────────────────── cos ──\n❯ \n──────────────────────────────\n" +
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents"
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return working, nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return 9, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateWorking {
+		t.Fatalf("structural interrupt status Assess = %v, want Working", got)
+	}
+
+	quoted := "● The report quotes ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents\n❯ "
+	c.capturePane = func(string) (string, error) { return quoted, nil }
+	c.cursorState = func(string) (int, bool, error) { return 1, false, nil }
+	if got := c.Assess("0:0.0"); got != StateIdle {
+		t.Fatalf("quoted interrupt-status prose Assess = %v, want Idle", got)
+	}
+}
+
+func TestClaudeAssessGenuineNBSPComposerFixture(t *testing.T) {
+	fixture, err := os.ReadFile("../deliver/testdata/working-cos.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(fixture), "\n"), "\n")
+	if got, want := len(lines), 63; got != want {
+		t.Fatalf("working-cos.txt rows = %d, want %d", got, want)
+	}
+	if got, want := lines[51], "✢ Diagnosing the fleet delivery blockage… (18m 1s · ↓ 18.6k tokens)"; got != want {
+		t.Fatalf("spinner row = %q, want %q", got, want)
+	}
+	if got, want := lines[60], "❯\u00a0"; got != want {
+		t.Fatalf("composer row bytes = % x, want % x", []byte(got), []byte(want))
+	}
+	if got, want := lines[62], "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents"; got != want {
+		t.Fatalf("status row = %q, want %q", got, want)
+	}
+	const cursorY = 60
+	if got := deliver.ParseBusyAt(string(fixture), cursorY); !got {
+		t.Fatalf("ParseBusyAt(genuine fixture, %d) = %v, want true", cursorY, got)
+	}
+
+	c := claudeCode{
+		paneCommand: func(string) (string, error) { return "node", nil },
+		isShell:     func(string) bool { return false },
+		capturePane: func(string) (string, error) { return string(fixture), nil },
+		parseBusyAt: deliver.ParseBusyAt,
+		cursorState: func(string) (int, bool, error) { return cursorY, false, nil },
+	}
+	if got := c.Assess("0:0.0"); got != StateWorking {
+		t.Fatalf("Assess(genuine fixture) = %v, want exact state %v", got, StateWorking)
 	}
 }
 

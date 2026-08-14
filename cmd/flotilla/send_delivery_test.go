@@ -26,6 +26,175 @@ func TestNextSendRetryWait(t *testing.T) {
 	}
 }
 
+func TestReopenRecipientQuarantineRequiresOpenRosterAndPreservesConsumed(t *testing.T) {
+	dir := t.TempDir()
+	q := dispatch.NewQuarantineRegistry(dir)
+	now := time.Date(2026, 8, 13, 20, 0, 0, 0, time.UTC)
+	entry := dispatch.QuarantineEntry{Kind: "inbound-ack", RowID: "synthetic-row", Recipient: "desk", QuarantinedAt: now}
+	if inserted, err := q.Quarantine(entry); err != nil || !inserted {
+		t.Fatalf("quarantine = (%v,%v)", inserted, err)
+	}
+	closedValue := true
+	closed := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: &closedValue}}}
+	reopenRecipientQuarantine(dir, closed, "desk", now.Add(time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || !active {
+		t.Fatalf("closed recipient reopened: active=%v err=%v", active, err)
+	}
+	openValue := false
+	open := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: &openValue}}}
+	reopenRecipientQuarantine(dir, open, "desk", now.Add(2*time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || active {
+		t.Fatalf("open confirmed recipient stayed quarantined: active=%v err=%v", active, err)
+	}
+	if consumed := dispatch.NewRegistry(dir).Load(); len(consumed) != 0 {
+		t.Fatalf("reopen fabricated acknowledgement: %+v", consumed)
+	}
+}
+
+func TestRecipientClosedOutDocumentBlocksReopenUntilDispositionLifted(t *testing.T) {
+	dir := t.TempDir()
+	deskDir := filepath.Join(dir, "desks", "desk")
+	if err := os.MkdirAll(deskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Date(2026, 8, 13, 20, 3, 0, 0, time.UTC)
+	// Match the contract-of-record format exactly: UTC with minute precision.
+	doc := "# Close-out\n\n**When:** 2026-08-13T20:03Z\n"
+	if err := os.WriteFile(filepath.Join(deskDir, "CLOSE-OUT-20260813.md"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	openRoster := &roster.Config{Agents: []roster.Agent{{Name: "desk"}}}
+	if !recipientClosedOut(dir, openRoster, "desk") {
+		t.Fatal("durable close-out document did not close recipient")
+	}
+
+	q := dispatch.NewQuarantineRegistry(dir)
+	entry := dispatch.QuarantineEntry{Kind: "inbound-ack", RowID: "synthetic-doc-row", Recipient: "desk", QuarantinedAt: closedAt}
+	if inserted, err := q.Quarantine(entry); err != nil || !inserted {
+		t.Fatalf("quarantine = (%v,%v)", inserted, err)
+	}
+	// An eligible confirmed send while the durable document still says closed-out is not
+	// provider restoration and must leave the row quarantined.
+	reopenRecipientQuarantine(dir, openRoster, "desk", closedAt.Add(time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || !active {
+		t.Fatalf("doc-closed recipient reopened: active=%v err=%v", active, err)
+	}
+	if restoredAt, err := q.RecipientRestoredAt("desk"); err != nil || !restoredAt.IsZero() {
+		t.Fatalf("doc-closed send fabricated restoration: at=%v err=%v", restoredAt, err)
+	}
+
+	// Provider state is explicitly restored by a present false disposition. The audit document
+	// remains byte-identical; only then may an eligible confirmed work/send reopen the row.
+	restoredValue := false
+	openRoster.Agents[0].ClosedOut = &restoredValue
+	reopenRecipientQuarantine(dir, openRoster, "desk", closedAt.Add(2*time.Minute))
+	if active, err := q.IsQuarantined(entry.Kind, entry.RowID, entry.Recipient); err != nil || active {
+		t.Fatalf("restored confirmed recipient stayed quarantined: active=%v err=%v", active, err)
+	}
+	if consumed := dispatch.NewRegistry(dir).Load(); len(consumed) != 0 {
+		t.Fatalf("restoration fabricated acknowledgement: %+v", consumed)
+	}
+	if got, err := os.ReadFile(filepath.Join(deskDir, "CLOSE-OUT-20260813.md")); err != nil || string(got) != doc {
+		t.Fatalf("restoration mutated close-out provenance: got=%q err=%v", got, err)
+	}
+}
+
+func TestRecipientClosedOutExplicitRosterFlagOverridesConfirmedRestoration(t *testing.T) {
+	dir := t.TempDir()
+	q := dispatch.NewQuarantineRegistry(dir)
+	if _, err := q.ReopenRecipient("desk", time.Date(2026, 8, 13, 21, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	closedValue := true
+	closedRoster := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: &closedValue}}}
+	if !recipientClosedOut(dir, closedRoster, "desk") {
+		t.Fatal("explicit roster close-out must remain authoritative")
+	}
+}
+
+func TestRecipientRoutingHeldQuarantineReadErrorFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(dispatch.QuarantinePath(dir), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: &restored}}}
+	if !recipientRoutingHeld(dir, cfg, "desk") {
+		t.Fatal("corrupt quarantine registry authorized internal wake")
+	}
+}
+
+func TestClosedOutDocumentDetectorConfirmCannotDefeatQuarantine(t *testing.T) {
+	for _, recipient := range []string{"cos-tech-writer", "cos-ux-designer"} {
+		t.Run(recipient, func(t *testing.T) {
+			dir := t.TempDir()
+			deskDir := filepath.Join(dir, "desks", recipient)
+			if err := os.MkdirAll(deskDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			docPath := filepath.Join(deskDir, "CLOSE-OUT-20260813.md")
+			if err := os.WriteFile(docPath, []byte("# Close-out\n\n**When:** 2026-08-13T20:03Z\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 8, 13, 22, 53, 32, 0, time.UTC)
+			q := dispatch.NewQuarantineRegistry(dir)
+			for i := 0; i < 12; i++ {
+				row := inbound.Entry{ID: fmt.Sprintf("synthetic-live-row-%02d", i), Sender: "xo", Recipient: recipient,
+					Message: fmt.Sprintf("preserved synthetic payload %02d", i), Nonce: fmt.Sprintf("flotilla-dispatch-synthetic-live-%02d", i),
+					DeliveredAt: now.Add(-3 * time.Hour)}
+				if err := inbound.Record(dir, row); err != nil {
+					t.Fatal(err)
+				}
+				if inserted, err := q.Quarantine(dispatch.QuarantineEntry{Kind: "inbound-ack", RowID: row.ID,
+					Nonce: row.Nonce, Sender: row.Sender, Recipient: recipient, QuarantinedAt: now.Add(-time.Hour)}); err != nil || !inserted {
+					t.Fatalf("quarantine row %d = (%v,%v)", i, inserted, err)
+				}
+			}
+			cfg := &roster.Config{Agents: []roster.Agent{{Name: recipient}}} // roster flag deliberately absent
+
+			confirmed := watch.NewInjector(func(string, string) error { return nil }, 1)
+			confirmed.SetTurnConfirmed(func(got string) { reopenRecipientQuarantine(dir, cfg, got, now) })
+			confirmed.Start()
+			confirmed.Enqueue(watch.Job{Agent: recipient, Kind: watch.KindDetector, Message: strings.Repeat("D", 1591)})
+			confirmed.Stop()
+			for _, entry := range q.Load() {
+				if entry.Recipient == recipient && entry.Kind == "inbound-ack" && !entry.ReopenedAt.IsZero() {
+					t.Fatalf("1591-byte detector wake set reopened_at for %s: %+v", entry.RowID, entry)
+				}
+			}
+			var adjutant, operator int
+			if got := watch.UndeliveredDispatchSweep(dir, watch.UndeliveredHooks{
+				Now: func() time.Time { return now }, Fired: watch.NewUndeliveredAlertSet(),
+				RecipientClosedOut: func(got string) bool { return recipientClosedOut(dir, cfg, got) },
+				ResolveAdjutant:    func(string) string { return "adj" },
+				EnqueueAdjutant:    func(string, string) { adjutant++ }, AlertOperator: func(string) { operator++ },
+			}); got != 0 || adjutant != 0 || operator != 0 {
+				t.Fatalf("detector-confirmed closed rows re-alerted: got=%d adjutant=%d operator=%d", got, adjutant, operator)
+			}
+
+			// Once the provider disposition is explicitly lifted, an eligible confirmed live
+			// operator work turn is the exact edge that reopens all preserved rows. The audit
+			// document remains byte-identical.
+			restoredValue := false
+			cfg.Agents[0].ClosedOut = &restoredValue
+			work := watch.NewInjector(func(string, string) error { return nil }, 1)
+			work.SetTurnConfirmed(func(got string) { reopenRecipientQuarantine(dir, cfg, got, now.Add(time.Minute)) })
+			work.Start()
+			work.Enqueue(watch.Job{Agent: recipient, Kind: watch.KindOperatorInterrupt, Message: "genuine operator work"})
+			work.Stop()
+			if active, err := q.HasActiveRecipient(recipient); err != nil || active {
+				t.Fatalf("restored eligible work/send did not reopen all rows: active=%v err=%v", active, err)
+			}
+			if consumed := dispatch.NewRegistry(dir).Load(); len(consumed) != 0 {
+				t.Fatalf("reopen fabricated acknowledgement: %+v", consumed)
+			}
+			if got, err := os.ReadFile(docPath); err != nil || string(got) != "# Close-out\n\n**When:** 2026-08-13T20:03Z\n" {
+				t.Fatalf("reopen mutated close-out provenance: got=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestErrRetryableBusyUnwrap(t *testing.T) {
 	err := fmt.Errorf("%w", errRetryableBusy{agent: "cos"})
 	if !errors.Is(err, surface.ErrBusy) {

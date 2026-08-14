@@ -6,7 +6,10 @@
 // Agent.surface (default "claude-code").
 package surface
 
-import "errors"
+import (
+	"errors"
+	"sort"
+)
 
 // State is an agent pane's assessed rendered state.
 type State int
@@ -19,6 +22,9 @@ const (
 	StateAwaitingInput          // blocked on a prompt for input (reserved; per-surface)
 	StateAwaitingApproval       // blocked on a tool/permission approval (reserved; per-surface)
 	StateErrored                // surfaced an error state (reserved; per-surface)
+	// Appended: detector snapshots persist State numerically; insertion would
+	// reinterpret prior idle/awaiting states after upgrade.
+	StateWedge // working chrome is static while completed-result evidence is stable
 )
 
 // String renders a State as a short lowercase label for logs and the
@@ -29,6 +35,8 @@ func (s State) String() string {
 		return "shell"
 	case StateWorking:
 		return "working"
+	case StateWedge:
+		return "wedge"
 	case StateIdle:
 		return "idle"
 	case StateAwaitingInput:
@@ -184,6 +192,21 @@ func Get(name string) (Driver, bool) {
 	}
 	d, ok := registry[name]
 	return d, ok
+}
+
+// RegisteredDrivers returns a deterministic snapshot of every registered
+// harness driver. Callers cannot mutate the registry through the result.
+func RegisteredDrivers() []Driver {
+	names := make([]string, 0, len(registry))
+	for name := range registry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]Driver, 0, len(names))
+	for _, name := range names {
+		out = append(out, registry[name])
+	}
+	return out
 }
 
 // ErrRestartRequired signals that a surface's context cannot be rotated in-session

@@ -1,0 +1,63 @@
+  flotilla dispatch ack (example)
+  After handling this dispatch, record its durable ack: `flotilla dispatch-ack flotilla-dispatch-example-nonce`
+  [dispatch nonce: `flotilla-dispatch-example-nonce`]
+
+● Found the real one. backend's composer is empty and idle at line [5] — but a stale spinner from a finished turn sits four lines above it, still inside the 8-line window the classifier scans. No positional binding at all.
+
+  And line [7] is the permanent auto-mode status bar containing esc to interrupt.
+
+● Bash(cd /tmp/example-build || exit 1
+      echo "=== the Claude busy decision: what does it scan, and does 'esc to interrupt' count? ==="…)
+  ⎿  === the Claude busy decision: what does it scan, and does 'esc to interrupt' count? ===
+       12:// workingSpinner matches Claude Code's in-flight working status line. The render EVOLVES
+       49:var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯●\w]\s+[^\s\x{2026}]+\x{2026}`)
+     … +23 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/user/work/example-state
+  ⎿  Allowed by auto mode classifier
+
+● Root cause found.
+
+  if strings.Contains(ln, "esc to interrupt") || workingSpinner.MatchString(ln)
+
+  An unanchored substring over the last 8 lines. And every Claude seat in auto mode carries a permanent status bar reading · esc to interrupt ·. Every auto-mode Claude seat is busy forever and can never receive anything.
+
+  Capturing a genuinely-working pane as a positive control before I touch this.
+
+● Bash(mkdir -p /tmp/example-fix
+      echo "=== capture fixtures: idle-but-blocked, and genuinely-working ==="…)
+  ⎿  === capture fixtures: idle-but-blocked, and genuinely-working ===
+       idle-backend.txt       64 lines
+       xo-adj             spinner=-        last=  example-model medium · ~/work/example
+     … +4 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+● backend has a live spinner. Verifying it's genuinely working, then comparing the two structures — that's my discriminator.
+
+● Bash(T=flotilla-backend:0.0
+      h1=$(timeout 8 tmux capture-pane -p -t $T 2>/dev/null|sha256sum|cut -c1-10); sleep 15…)
+  ⎿    backend: aaaaaaaaaa bbbbbbbbbb bbbbbbbbbb  -> CHANGING = genuinely working
+
+     === STRUCTURAL COMPARISON of the bottom 8 lines ===
+     … +18 lines (ctrl+o to expand)
+  ⎿  Allowed by auto mode classifier
+
+● Correction to what I just said: esc to interrupt in the status bar is not permanent — it appears only while interruptible. The substring arm is still wrong (it matches the phrase in prose), but my "every auto-mode seat is
+  permanently busy" was too strong.
+
+  The real discriminator is positional. My own pane is a live working Claude seat — the ideal positive control.
+
+  Bash(MYPANE=$(timeout 8 tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}|#{session_name}' 2>/dev/null | grep -E '\|flotilla-xo$' | head -1 | cut…)
+  ⎿  Running…
+
+✢ Diagnosing the fleet delivery blockage… (18m 1s · ↓ 18.6k tokens)
+  ⎿  ◼ P0: diagnose and fix the fleet message-delivery blockage
+     ◻ Rehydrate context in every human-facing message
+     ◻ Stop sending null reports to the operator
+     ◻ Move dispatch-ack from inference to the flotilla daemon
+     ◻ Build the semi-autonomous inbound message buffer
+      … +2 pending, 1 completed
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── xo ──
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ctrl+t to hide tasks · ← for agents

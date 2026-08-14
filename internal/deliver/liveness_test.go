@@ -14,3 +14,16 @@ func TestIsShell(t *testing.T) {
 		}
 	}
 }
+
+func TestParseProcessArgv(t *testing.T) {
+	got := parseProcessArgv([]byte("node\x00/opt/tools/bin/codex\x00--flag\x00"))
+	want := []string{"node", "/opt/tools/bin/codex", "--flag"}
+	if len(got) != len(want) {
+		t.Fatalf("argv=%q want=%q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("argv[%d]=%q want=%q", i, got[i], want[i])
+		}
+	}
+}

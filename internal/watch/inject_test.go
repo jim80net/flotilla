@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,44 @@ func captureLog(t *testing.T) *bytes.Buffer {
 		log.SetFlags(prevFlags)
 	})
 	return &buf
+}
+
+func TestInjectorTurnConfirmedHookOnlyEligibleWorkSend(t *testing.T) {
+	var recipients []string
+	in := NewInjector(func(agent, _ string) error {
+		if agent == "busy" {
+			return surface.ErrBusy
+		}
+		return nil
+	}, 1)
+	in.SetTurnConfirmed(func(recipient string) { recipients = append(recipients, recipient) })
+	in.deliver(Job{Agent: "detector", Message: "internal wake", Kind: KindDetector})
+	in.deliver(Job{Agent: "heartbeat", Message: "internal beat", Kind: KindHeartbeat})
+	in.deliver(Job{Agent: "default", Message: "bare operator work", Kind: KindDefault})
+	in.deliver(Job{Agent: "relay", Message: "operator work", Kind: KindRelay})
+	in.deliver(Job{Agent: "interrupt", Message: "live operator work", Kind: KindOperatorInterrupt})
+	in.deliver(Job{Agent: "send", Message: "desk work", Kind: KindSend})
+	in.deliver(Job{Agent: "busy", Message: "not confirmed", Kind: KindSend})
+	want := []string{"default", "relay", "interrupt", "send"}
+	if !reflect.DeepEqual(recipients, want) {
+		t.Fatalf("eligible turn-confirmed recipients = %v, want %v", recipients, want)
+	}
+}
+
+func TestInjectorClosedOutSuppressesInternalWakesOnly(t *testing.T) {
+	var sent []string
+	in := NewInjector(func(agent, _ string) error {
+		sent = append(sent, agent)
+		return nil
+	}, 1)
+	in.SetRecipientClosedOut(func(agent string) bool { return agent == "closed" })
+	in.deliver(Job{Agent: "closed", Kind: KindDetector, Message: strings.Repeat("D", 1591)})
+	in.deliver(Job{Agent: "closed", Kind: KindHeartbeat, Message: "beat"})
+	in.deliver(Job{Agent: "closed", Kind: KindOperatorInterrupt, Message: "real work"})
+	in.deliver(Job{Agent: "open", Kind: KindDetector, Message: "normal detector"})
+	if want := []string{"closed", "open"}; !reflect.DeepEqual(sent, want) {
+		t.Fatalf("delivered recipients = %v, want eligible work to closed + detector to open %v", sent, want)
+	}
 }
 
 func TestInjectorSerializes(t *testing.T) {

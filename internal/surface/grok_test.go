@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -243,14 +244,14 @@ func TestClassifyGrokRateLimitProseNotMaterial(t *testing.T) {
 func TestClassifyGrokComposerLine(t *testing.T) {
 	// Realistic grok composer-box renders (LIVE-CAPTURED 2026-06-23, design.md §10.1/§10.2). The
 	// classifier reads the line at cursorY; the box left/right borders (│) must be stripped.
-	const cleared = "  ╭────────╮\n  │ ❯                                              │\n  ╰──── Composer 2.5 Fast ─╯"
-	const pending = "  ╭────────╮\n  │ ❯ characterization pending body do not submit  │\n  ╰──── Composer 2.5 Fast ─╯"
+	const cleared = "  ╭────────╮\n  │ ❯                                              │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
+	const pending = "  ╭────────╮\n  │ ❯ characterization pending body do not submit  │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 	// A multi-line pending body: the cursor on the THIRD (continuation) row, which has no ❯.
-	const multiline = "  ╭────────╮\n  │ ❯ line ONE                                     │\n  │   line TWO                                     │\n  │   line THREE                                   │\n  ╰──── Composer 2.5 Fast ─╯"
+	const multiline = "  ╭────────╮\n  │ ❯ line ONE                                     │\n  │   line TWO                                     │\n  │   line THREE                                   │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 	// The approval modal: the cursor sits on the ◆ Run line (no ❯), with the ┃ block below.
 	const modalCap = "    ◆ Run Edit `/x/hello.txt` 10s          11s ⇣19.0k [✗]\n\n  ┃\n  ┃  Allow Edit `/x/hello.txt`?\n  ┃\n  ┃  1 (●) Yes\n\n  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel"
 	// The composer is visible on a different row than the cursor (the live idle desk case).
-	const offCursor = "  idle status line\n  │ ❯                                              │\n  Shift+Tab:mode"
+	const offCursor = "  idle status line\n  │ ❯                                              │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 
 	cases := []struct {
 		name     string
@@ -263,11 +264,13 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 		{"composer visible off-cursor → Cleared", offCursor, 0, ComposerCleared},
 		// A lone user-typed box-drawing │ must NOT false-read Cleared (the recycle gate would discard
 		// the draft) — only the trailing RIGHT border is stripped, not a typed │ in the body.
-		{"body is a lone typed │ → Pending (not a false Cleared)", "  │ ❯ │                       │", 0, ComposerPending},
+		{"body is a lone typed │ → Pending (not a false Cleared)", "  │ ❯ │                       │\n  ╰──── Grok 4.5 (high) · always-approve ─╯", 0, ComposerPending},
 		{"multi-line body visible off-cursor → Pending", multiline, 3, ComposerPending},
 		{"approval modal: cursor on ◆ Run line (no ❯) → Undetermined (NOT Cleared — gate-safety)", modalCap, 0, ComposerUndetermined},
 		{"cursor past the captured range but composer visible → Cleared", cleared, 9999, ComposerCleared},
 		{"negative cursor but composer visible → Cleared", cleared, -1, ComposerCleared},
+		{"quoted prompt without adjacent footer → Undetermined", "  The pane showed this:\n  │ ❯                                              │\n  ordinary prose", 1, ComposerUndetermined},
+		{"quoted footer without adjacent prompt → Undetermined", "  │ ❯                                              │\n  prose between\n  ╰──── Grok 4.5 (high) · always-approve ─╯", 0, ComposerUndetermined},
 		{"cursor on a plain (non-prompt) line → Undetermined", "  plain conversation line\n  more", 0, ComposerUndetermined},
 	}
 	for _, tc := range cases {
@@ -279,10 +282,63 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	}
 }
 
+func TestGrok45ComposerFixturesArePositionallyBound(t *testing.T) {
+	idle, err := os.ReadFile("testdata/grok-45-idle.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := classifyGrokComposerLine(string(idle), 3); got != ComposerCleared {
+		t.Fatalf("idle Grok 4.5 fixture = %v, want Cleared", got)
+	}
+	if got := parseGrokState(string(idle)); got != StateIdle {
+		t.Fatalf("idle Grok 4.5 fixture state = %v, want Idle", got)
+	}
+
+	quoted, err := os.ReadFile("testdata/grok-45-quoted-composer.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := classifyGrokComposerLine(string(quoted), 2); got != ComposerUndetermined {
+		t.Fatalf("quoted Grok composer fixture = %v, want Undetermined", got)
+	}
+	if got := parseGrokState(string(quoted)); got != StateIdle {
+		t.Fatalf("quoted Grok composer fixture state = %v, want Idle", got)
+	}
+}
+
+func TestGrok46ComposerCapturePartitions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fixture string
+		cursorY int
+	}{
+		{name: "working-seat opt-in chrome", fixture: "testdata/grok-46-opt-in-cleared.txt", cursorY: 5},
+		{name: "previously uncertain off-cursor render", fixture: "testdata/grok-46-off-cursor-cleared.txt", cursorY: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captured, err := os.ReadFile(tc.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := parseGrokState(string(captured)); got != StateIdle {
+				t.Fatalf("parseGrokState = %v, want Idle", got)
+			}
+			if got := classifyGrokComposerLine(string(captured), tc.cursorY); got != ComposerCleared {
+				t.Fatalf("classifyGrokComposerLine = %v, want Cleared", got)
+			}
+			if tc.name == "previously uncertain off-cursor render" {
+				if got := classifyComposerLine(string(captured), tc.cursorY); got != ComposerUndetermined {
+					t.Fatalf("stale Claude classifier = %v, want Undetermined on Grok chrome", got)
+				}
+			}
+		})
+	}
+}
+
 // TestGrokComposerStateWiring: ComposerState threads cursorState + capturePane → classifyGrokComposerLine,
 // and fails safe (Undetermined) on a cursor read error or a tmux copy/view mode.
 func TestGrokComposerStateWiring(t *testing.T) {
-	const cleared = "  │ ❯                          │"
+	const cleared = "  │ ❯                          │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 	t.Run("idle cleared composer → Cleared", func(t *testing.T) {
 		g := grok{
 			cursorState: func(string) (int, bool, error) { return 0, false, nil },
@@ -316,6 +372,19 @@ func TestGrokComposerStateWiring(t *testing.T) {
 			t.Errorf("ComposerState = %v, want Undetermined on capture error", got)
 		}
 	})
+}
+
+func TestGrokUnseenFooterVariantRemainsUncertainForOfficerBypassControl(t *testing.T) {
+	// Deliberately outside grokComposerFooter: the officer route test proves
+	// this next-variant class can move via independent idle proof without
+	// teaching the Grok expert classifier another footer.
+	captured := "transcript\n  │ ❯                         │\n  ╰── future-model [novel controls] ──╯"
+	if grokComposerFooter.MatchString("  ╰── future-model [novel controls] ──╯") {
+		t.Fatal("invented footer unexpectedly matched grokComposerFooter")
+	}
+	if got := classifyGrokComposerLine(captured, 1); got != ComposerUndetermined {
+		t.Fatalf("classifyGrokComposerLine = %s, want Undetermined", got)
+	}
 }
 
 func TestGrokLatestResult(t *testing.T) {

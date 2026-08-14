@@ -29,7 +29,13 @@ func (s *OutboxSweeper) SweepAll() int {
 	}
 	pending := outbox.ListAll(s.rosterDir)
 	n := 0
-	seenRecipient := make(map[string]bool)
+	// Admit the oldest current order per SENDER-RECIPIENT LANE, not per recipient.
+	// Ordering is only meaningful within a lane: two senders' messages to the same
+	// recipient have no relative order to preserve, so coupling them throttles the
+	// whole recipient to one delivery per sweep. Measured 2026-08-12: 448 of 453
+	// queued messages had NEVER been attempted, and the busiest recipients were
+	// GAINING backlog because admission (2-3/sweep fleet-wide) trailed inflow.
+	seenLane := make(map[string]bool)
 	for _, e := range pending {
 		if !outbox.Current(s.rosterDir, e) {
 			_, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
@@ -38,12 +44,13 @@ func (s *OutboxSweeper) SweepAll() int {
 			}
 			continue
 		}
-		// Admit only the oldest current order for each recipient. If that head is already
-		// in flight, its successors still wait; a busy-deferred head cannot be queue-jumped.
-		if seenRecipient[e.Recipient] {
+		// Within a lane the head still cannot be queue-jumped: a busy-deferred head
+		// blocks its own successors, preserving per-sender FIFO exactly as before.
+		lane := e.Sender + "\x00" + e.Recipient
+		if seenLane[lane] {
 			continue
 		}
-		seenRecipient[e.Recipient] = true
+		seenLane[lane] = true
 		key := entryKey(e.Sender, e.ID)
 		if _, loaded := s.inFlight.LoadOrStore(key, struct{}{}); loaded {
 			continue
