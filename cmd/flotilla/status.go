@@ -21,10 +21,9 @@ import (
 )
 
 // cmdStatus prints a one-line-per-desk view of the fleet's last-known state. It
-// reads ONLY the files the `flotilla watch` change-detector already writes — the
-// detector snapshot (per-desk assessed state + the XO's settled flag) and the XO
-// liveness ack file — so it starts no daemon, resolves no panes, and writes no
-// new state. It is a pure read of existing artifacts.
+// reads existing durable artifacts — the detector snapshot (per-desk assessed state +
+// the XO's settled flag), the XO liveness ack file, and administrative CLOSE-OUT
+// markers — so it starts no daemon, resolves no panes, and writes no new state.
 //
 // The states come from a SNAPSHOT (the detector's view as of its last tick), NOT
 // a live pane probe, so status always reports the snapshot's age: a stale read
@@ -69,6 +68,7 @@ func cmdStatus(args []string) error {
 		}
 	}
 	loopByAgent := loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
+	closedOut := statusClosedOutSeats(rosterDir, cfg)
 	if *asJSON {
 		// generated_at is the snapshot's mtime (when watch last wrote it) — the
 		// honest "as of" for the states below. Empty when there is no snapshot.
@@ -76,13 +76,13 @@ func cmdStatus(args []string) error {
 		if fi, statErr := os.Stat(*snapshotPath); statErr == nil {
 			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
-		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent)
+		doc := buildStatusJSONWithClosedOut(cfg, xo, generatedAt, snap, loopByAgent, closedOut)
 		doc.Quality = harnessquality.LoadSummary(filepath.Dir(*rosterPath), now)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(doc)
 	}
-	writeStatus(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, now, loopByAgent)
+	writeStatusWithClosedOut(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, now, loopByAgent, closedOut)
 	writeQualitySummary(os.Stdout, harnessquality.LoadSummary(filepath.Dir(*rosterPath), now))
 	return nil
 }
@@ -125,19 +125,30 @@ type statusItem struct {
 // unit-testable with an in-memory snapshot; cmdStatus supplies generated_at
 // (the snapshot's mtime), the loaded snapshot, and pre-derived loop evidence.
 func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) statusDoc {
+	return buildStatusJSONWithClosedOut(cfg, xo, generatedAt, snap, loopByAgent, nil)
+}
+
+func buildStatusJSONWithClosedOut(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, closedOut map[string]bool) statusDoc {
 	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	for _, a := range cfg.Agents {
 		evidence, evidenceOK := loopByAgent[a.Name]
 		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
 		displayPosture := loopposture.OperatorDisplay(rawPosture)
+		state := deskStateLabel(snap, a.Name)
+		queueState := utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN)
+		if closedOut[a.Name] {
+			state = "closed-out"
+			displayPosture = "unavailable"
+			queueState = utilization.QueueUnknown
+		}
 		item := statusItem{
 			Name:        a.Name,
 			Surface:     effectiveSurface(a.Surface),
-			State:       deskStateLabel(snap, a.Name),
+			State:       state,
 			LoopPosture: string(displayPosture),
-			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),
+			QueueState:  queueState,
 		}
-		if rawPosture != displayPosture {
+		if !closedOut[a.Name] && rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)
 		}
 		if usage, ok := snap.Usage[a.Name]; ok {
@@ -176,6 +187,10 @@ func effectiveSurface(s string) string {
 // file I/O) so the formatting is unit-testable with an in-memory snapshot and a
 // pinned clock — no roster file, no daemon, no real time.
 func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath string, snap watch.Snapshot, snapOK bool, now time.Time, loopByAgent map[string]loopposture.Evidence) {
+	writeStatusWithClosedOut(out, cfg, xo, snapshotPath, ackPath, snap, snapOK, now, loopByAgent, nil)
+}
+
+func writeStatusWithClosedOut(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath string, snap watch.Snapshot, snapOK bool, now time.Time, loopByAgent map[string]loopposture.Evidence, closedOut map[string]bool) {
 	// Freshness header — the desk states below are as of the snapshot's mtime,
 	// not a live probe. Always surface that (or its absence).
 	if snapOK {
@@ -188,7 +203,7 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintf(out, "flotilla status — no readable detector snapshot at %s\n", snapshotPath)
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
-	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent).Utilization
+	utilSummary := buildStatusJSONWithClosedOut(cfg, xo, "", snap, loopByAgent, closedOut).Utilization
 	fmt.Fprintf(out, "Fleet — %s\n", utilization.Line(utilSummary))
 	if read := utilization.WallRead(utilSummary); read != "" {
 		fmt.Fprintf(out, "Next — %s\n", read)
@@ -215,9 +230,30 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 			marker = "(XO)"
 		}
 		posture := loopposture.OperatorDisplay(deriveAgentPosture(a.Name, snap, loopByAgent))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, usageLabel(snap, a.Name, now), marker)
+		state := deskStateLabel(snap, a.Name)
+		if closedOut[a.Name] {
+			state = "closed-out"
+			posture = "unavailable"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, state, posture, usageLabel(snap, a.Name, now), marker)
 	}
 	_ = w.Flush()
+}
+
+// statusClosedOutSeats projects the same durable administrative disposition used by
+// delivery quarantine into the status read model. CLOSE-OUT documents commonly mark a
+// provider-stopped seat; either that marker or roster closed_out=true makes it unavailable.
+func statusClosedOutSeats(rosterDir string, cfg *roster.Config) map[string]bool {
+	closedOut := make(map[string]bool)
+	if cfg == nil {
+		return closedOut
+	}
+	for _, agent := range cfg.Agents {
+		if recipientClosedOut(rosterDir, cfg, agent.Name) {
+			closedOut[agent.Name] = true
+		}
+	}
+	return closedOut
 }
 
 func usageLabel(snap watch.Snapshot, name string, now time.Time) string {

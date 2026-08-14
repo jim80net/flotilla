@@ -12,6 +12,7 @@ import (
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -274,6 +275,46 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 	}
 	if !foundData {
 		t.Fatalf("CLI status missing data row:\n%s", text.String())
+	}
+}
+
+func TestStatusCloseOutMarkerIsUnavailableWhileNormalIdleRemainsAvailable(t *testing.T) {
+	rosterDir := t.TempDir()
+	closedDeskDir := filepath.Join(rosterDir, "desks", "closed")
+	if err := os.MkdirAll(closedDeskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(closedDeskDir, "CLOSE-OUT-20260814.md"),
+		[]byte("# Close-out\n\n**When:** 2026-08-14T02:06Z\n\nThe seat is provider-stopped.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "closed"}, {Name: "normal"}}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"closed": surface.StateIdle,
+		"normal": surface.StateIdle,
+	}}
+	loop := map[string]loopposture.Evidence{
+		"closed": {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1},
+		"normal": {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1},
+	}
+	closedOut := statusClosedOutSeats(rosterDir, cfg)
+	doc := buildStatusJSONWithClosedOut(cfg, "normal", "", snap, loop, closedOut)
+	if got := doc.Agents[0]; got.State != "closed-out" || got.LoopPosture != "unavailable" || got.QueueState != utilization.QueueUnknown {
+		t.Fatalf("closed seat = %+v, want closed-out/unavailable/unknown", got)
+	}
+	if got := doc.Agents[1]; got.State != "idle" || got.LoopPosture != "available" {
+		t.Fatalf("normal seat = %+v, want idle/available", got)
+	}
+	if doc.Utilization.AcceptsDispatch != 1 {
+		t.Fatalf("accepts_dispatch = %d, want only the normal seat", doc.Utilization.AcceptsDispatch)
+	}
+
+	var text bytes.Buffer
+	writeStatusWithClosedOut(&text, cfg, "normal", "missing", "missing", snap, false, time.Now(), loop, closedOut)
+	for _, want := range []string{"closed  closed-out  unavailable", "normal  idle        available"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("CLI status missing %q:\n%s", want, text.String())
+		}
 	}
 }
 
