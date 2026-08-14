@@ -138,7 +138,7 @@ func TestExcludeQuarantinedInboundWorkIsHeldNotActionable(t *testing.T) {
 	}
 	st := backlog.Status{Found: true, Unblocked: make([]string, 12)}
 	for i := range st.Unblocked {
-		st.Unblocked[i] = fmt.Sprintf("- [in-flight] %s", QuarantineBacklogToken(fmt.Sprintf("flotilla-dispatch-%08x", i)))
+		st.Unblocked[i] = fmt.Sprintf("- [in-flight] synthetic dispatch %02d", i)
 	}
 	got, err := ExcludeQuarantinedInboundWork(dir, "closed-desk", st)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestExcludeQuarantinedInboundWorkIsHeldNotActionable(t *testing.T) {
 	}
 }
 
-func TestExcludeQuarantinedInboundWorkRequiresIdentityAndPreservesUnrelatedWork(t *testing.T) {
+func TestExcludeQuarantinedInboundWorkHoldsWholeRecipientQueueUntilRestore(t *testing.T) {
 	dir := t.TempDir()
 	q := NewQuarantineRegistry(dir)
 	for i := 0; i < 2; i++ {
@@ -161,30 +161,17 @@ func TestExcludeQuarantinedInboundWorkRequiresIdentityAndPreservesUnrelatedWork(
 			t.Fatal(err)
 		}
 	}
-	cases := [][]string{
-		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000002]"},
-		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000002]", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work"},
-		// One durable marker may exclude at most one matching line; a duplicate remains visible.
-		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work"},
+	lines := []string{"- [in-flight] held inbound", "- [next] later real work"}
+	got, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: lines})
+	if err != nil || len(got.Unblocked) != 0 {
+		t.Fatalf("routing-held queue remained actionable: output=%v err=%v", got.Unblocked, err)
 	}
-	for _, lines := range cases {
-		got, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: lines})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Contains(got.Unblocked, "- [next] genuine work") {
-			t.Fatalf("unrelated work was hidden: input=%v output=%v", lines, got.Unblocked)
-		}
-		if len(lines) == 3 && lines[0] == lines[1] && len(got.Unblocked) != 2 {
-			t.Fatalf("duplicate identity over-suppressed: %v", got.Unblocked)
-		}
+	if _, err := q.ReopenRecipient("desk", time.Now()); err != nil {
+		t.Fatal(err)
 	}
-	got, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: []string{
-		"- [next] investigate prose mentioning flotilla-dispatch-00000001",
-		"- [next] [dispatch-nonce:flotilla-dispatch-000000010] prefix collision",
-	}})
-	if err != nil || len(got.Unblocked) != 2 {
-		t.Fatalf("incidental/prefix identity mention suppressed: output=%v err=%v", got.Unblocked, err)
+	got, err = ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: lines})
+	if err != nil || !slices.Equal(got.Unblocked, lines) {
+		t.Fatalf("restored queue did not resume exactly: output=%v err=%v", got.Unblocked, err)
 	}
 }
 

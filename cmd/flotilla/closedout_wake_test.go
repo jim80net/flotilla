@@ -44,7 +44,7 @@ func TestClosedOutSeatsQuarantinedRowsNeverWakeOrWedge(t *testing.T) {
 					Nonce: row.Nonce, Sender: row.Sender, Recipient: recipient, QuarantinedAt: now.Add(-time.Hour)}); err != nil || !inserted {
 					t.Fatalf("quarantine %d = (%v,%v)", i, inserted, err)
 				}
-				fmt.Fprintf(&backlogBody, "- [in-flight] held dispatch %s\n", dispatch.QuarantineBacklogToken(row.Nonce))
+				fmt.Fprintf(&backlogBody, "- [in-flight] held dispatch %02d\n", i)
 			}
 			backlogPath := filepath.Join(dir, "flotilla-"+recipient+"-backlog.md")
 			if err := os.WriteFile(backlogPath, []byte(backlogBody.String()), 0o600); err != nil {

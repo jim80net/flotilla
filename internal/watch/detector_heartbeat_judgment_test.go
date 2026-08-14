@@ -226,6 +226,27 @@ func TestDeskHeartbeatCloseOutLandingAfterSnapshotCancelsSideEffects(t *testing.
 	}
 }
 
+func TestDeskHeartbeatCloseOutBetweenBeatAndEscalationCancelsEscalation(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "desk"}, []string{"desk"}, 1, 3, true)
+	held := false
+	cfg.RecipientClosedOut = func(string) bool { return held }
+	cfg.WakeDeskHeartbeat = func(string) { held = true }
+	f.set("xo", surface.StateIdle)
+	f.set("desk", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "desk": surface.StateIdle}, "h0")
+	d.deskBeatEligibleAt["desk"] = f.clock.Add(-time.Minute)
+	d.deskNoProgress["desk"] = 2
+	d.Tick()
+	if len(f.escLog()) != 0 {
+		t.Fatalf("close-out after beat check emitted stale escalation: %v", f.escLog())
+	}
+	if d.deskNoProgress["desk"] != 0 || d.deskStopped["desk"] {
+		t.Fatalf("late close-out retained cap episode: cap=%d stopped=%v", d.deskNoProgress["desk"], d.deskStopped["desk"])
+	}
+}
+
 // (J1) WARRANTED-TRUE behaves exactly as #183: an idle, eligible, cadence-elapsed, not-settled desk
 // is beaten on its cadence.
 func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {

@@ -160,42 +160,6 @@ func (r *QuarantineRegistry) HasActiveRecipient(recipient string) (bool, error) 
 	return false, nil
 }
 
-// ActiveRecipientCount returns the number of active quarantined source rows of kind for recipient.
-// It is a strict read: callers deciding whether work is actionable must fail closed on error.
-func (r *QuarantineRegistry) ActiveRecipientCount(kind, recipient string) (int, error) {
-	entries, err := r.loadStrict()
-	if err != nil {
-		return 0, err
-	}
-	kind = strings.TrimSpace(kind)
-	recipient = strings.TrimSpace(recipient)
-	n := 0
-	for _, e := range entries {
-		if e.Kind == kind && e.Recipient == recipient && e.ReopenedAt.IsZero() {
-			n++
-		}
-	}
-	return n, nil
-}
-
-// ActiveRecipientEntries returns active source-row dispositions of kind for recipient. Callers
-// correlating quarantine with another ledger must use these durable identities, never row counts.
-func (r *QuarantineRegistry) ActiveRecipientEntries(kind, recipient string) ([]QuarantineEntry, error) {
-	entries, err := r.loadStrict()
-	if err != nil {
-		return nil, err
-	}
-	kind = strings.TrimSpace(kind)
-	recipient = strings.TrimSpace(recipient)
-	var active []QuarantineEntry
-	for _, e := range entries {
-		if e.Kind == kind && e.Recipient == recipient && e.ReopenedAt.IsZero() {
-			active = append(active, e)
-		}
-	}
-	return active, nil
-}
-
 // RecipientRestoredAt returns the latest durable, turn-confirmed restoration for recipient.
 // It lets an audit close-out document remain on disk without permanently overriding later
 // delivery proof. A newer close-out event still wins.

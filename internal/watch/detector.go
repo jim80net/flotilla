@@ -1847,11 +1847,13 @@ func (d *Detector) runSynthesis(eligible []synthEligible) {
 func (d *Detector) runDeskHeartbeats(beats, escalations []string) {
 	held := make(map[string]bool, len(beats)+len(escalations))
 	isHeld := func(name string) bool {
-		if value, ok := held[name]; ok {
-			return value
+		if held[name] {
+			return true // suppression is sticky for the remainder of this tick
 		}
 		value := d.heartbeatRecipientHeld(name)
-		held[name] = value
+		if value {
+			held[name] = true
+		}
 		return value
 	}
 	for _, name := range beats {

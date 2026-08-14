@@ -42,7 +42,7 @@ func TestLoadFleetEvidenceQuarantinedInboundIsNotActionable(t *testing.T) {
 	agent := "closed-desk"
 	var body string = "## Backlog\n"
 	for i := 0; i < 12; i++ {
-		body += fmt.Sprintf("- [in-flight] %s\n", dispatch.QuarantineBacklogToken(fmt.Sprintf("flotilla-dispatch-%08x", i)))
+		body += fmt.Sprintf("- [in-flight] synthetic held dispatch %02d\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "flotilla-"+agent+"-backlog.md"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
