@@ -12,6 +12,46 @@ import (
 // live footer (the prompt renders at the bottom of the pane during /exit).
 const WorktreeExitTailLines = 12
 
+// HarnessExitConfirmationChoice recognizes the unattended-close confirmation shown when
+// a harness still has background work. It returns the numbered choice whose label actually
+// exits; callers must not assume that "exit anyway" is always choice 1.
+//
+// Detection is deliberately narrow: both background-work chrome and an exit confirmation
+// must be present in the live tail. This keeps ordinary numbered prompts and historical
+// conversation prose from being submitted by recycle.
+func HarnessExitConfirmationChoice(captured string) (string, bool) {
+	tail := strings.ToLower(TailRegion(captured, WorktreeExitTailLines))
+	background := strings.Contains(tail, "background work") ||
+		strings.Contains(tail, "background agent") ||
+		strings.Contains(tail, "background task")
+	exitConfirm := strings.Contains(tail, "are you sure you want to exit") ||
+		strings.Contains(tail, "exit session?") ||
+		strings.Contains(tail, "confirm exit")
+	if !background || !exitConfirm {
+		return "", false
+	}
+
+	for _, line := range strings.Split(tail, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(line, "›>❯◆●○ "))
+		sep := strings.IndexAny(line, ".)")
+		if sep <= 0 {
+			continue
+		}
+		choice := strings.TrimSpace(line[:sep])
+		label := strings.TrimSpace(line[sep+1:])
+		if choice == "" || strings.IndexFunc(choice, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			continue
+		}
+		if strings.Contains(label, "exit") &&
+			!strings.Contains(label, "cancel") &&
+			!strings.Contains(label, "stay") &&
+			!strings.Contains(label, "keep running") {
+			return choice, true
+		}
+	}
+	return "", false
+}
+
 // ClaudeWorktreeExitPrompt reports whether captured shows Claude Code's interactive
 // worktree-exit menu ("Exiting worktree session — 1. Keep worktree / 2. Remove
 // worktree"). Pure / testable — no pane I/O.

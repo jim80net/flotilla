@@ -44,6 +44,44 @@ func TestClaudeWorktreeExitPrompt(t *testing.T) {
 	}
 }
 
+func TestHarnessExitConfirmationChoice(t *testing.T) {
+	cases := []struct {
+		name     string
+		captured string
+		choice   string
+		want     bool
+	}{
+		{
+			"exit anyway is first",
+			"3 background agents still running\nAre you sure you want to exit?\n❯ 1. Exit anyway\n  2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
+			"exit choice is discovered rather than assumed",
+			"Background work is still running\nExit session?\n  1. Keep running\n› 2) Save and exit\nEnter to confirm",
+			"2", true,
+		},
+		{
+			"ordinary numbered prompt is untouched",
+			"Choose a deployment\n1. Exit staging\n2. Production\nEnter to confirm",
+			"", false,
+		},
+		{
+			"background prose without confirmation is untouched",
+			"Earlier we discussed background work and exit behavior\n❯ ",
+			"", false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			choice, ok := HarnessExitConfirmationChoice(tc.captured)
+			if choice != tc.choice || ok != tc.want {
+				t.Errorf("HarnessExitConfirmationChoice = (%q, %v), want (%q, %v)", choice, ok, tc.choice, tc.want)
+			}
+		})
+	}
+}
+
 func TestSendMenuChoiceArgs(t *testing.T) {
 	want := [][]string{
 		{"send-keys", "-t", "flotilla:0.1", "-l", "--", "1"},

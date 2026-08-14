@@ -397,6 +397,53 @@ func TestRunRecycleWorktreeExitPromptKeepsDirty(t *testing.T) {
 	}
 }
 
+func TestRunRecycleClearsBackgroundWorkExitConfirmation(t *testing.T) {
+	r := happyRec()
+	r.closeNeverShell = true
+	answered := false
+	ops := fakeRecycleOps(r)
+	ops.capturePane = func(string) (string, error) {
+		if answered {
+			return "", nil
+		}
+		return "4 background agents still running\nAre you sure you want to exit?\n" +
+			"  1. Cancel\n❯ 2. Exit anyway\nEnter to confirm", nil
+	}
+	ops.answerMenu = func(_ string, choice string) error {
+		if choice != "2" {
+			t.Fatalf("choice = %q, want discovered Exit-anyway choice 2", choice)
+		}
+		answered = true
+		r.closeNeverShell = false
+		return nil
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if err != nil {
+		t.Fatalf("runRecycle: %v", err)
+	}
+	if !answered || !r.respawned {
+		t.Fatalf("confirmation must be cleared and recycle relaunched: answered=%v respawned=%v", answered, r.respawned)
+	}
+}
+
+func TestRunRecycleNoExitConfirmationNonRegression(t *testing.T) {
+	r := happyRec()
+	menuAnswers := 0
+	ops := fakeRecycleOps(r)
+	ops.capturePane = func(string) (string, error) { return "ordinary closing frame", nil }
+	ops.answerMenu = func(string, string) error {
+		menuAnswers++
+		return nil
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if err != nil {
+		t.Fatalf("runRecycle no-menu path: %v", err)
+	}
+	if menuAnswers != 0 || !r.respawned {
+		t.Fatalf("no-menu path changed: menuAnswers=%d respawned=%v", menuAnswers, r.respawned)
+	}
+}
+
 func runGitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

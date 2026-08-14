@@ -393,15 +393,18 @@ func phase1HandoffTimeoutErr(ops recycleOps, target string, p recyclePlan) strin
 // pollClosed waits for the agent process to be provably GONE after the close — by the pane
 // being DEAD (claude-direct fleet desk: /exit exits the pane's direct process, which with
 // remain-on-exit on leaves pane_dead=1) OR a Shell verdict (a shell-backed desk drops to bash).
-// When Claude Code shows the worktree-exit menu, it answers mechanically (keep by default;
-// remove only when --remove-worktree and the tree is clean). Subagent/list-nav overlays that
-// steal focus during /exit are self-healed when available (#436 / #443 abort class).
+// When a harness shows its background-work exit confirmation, recycle selects the option
+// whose label exits. When Claude Code shows the worktree-exit menu, it answers mechanically
+// (keep by default; remove only when --remove-worktree and the tree is clean).
+// Subagent/list-nav overlays that steal focus during /exit are self-healed when available
+// (#436 / #443 abort class).
 // A transient pane_dead read error or an Assess Unknown (the capture-glitch fail-open value)
 // is RETRIED, not treated as "closed" — only a confirmed dead-or-shell returns true, so the
 // relaunch never fires on a still-live session.
 func pollClosed(ops recycleOps, target string, timeout time.Duration) (worktreeCloseNote, bool) {
 	n := pollAttempts(timeout)
 	var note worktreeCloseNote
+	answeredExitConfirm := false
 	answeredWorktree := false
 	healedOverlay := false
 	for i := 0; i <= n; i++ {
@@ -422,8 +425,19 @@ func pollClosed(ops recycleOps, target string, timeout time.Duration) (worktreeC
 				}
 			}
 		}
-		if !answeredWorktree && ops.capturePane != nil && ops.answerMenu != nil {
-			if prompt, err := ops.capturePane(target); err == nil && deliver.ClaudeWorktreeExitPrompt(prompt) {
+		if ops.capturePane != nil && ops.answerMenu != nil {
+			prompt, captureErr := ops.capturePane(target)
+			if !answeredExitConfirm && captureErr == nil {
+				if choice, ok := deliver.HarnessExitConfirmationChoice(prompt); ok {
+					if err := ops.answerMenu(target, choice); err != nil {
+						log.Printf("flotilla: recycle: background-work exit confirmation answer failed for %q: %v", target, err)
+					} else {
+						answeredExitConfirm = true
+						log.Printf("flotilla: recycle: answered background-work exit confirmation on %q with choice %q", target, choice)
+					}
+				}
+			}
+			if !answeredWorktree && captureErr == nil && deliver.ClaudeWorktreeExitPrompt(prompt) {
 				dirtyN := 0
 				if ops.countDirty != nil && ops.cwd != "" {
 					if n, err := ops.countDirty(ops.cwd); err == nil {
