@@ -71,6 +71,13 @@ func TestHarnessExitConfirmationChoice(t *testing.T) {
 			"Earlier we discussed background work and exit behavior\n❯ ",
 			"", false,
 		},
+		{
+			"quoted background exit prose does not bind unrelated numbered menu",
+			"Earlier output quoted: \"4 background agents still running\"\n" +
+				"Earlier question: \"Are you sure you want to exit?\"\n" +
+				"1. Exit staging\n2. Production\nEnter to confirm",
+			"", false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

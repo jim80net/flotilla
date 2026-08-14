@@ -20,36 +20,100 @@ const WorktreeExitTailLines = 12
 // must be present in the live tail. This keeps ordinary numbered prompts and historical
 // conversation prose from being submitted by recycle.
 func HarnessExitConfirmationChoice(captured string) (string, bool) {
-	tail := strings.ToLower(TailRegion(captured, WorktreeExitTailLines))
-	background := strings.Contains(tail, "background work") ||
-		strings.Contains(tail, "background agent") ||
-		strings.Contains(tail, "background task")
-	exitConfirm := strings.Contains(tail, "are you sure you want to exit") ||
-		strings.Contains(tail, "exit session?") ||
-		strings.Contains(tail, "confirm exit")
-	if !background || !exitConfirm {
+	lines := strings.Split(strings.ToLower(TailRegion(captured, WorktreeExitTailLines)), "\n")
+	footer := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "enter to confirm" || line == "press enter to confirm" {
+			footer = i
+			break
+		}
+	}
+	if footer < 2 {
 		return "", false
 	}
 
-	for _, line := range strings.Split(tail, "\n") {
-		line = strings.TrimSpace(strings.TrimLeft(line, "›>❯◆●○ "))
-		sep := strings.IndexAny(line, ".)")
-		if sep <= 0 {
-			continue
+	// The numbered action rows must be the contiguous block immediately above the
+	// confirmation footer. This binds choices to this menu rather than to arbitrary
+	// numbered prose elsewhere in the captured tail.
+	type action struct{ choice, label string }
+	var reversed []action
+	i := footer - 1
+	for ; i >= 0; i-- {
+		choice, label, ok := exitMenuAction(lines[i])
+		if !ok {
+			break
 		}
-		choice := strings.TrimSpace(line[:sep])
-		label := strings.TrimSpace(line[sep+1:])
-		if choice == "" || strings.IndexFunc(choice, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-			continue
+		reversed = append(reversed, action{choice: choice, label: label})
+	}
+	if len(reversed) == 0 {
+		return "", false
+	}
+
+	// The exit question must immediately introduce that action block (one visual
+	// spacer is allowed), and a genuine background-work status line must occur in
+	// the same small menu region above it. Exact line shapes reject quoted prose.
+	for i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i--
+	}
+	if i < 0 || !exitConfirmationQuestion(lines[i]) {
+		return "", false
+	}
+	question := i
+	background := false
+	for i = question - 1; i >= 0 && i >= question-5; i-- {
+		if backgroundWorkStatus(lines[i]) {
+			background = true
+			break
 		}
-		if strings.Contains(label, "exit") &&
-			!strings.Contains(label, "cancel") &&
-			!strings.Contains(label, "stay") &&
-			!strings.Contains(label, "keep running") {
-			return choice, true
+	}
+	if !background {
+		return "", false
+	}
+
+	for i := len(reversed) - 1; i >= 0; i-- {
+		if exitConfirmationAction(reversed[i].label) {
+			return reversed[i].choice, true
 		}
 	}
 	return "", false
+}
+
+func exitMenuAction(line string) (choice, label string, ok bool) {
+	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "›>❯ "))
+	sep := strings.IndexAny(line, ".)")
+	if sep <= 0 {
+		return "", "", false
+	}
+	choice = strings.TrimSpace(line[:sep])
+	label = strings.TrimSpace(line[sep+1:])
+	if choice == "" || label == "" || strings.IndexFunc(choice, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return "", "", false
+	}
+	return choice, label, true
+}
+
+func exitConfirmationQuestion(line string) bool {
+	line = strings.TrimSpace(line)
+	return line == "are you sure you want to exit?" || line == "exit session?"
+}
+
+func backgroundWorkStatus(line string) bool {
+	line = strings.TrimSpace(line)
+	if strings.ContainsAny(line, "\"'`:") {
+		return false
+	}
+	return (strings.Contains(line, "background work") || strings.Contains(line, "background agent") || strings.Contains(line, "background task")) &&
+		(strings.Contains(line, "running") || strings.Contains(line, "still running"))
+}
+
+func exitConfirmationAction(label string) bool {
+	switch strings.TrimSpace(label) {
+	case "exit anyway", "confirm exit", "save and exit":
+		return true
+	default:
+		return false
+	}
 }
 
 // ClaudeWorktreeExitPrompt reports whether captured shows Claude Code's interactive
