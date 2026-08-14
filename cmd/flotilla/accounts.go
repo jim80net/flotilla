@@ -197,7 +197,8 @@ func safeOAuthPrompt(line string) string {
 func allowedOAuthURL(line string) string {
 	for _, field := range strings.Fields(stripANSI(line)) {
 		candidate := strings.Trim(field, "<>[](){}\"',.;")
-		if !strings.HasPrefix(candidate, "https://") {
+		schemeEnd := strings.Index(candidate, "://")
+		if schemeEnd < 0 || !strings.EqualFold(candidate[:schemeEnd], "https") {
 			continue
 		}
 		u, err := url.Parse(candidate)
@@ -205,7 +206,7 @@ func allowedOAuthURL(line string) string {
 		// provider host, with an absolute path and optional OAuth query.
 		// Userinfo, explicit ports, and fragments are neither required nor
 		// safe to relay, so reject the entire URL when any is present.
-		if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil ||
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Opaque != "" || u.User != nil ||
 			u.Hostname() == "" || u.Port() != "" || !allowedOAuthHost(u.Hostname()) ||
 			u.Path == "" || !strings.HasPrefix(u.Path, "/") || strings.Contains(candidate, "#") {
 			continue

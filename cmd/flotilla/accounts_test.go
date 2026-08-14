@@ -322,6 +322,27 @@ func TestOAuthOutputBrokerRejectsUserinfoAndUnneededURLComponents(t *testing.T) 
 	}
 }
 
+func TestOAuthOutputBrokerAcceptsCaseInsensitiveSchemeAndHost(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{input: "HTTPS://claude.ai/oauth", want: "https://claude.ai/oauth"},
+		{input: "HtTpS://ClAuDe.Ai/oauth/authorize?state=needed", want: "https://ClAuDe.Ai/oauth/authorize?state=needed"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			var out bytes.Buffer
+			broker := newOAuthOutputBroker(&out)
+			if _, err := broker.Write([]byte("Open " + tc.input + "\n")); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := out.String(), "OAuth URL: "+tc.want+"\n"; got != want {
+				t.Fatalf("brokered OAuth URL = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func snapshotDirectory(t *testing.T, root string) string {
 	t.Helper()
 	var snapshot strings.Builder
