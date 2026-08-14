@@ -62,15 +62,19 @@ func HarnessExitConfirmationChoice(captured string) (string, bool) {
 	if i < 0 || !exitConfirmationQuestion(lines[i]) {
 		return "", false
 	}
-	question := i
-	background := false
-	for i = question - 1; i >= 0 && i >= question-5; i-- {
-		if backgroundWorkStatus(lines[i]) {
-			background = true
-			break
-		}
+	// The live #557 menu may render one spacer and bounded task-detail rows
+	// between its background summary and question. Every intervening non-blank
+	// line must itself be task chrome; arbitrary prose cannot bridge the region.
+	i--
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i--
 	}
-	if !background {
+	taskRows := 0
+	for i >= 0 && taskRows < 8 && backgroundTaskDetail(lines[i]) {
+		taskRows++
+		i--
+	}
+	if i < 0 || !backgroundWorkStatus(lines[i]) {
 		return "", false
 	}
 
@@ -108,19 +112,38 @@ func backgroundWorkStatus(line string) bool {
 	}
 
 	fields := strings.Fields(line)
+	if len(fields) == 5 && fields[0] == "background" && backgroundWorkNoun(fields[1]) && fields[2] == "still" && fields[3] == "running" && parenthesizedCount(fields[4]) {
+		return true
+	}
+	if len(fields) == 4 && fields[0] == "background" && backgroundWorkNoun(fields[1]) && fields[2] == "running" && parenthesizedCount(fields[3]) {
+		return true
+	}
 	if len(fields) != 4 && len(fields) != 5 {
 		return false
 	}
 	if !allASCIIInteger(fields[0]) || fields[1] != "background" {
 		return false
 	}
-	if fields[2] != "agent" && fields[2] != "agents" && fields[2] != "task" && fields[2] != "tasks" {
+	if !backgroundWorkNoun(fields[2]) {
 		return false
 	}
 	if len(fields) == 4 {
 		return fields[3] == "running"
 	}
 	return fields[3] == "still" && fields[4] == "running"
+}
+
+func backgroundWorkNoun(value string) bool {
+	return value == "agent" || value == "agents" || value == "task" || value == "tasks"
+}
+
+func parenthesizedCount(value string) bool {
+	return len(value) >= 3 && value[0] == '(' && value[len(value)-1] == ')' && allASCIIInteger(value[1:len(value)-1])
+}
+
+func backgroundTaskDetail(line string) bool {
+	fields := strings.Fields(strings.TrimSpace(line))
+	return len(fields) >= 3 && fields[len(fields)-2] == "●" && fields[len(fields)-1] == "running"
 }
 
 func allASCIIInteger(value string) bool {

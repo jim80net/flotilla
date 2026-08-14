@@ -1,0 +1,8 @@
+  background agents still running (6)
+  review-task  ● running
+  migration    ● running
+
+  Exit session?
+  1. Save and exit
+  2. Cancel
+  Enter to confirm

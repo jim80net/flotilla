@@ -45,12 +45,21 @@ func TestClaudeWorktreeExitPrompt(t *testing.T) {
 }
 
 func TestHarnessExitConfirmationChoice(t *testing.T) {
+	live557, err := os.ReadFile("../surface/testdata/exit-confirm-557.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name     string
 		captured string
 		choice   string
 		want     bool
 	}{
+		{
+			"live 557 count-suffix menu with task details",
+			string(live557),
+			"1", true,
+		},
 		{
 			"exit anyway is first",
 			"3 background agents still running\nAre you sure you want to exit?\n❯ 1. Exit anyway\n  2. Cancel\nEnter to confirm",
