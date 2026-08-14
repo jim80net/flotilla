@@ -1,11 +1,15 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/backlog"
 )
 
 func TestQuarantineRegistryIsDistinctDurableAndReversible(t *testing.T) {
@@ -119,5 +123,78 @@ func TestQuarantineRegistryRestorationIsMonotonicAndLifecycleBounded(t *testing.
 	}
 	if entries := q.Load(); len(entries) != 2 { // one row edge + one recipient transition
 		t.Fatalf("repeated lifecycle grew registry: entries=%+v", entries)
+	}
+}
+
+func TestExcludeQuarantinedInboundWorkIsHeldNotActionable(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQuarantineRegistry(dir)
+	now := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		if inserted, err := q.Quarantine(QuarantineEntry{Kind: "inbound-ack", RowID: fmt.Sprintf("row-%02d", i),
+			Nonce: fmt.Sprintf("flotilla-dispatch-%08x", i), Recipient: "closed-desk", QuarantinedAt: now}); err != nil || !inserted {
+			t.Fatalf("quarantine %d = (%v,%v)", i, inserted, err)
+		}
+	}
+	st := backlog.Status{Found: true, Unblocked: make([]string, 12)}
+	for i := range st.Unblocked {
+		st.Unblocked[i] = fmt.Sprintf("- [in-flight] %s", QuarantineBacklogToken(fmt.Sprintf("flotilla-dispatch-%08x", i)))
+	}
+	got, err := ExcludeQuarantinedInboundWork(dir, "closed-desk", st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Unblocked) != 0 {
+		t.Fatalf("quarantined held rows remained actionable: %v", got.Unblocked)
+	}
+	if len(st.Unblocked) != 12 {
+		t.Fatal("filter mutated source backlog status")
+	}
+}
+
+func TestExcludeQuarantinedInboundWorkRequiresIdentityAndPreservesUnrelatedWork(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQuarantineRegistry(dir)
+	for i := 0; i < 2; i++ {
+		if _, err := q.Quarantine(QuarantineEntry{Kind: "inbound-ack", RowID: fmt.Sprintf("row-%d", i),
+			Nonce: fmt.Sprintf("flotilla-dispatch-%08x", i+1), Recipient: "desk"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := [][]string{
+		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000002]"},
+		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000002]", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work"},
+		// One durable marker may exclude at most one matching line; a duplicate remains visible.
+		{"- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [in-flight] [dispatch-nonce:flotilla-dispatch-00000001]", "- [next] genuine work"},
+	}
+	for _, lines := range cases {
+		got, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: lines})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(got.Unblocked, "- [next] genuine work") {
+			t.Fatalf("unrelated work was hidden: input=%v output=%v", lines, got.Unblocked)
+		}
+		if len(lines) == 3 && lines[0] == lines[1] && len(got.Unblocked) != 2 {
+			t.Fatalf("duplicate identity over-suppressed: %v", got.Unblocked)
+		}
+	}
+	got, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true, Unblocked: []string{
+		"- [next] investigate prose mentioning flotilla-dispatch-00000001",
+		"- [next] [dispatch-nonce:flotilla-dispatch-000000010] prefix collision",
+	}})
+	if err != nil || len(got.Unblocked) != 2 {
+		t.Fatalf("incidental/prefix identity mention suppressed: output=%v err=%v", got.Unblocked, err)
+	}
+}
+
+func TestExcludeQuarantinedInboundWorkReadErrorFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(QuarantinePath(dir), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExcludeQuarantinedInboundWork(dir, "desk", backlog.Status{Found: true,
+		Unblocked: []string{"- [in-flight] work"}}); err == nil {
+		t.Fatal("corrupt quarantine registry authorized actionable work")
 	}
 }

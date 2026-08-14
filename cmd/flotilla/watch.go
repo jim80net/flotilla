@@ -24,6 +24,7 @@ import (
 	"github.com/jim80net/flotilla/internal/decisionbrief"
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/frontier"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
@@ -377,6 +378,9 @@ func cmdWatch(args []string) error {
 	injector.SetTurnConfirmed(func(recipient string) {
 		reopenRecipientQuarantine(rosterDir, currentRoster(), recipient, time.Now().UTC())
 	})
+	injector.SetRecipientClosedOut(func(recipient string) bool {
+		return recipientRoutingHeld(rosterDir, currentRoster(), recipient)
+	})
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -679,7 +683,12 @@ func cmdWatch(args []string) error {
 				return raw, true, nil
 			},
 			deskBacklogPath, // named in the #479 headingless alert so the fix is one copy-paste away
-			internalWedgeAlert, time.Now)
+			internalWedgeAlert, time.Now, func(agent string, st backlog.Status) (backlog.Status, error) {
+				return dispatch.ExcludeQuarantinedInboundWork(rosterDir, agent, st)
+			})
+		deskRecipientClosedOut := func(agent string) bool {
+			return recipientRoutingHeld(rosterDir, currentRoster(), agent)
+		}
 
 		// #216 idle-hold antipattern: per-agent consecutive-strike tracker; the break
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
@@ -925,6 +934,7 @@ func cmdWatch(args []string) error {
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:   deskHeartbeatEnabled,
+			RecipientClosedOut: deskRecipientClosedOut,
 			HeartbeatWarranted: deskHeartbeatWarranted,
 			HeartbeatLiveState: func(agent string) surface.State {
 				// Fresh, non-debounced fail-closed live join. Live identity must be readable and
@@ -1438,7 +1448,7 @@ func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool
 	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert, time.Now)
 }
 
-func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string), now func() time.Time) func(agent string) watch.DeskHeartbeatWarrant {
+func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string), now func() time.Time, filters ...func(string, backlog.Status) (backlog.Status, error)) func(agent string) watch.DeskHeartbeatWarrant {
 	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
 	return func(agent string) watch.DeskHeartbeatWarrant {
 		raw, exists, err := read(agent)
@@ -1456,6 +1466,17 @@ func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent str
 		}
 		content := string(raw)
 		st := backlog.Parse(content)
+		for _, filter := range filters {
+			if filter == nil {
+				continue
+			}
+			st, err = filter(agent, st)
+			if err != nil {
+				// Quarantine uncertainty is not positive work evidence. Suppress both beat and
+				// cap accrual until the durable disposition becomes readable again.
+				return watch.DeskHeartbeatNotWarranted
+			}
+		}
 		// A present, readable file with NO "## Backlog" section (and non-empty content) is the format
 		// slip the !Found warrant arm keeps WARRANTED — loud on first sight AND on every failed fix
 		// attempt (changed-but-still-headingless), silent while the broken file is untouched (#479).

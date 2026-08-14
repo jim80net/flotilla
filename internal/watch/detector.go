@@ -279,6 +279,10 @@ type DetectorConfig struct {
 	// returns false is never beaten — the primary XO (which keeps its own clock) and the
 	// approval-sensitive desks are excluded here.
 	HeartbeatEnabled func(agent string) bool
+	// RecipientClosedOut is the shared fail-closed routing-hold disposition. A held desk is
+	// excluded before heartbeat evidence is sampled and again under the decision lock, so it
+	// receives no beat, accrues no cap, and cannot wedge. nil preserves legacy behavior.
+	RecipientClosedOut func(agent string) bool
 	// HeartbeatWarranted is the #189 per-recipient JUDGMENT. Beat preserves the fail-safe #183
 	// continuation policy; Wedge is true only with positive evidence of an outstanding obligation.
 	// It is the cmd-wiring's FILE I/O (os.ReadFile +
@@ -384,6 +388,7 @@ const (
 type deskHeartbeatEvidence struct {
 	warrant   DeskHeartbeatWarrant
 	liveState surface.State
+	held      bool
 }
 
 type SynthOperation struct {
@@ -1595,21 +1600,31 @@ func (d *Detector) awaitingSweepLocked(cur Snapshot) []string {
 // #183 behavior). The seams are read-only/pure w.r.t. detector state, so calling them without the
 // lock is safe (no detector mutable state is touched here).
 func (d *Detector) deskWarrantSnapshot() map[string]deskHeartbeatEvidence {
-	if d.cfg.HeartbeatEnabled == nil || d.cfg.HeartbeatWarranted == nil {
-		return nil // feature off OR warrant unwired ⇒ the under-lock decision defaults to warranted
+	if d.cfg.HeartbeatEnabled == nil || (d.cfg.HeartbeatWarranted == nil && d.cfg.RecipientClosedOut == nil) {
+		return nil // feature off, or legacy #183 seams remain byte-inert
 	}
 	warrant := make(map[string]deskHeartbeatEvidence, len(d.cfg.Desks))
 	for _, name := range d.cfg.Desks {
 		if name == d.cfg.XOAgent || !d.cfg.HeartbeatEnabled(name) {
 			continue // never read the backlog of the XO or an opted-out/approval-sensitive desk
 		}
+		if d.cfg.RecipientClosedOut != nil && d.cfg.RecipientClosedOut(name) {
+			warrant[name] = deskHeartbeatEvidence{held: true}
+			continue // a routing hold excludes all later live-state/backlog evidence reads
+		}
+		if d.cfg.HeartbeatWarranted == nil {
+			warrant[name] = deskHeartbeatEvidence{warrant: DeskHeartbeatPositiveWarrant, liveState: surface.StateIdle}
+			continue // preserve #183: an unwired judgment never consults the newer live seam
+		}
 		liveState := surface.StateIdle
 		if d.cfg.HeartbeatLiveState != nil {
 			liveState = d.cfg.HeartbeatLiveState(name)
 		}
+		w := d.cfg.HeartbeatWarranted(name) // the OFF-lock file read happens HERE
 		warrant[name] = deskHeartbeatEvidence{
-			warrant:   d.cfg.HeartbeatWarranted(name), // the OFF-lock file read happens HERE
+			warrant:   w,
 			liveState: liveState,
+			held:      false,
 		}
 	}
 	return warrant
@@ -1640,6 +1655,23 @@ func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]de
 		if name == d.cfg.XOAgent || !d.cfg.HeartbeatEnabled(name) {
 			continue // the primary XO keeps its own clock; an opted-out desk never beats
 		}
+		evidence, ok := warrant[name]
+		if !ok {
+			evidence = deskHeartbeatEvidence{warrant: DeskHeartbeatPositiveWarrant, liveState: surface.StateIdle}
+		}
+		if evidence.held {
+			// Routing-held desks are cap-neutral. Clear any pre-hold cadence/cap state so a
+			// later explicit restoration starts from a clean heartbeat episode.
+			delete(d.deskBeatEligibleAt, name)
+			d.deskNoProgress[name] = 0
+			delete(d.deskStopped, name)
+			d.deskProgressed[name] = false
+			delete(d.deskSettled, name)
+			if d.cfg.DeskSettleConsume != nil {
+				_ = d.cfg.DeskSettleConsume(name)
+			}
+			continue
+		}
 		switch cur.DeskStates[name] {
 		case surface.StateWorking:
 			if prev.DeskStates[name] != surface.StateWorking {
@@ -1656,10 +1688,6 @@ func (d *Detector) deskHeartbeatLocked(prev, cur Snapshot, warrant map[string]de
 			// marker is settled until re-armed.
 			if d.cfg.DeskSettleConsume != nil && d.cfg.DeskSettleConsume(name) {
 				d.deskSettled[name] = true
-			}
-			evidence, ok := warrant[name]
-			if !ok {
-				evidence = deskHeartbeatEvidence{warrant: DeskHeartbeatPositiveWarrant, liveState: surface.StateIdle}
 			}
 			if evidence.liveState != surface.StateIdle {
 				// The debounced pane snapshot said Idle, but a fresh live assessment says the desk is
@@ -1817,16 +1845,51 @@ func (d *Detector) runSynthesis(eligible []synthEligible) {
 // are nil (the decision returned nil slices anyway when HeartbeatEnabled is nil; this double-guards a
 // partially-wired config).
 func (d *Detector) runDeskHeartbeats(beats, escalations []string) {
+	held := make(map[string]bool, len(beats)+len(escalations))
+	isHeld := func(name string) bool {
+		if value, ok := held[name]; ok {
+			return value
+		}
+		value := d.heartbeatRecipientHeld(name)
+		held[name] = value
+		return value
+	}
 	for _, name := range beats {
+		if isHeld(name) {
+			continue
+		}
 		if d.cfg.WakeDeskHeartbeat != nil {
 			d.cfg.WakeDeskHeartbeat(name)
 		}
 	}
 	for _, name := range escalations {
+		if isHeld(name) {
+			continue
+		}
 		if d.cfg.DeskEscalate != nil {
 			d.cfg.DeskEscalate(name)
 		}
 	}
+}
+
+// heartbeatRecipientHeld revalidates the external disposition immediately before each off-lock
+// side effect. A hold can land after phase-1 sampling; it must cancel the beat and its coordinator
+// escalation and leave no stale cap/settle episode behind.
+func (d *Detector) heartbeatRecipientHeld(name string) bool {
+	if d.cfg.RecipientClosedOut == nil || !d.cfg.RecipientClosedOut(name) {
+		return false
+	}
+	d.mu.Lock()
+	delete(d.deskBeatEligibleAt, name)
+	d.deskNoProgress[name] = 0
+	delete(d.deskStopped, name)
+	d.deskProgressed[name] = false
+	delete(d.deskSettled, name)
+	if d.cfg.DeskSettleConsume != nil {
+		_ = d.cfg.DeskSettleConsume(name)
+	}
+	d.mu.Unlock()
+	return true
 }
 
 // commitSynthesisLocked commits one agent's synthesis decision under a SHORT re-lock of d.mu and

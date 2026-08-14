@@ -112,6 +112,18 @@ func TestRecipientClosedOutExplicitRosterFlagOverridesConfirmedRestoration(t *te
 	}
 }
 
+func TestRecipientRoutingHeldQuarantineReadErrorFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(dispatch.QuarantinePath(dir), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "desk", ClosedOut: &restored}}}
+	if !recipientRoutingHeld(dir, cfg, "desk") {
+		t.Fatal("corrupt quarantine registry authorized internal wake")
+	}
+}
+
 func TestClosedOutDocumentDetectorConfirmCannotDefeatQuarantine(t *testing.T) {
 	for _, recipient := range []string{"cos-tech-writer", "cos-ux-designer"} {
 		t.Run(recipient, func(t *testing.T) {

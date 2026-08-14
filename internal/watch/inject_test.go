@@ -53,6 +53,22 @@ func TestInjectorTurnConfirmedHookOnlyEligibleWorkSend(t *testing.T) {
 	}
 }
 
+func TestInjectorClosedOutSuppressesInternalWakesOnly(t *testing.T) {
+	var sent []string
+	in := NewInjector(func(agent, _ string) error {
+		sent = append(sent, agent)
+		return nil
+	}, 1)
+	in.SetRecipientClosedOut(func(agent string) bool { return agent == "closed" })
+	in.deliver(Job{Agent: "closed", Kind: KindDetector, Message: strings.Repeat("D", 1591)})
+	in.deliver(Job{Agent: "closed", Kind: KindHeartbeat, Message: "beat"})
+	in.deliver(Job{Agent: "closed", Kind: KindOperatorInterrupt, Message: "real work"})
+	in.deliver(Job{Agent: "open", Kind: KindDetector, Message: "normal detector"})
+	if want := []string{"closed", "open"}; !reflect.DeepEqual(sent, want) {
+		t.Fatalf("delivered recipients = %v, want eligible work to closed + detector to open %v", sent, want)
+	}
+}
+
 func TestInjectorSerializes(t *testing.T) {
 	var inFlight, overlap, count int32
 	send := func(agent, message string) error {

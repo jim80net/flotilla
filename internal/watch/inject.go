@@ -158,6 +158,7 @@ type Injector struct {
 	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
 	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
 	onTurnConfirmed           func(recipient string)                  // optional: eligible work/send accepted a turn; may reopen recipient quarantine
+	recipientClosedOut        func(recipient string) bool             // optional: fail-closed routing hold for internal wakes
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
@@ -224,6 +225,10 @@ func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 // (a relay kind or KindSend), keyed to the actual pane recipient. Internal detector/heartbeat wakes
 // are deliberately excluded: their composer confirmation is not provider-restoration evidence.
 func (in *Injector) SetTurnConfirmed(fn func(recipient string)) { in.onTurnConfirmed = fn }
+
+// SetRecipientClosedOut installs the shared routing-hold predicate. It suppresses only internal
+// detector/heartbeat deliveries; eligible operator/work sends remain the controlled restore edge.
+func (in *Injector) SetRecipientClosedOut(fn func(recipient string) bool) { in.recipientClosedOut = fn }
 
 // SetCoordinatorIngress installs #533 adjutant front-office ingress aliasing before coordinator delivery.
 func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) { in.coordinatorIngress = g }
@@ -303,6 +308,11 @@ func (in *Injector) Start() {
 // tick). Any other error is a real delivery failure: a relay escalates LOUDLY (never silent),
 // a tick logs only. A failed delivery never kills the worker.
 func (in *Injector) deliver(j Job) {
+	if (j.Kind == KindDetector || j.Kind == KindHeartbeat) && in.recipientClosedOut != nil && in.recipientClosedOut(j.Agent) {
+		log.Printf("flotilla watch: %s to %q suppressed — recipient is closed out/routing held", deliveryKind(j.Kind), j.Agent)
+		in.abortDetectorClaim(j)
+		return
+	}
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send

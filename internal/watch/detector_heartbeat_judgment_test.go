@@ -158,6 +158,74 @@ func (f *hbjFixture) escLog() []string {
 	return append([]string(nil), f.escalations...)
 }
 
+func TestDeskHeartbeatClosedOutIsCapNeutralAndRestorationRearms(t *testing.T) {
+	for _, agent := range []string{"cos-tech-writer", "cos-ux-designer"} {
+		t.Run(agent, func(t *testing.T) {
+			f := newHBJFixture()
+			cfg := f.config("xo", []string{"xo", agent}, []string{agent}, 1, 3, true)
+			held := true
+			cfg.RecipientClosedOut = func(string) bool { return held }
+			settleMarker := true
+			cfg.DeskSettleConsume = func(string) bool {
+				wasSet := settleMarker
+				settleMarker = false
+				return wasSet
+			}
+			f.setWarranted(agent, true)
+			f.set("xo", surface.StateIdle)
+			f.set(agent, surface.StateIdle)
+			d := f.newDet(t, cfg)
+			d.deskSettled[agent] = true
+			seed(d, map[string]surface.State{"xo": surface.StateIdle, agent: surface.StateIdle}, "h0")
+			for i := 0; i < 6; i++ {
+				d.Tick()
+				f.advance(time.Minute)
+			}
+			if len(f.beatLog()) != 0 || len(f.escLog()) != 0 {
+				t.Fatalf("closed-out desk beat/wedged: beats=%v escalations=%v", f.beatLog(), f.escLog())
+			}
+			held = false
+			for i := 0; i < 4; i++ {
+				d.Tick()
+				f.advance(time.Minute)
+			}
+			if len(f.beatLog()) != 3 || len(f.escLog()) != 1 || f.escLog()[0] != agent {
+				t.Fatalf("restored genuine obligation did not resume normal cap: beats=%v escalations=%v", f.beatLog(), f.escLog())
+			}
+		})
+	}
+}
+
+func TestDeskHeartbeatCloseOutLandingAfterSnapshotCancelsSideEffects(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "desk"}, []string{"desk"}, 1, 3, true)
+	held := false
+	cfg.RecipientClosedOut = func(string) bool {
+		value := held
+		if value {
+			held = false // restoration races after the beat check; escalation must share its decision
+		}
+		return value
+	}
+	cfg.HeartbeatWarranted = func(string) DeskHeartbeatWarrant {
+		held = true // disposition lands after its phase-1 check
+		return DeskHeartbeatPositiveWarrant
+	}
+	f.set("xo", surface.StateIdle)
+	f.set("desk", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "desk": surface.StateIdle}, "h0")
+	d.deskBeatEligibleAt["desk"] = f.clock.Add(-time.Minute)
+	d.deskNoProgress["desk"] = 2
+	d.Tick()
+	if len(f.beatLog()) != 0 || len(f.escLog()) != 0 {
+		t.Fatalf("late close-out emitted side effects: beats=%v escalations=%v", f.beatLog(), f.escLog())
+	}
+	if d.deskNoProgress["desk"] != 0 || d.deskStopped["desk"] {
+		t.Fatalf("late close-out retained cap episode: cap=%d stopped=%v", d.deskNoProgress["desk"], d.deskStopped["desk"])
+	}
+}
+
 // (J1) WARRANTED-TRUE behaves exactly as #183: an idle, eligible, cadence-elapsed, not-settled desk
 // is beaten on its cadence.
 func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {

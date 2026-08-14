@@ -182,6 +182,21 @@ func recipientClosedOut(rosterDir string, cfg *roster.Config, recipient string) 
 	return true
 }
 
+// recipientRoutingHeld extends the administrative close-out disposition through the quarantine
+// reopen edge. Explicit closed_out:false permits a real work/send to land, but internal wakes remain
+// suppressed until that eligible confirmed turn has actually lifted every active marker.
+func recipientRoutingHeld(rosterDir string, cfg *roster.Config, recipient string) bool {
+	if recipientClosedOut(rosterDir, cfg, recipient) {
+		return true
+	}
+	active, err := dispatch.NewQuarantineRegistry(rosterDir).HasActiveRecipient(recipient)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: read routing-hold quarantine for %q failed; suppressing internal wake: %v\n", recipient, err)
+		return true
+	}
+	return active
+}
+
 // reopenRecipientQuarantine lifts only the reversible quarantine marker after a confirmed turn
 // reaches a recipient whose explicit roster disposition is no longer closed out. It never consumes
 // or removes the preserved inbound rows and never fabricates an acknowledgement.
