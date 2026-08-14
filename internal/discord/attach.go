@@ -2,16 +2,16 @@ package discord
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
+	"image/draw"
 	"image/jpeg"
 	_ "image/png"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,17 +24,21 @@ import (
 // MaxAttachmentBytes is Discord's default per-file upload cap for webhook
 // attachments (~25 MiB). Fail closed before posting when any file exceeds it.
 const (
-	MaxAttachmentBytes        = 25 * 1024 * 1024
-	defaultAttachmentTimeout  = 30 * time.Second
-	attachmentAttempts        = 3
-	fallbackImageMaxDimension = 1600
-	fallbackImageMaxBytes     = 2 * 1024 * 1024
+	MaxAttachmentBytes         = 25 * 1024 * 1024
+	defaultAttachmentTimeout   = 30 * time.Second
+	attachmentAttempts         = 3
+	fallbackImageMaxDimension  = 1600
+	fallbackImageMaxBytes      = 2 * 1024 * 1024
+	fallbackSourceMaxDimension = 10000
+	fallbackSourceMaxPixels    = 40 * 1000 * 1000
 )
 
 type attachmentPostOptions struct {
 	client    *http.Client
 	attempts  int
-	backoff   func(attempt int)
+	backoff   func(attempt int) time.Duration
+	wait      func(time.Duration)
+	now       func() time.Time
 	transcode func(paths []string) (fallback []string, cleanup func(), err error)
 }
 
@@ -42,6 +46,7 @@ type attachmentHTTPError struct {
 	statusCode int
 	status     string
 	snippet    string
+	retryAfter string
 }
 
 func (e *attachmentHTTPError) Error() string {
@@ -129,6 +134,8 @@ func PostWithAttachments(webhookURL, username, content string, attachPaths []str
 		client:    &client,
 		attempts:  attachmentAttempts,
 		backoff:   attachmentBackoff,
+		wait:      time.Sleep,
+		now:       time.Now,
 		transcode: transcodeImageAttachments,
 	})
 }
@@ -148,9 +155,9 @@ func notifyAttachmentTimeout() (time.Duration, error) {
 	return d, nil
 }
 
-func attachmentBackoff(attempt int) {
+func attachmentBackoff(attempt int) time.Duration {
 	// 250ms, 500ms between the three bounded attempts.
-	time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+	return time.Duration(attempt) * 250 * time.Millisecond
 }
 
 func postWithAttachments(webhookURL, host, username, content string, attachPaths []string, opts attachmentPostOptions) error {
@@ -164,11 +171,15 @@ func postWithAttachments(webhookURL, host, username, content string, attachPaths
 	if err != nil {
 		return err
 	}
-	originalErr, timedOut := postAttachmentAttempts(opts, webhookURL, host, body, contentType)
+	originalErr := postAttachmentAttempts(opts, webhookURL, host, body, contentType)
 	if originalErr == nil {
 		return nil
 	}
-	if !timedOut || opts.transcode == nil {
+	var httpErr *attachmentHTTPError
+	if !errors.As(originalErr, &httpErr) {
+		return fmt.Errorf("attachment delivery status unknown after a transport failure; request was not replayed: %w", originalErr)
+	}
+	if httpErr.statusCode < 500 || opts.transcode == nil {
 		return fmt.Errorf("attachment upload failed after %d attempt(s): %w", opts.attempts, originalErr)
 	}
 
@@ -177,57 +188,76 @@ func postWithAttachments(webhookURL, host, username, content string, attachPaths
 		defer cleanup()
 	}
 	if transcodeErr != nil {
-		return fmt.Errorf("attachment upload timed out after %d attempt(s); automatic image fallback failed: %w (original error: %v)", opts.attempts, transcodeErr, originalErr)
+		return fmt.Errorf("attachment upload was rejected after %d attempt(s); automatic image fallback failed: %w (original error: %v)", opts.attempts, transcodeErr, originalErr)
 	}
 	fallbackBody, fallbackType, buildErr := buildAttachmentBody(username, content, fallback)
 	if buildErr != nil {
-		return fmt.Errorf("attachment upload timed out after %d attempt(s); build automatic image fallback: %w", opts.attempts, buildErr)
+		return fmt.Errorf("attachment upload was rejected after %d attempt(s); build automatic image fallback: %w", opts.attempts, buildErr)
 	}
-	fallbackErr, _ := postAttachmentAttempts(opts, webhookURL, host, fallbackBody, fallbackType)
+	fallbackErr := postAttachmentAttempts(opts, webhookURL, host, fallbackBody, fallbackType)
 	if fallbackErr != nil {
-		return fmt.Errorf("attachment upload timed out after %d attempt(s); downscaled JPEG fallback also failed after %d attempt(s): %w", opts.attempts, opts.attempts, fallbackErr)
+		var fallbackHTTPError *attachmentHTTPError
+		if !errors.As(fallbackErr, &fallbackHTTPError) {
+			return fmt.Errorf("downscaled attachment delivery status unknown after a transport failure; request was not replayed: %w", fallbackErr)
+		}
+		return fmt.Errorf("attachment upload was rejected after %d attempt(s); downscaled JPEG fallback also failed after %d attempt(s): %w", opts.attempts, opts.attempts, fallbackErr)
 	}
 	return nil
 }
 
-func postAttachmentAttempts(opts attachmentPostOptions, webhookURL, host string, body []byte, contentType string) (last error, timedOut bool) {
+func postAttachmentAttempts(opts attachmentPostOptions, webhookURL, host string, body []byte, contentType string) (last error) {
+	if opts.now == nil {
+		opts.now = time.Now
+	}
 	for attempt := 1; attempt <= opts.attempts; attempt++ {
 		err := postAttachmentBody(opts.client, webhookURL, host, body, contentType)
 		if err == nil {
-			return nil, timedOut
+			return nil
 		}
 		last = err
-		if isTimeout(err) {
-			timedOut = true
-		}
 		if !retryableAttachmentError(err) || attempt == opts.attempts {
 			break
 		}
-		if opts.backoff != nil {
-			opts.backoff(attempt)
+		delay := time.Duration(0)
+		var httpErr *attachmentHTTPError
+		if errors.As(err, &httpErr) && httpErr.statusCode == http.StatusTooManyRequests {
+			delay, _ = parseRetryAfter(httpErr.retryAfter, opts.now())
+		}
+		if delay <= 0 && opts.backoff != nil {
+			delay = opts.backoff(attempt)
+		}
+		if delay > 0 && opts.wait != nil {
+			opts.wait(delay)
 		}
 	}
-	return last, timedOut
+	return last
 }
 
 func retryableAttachmentError(err error) bool {
-	if isTimeout(err) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
 	var httpErr *attachmentHTTPError
 	return errors.As(err, &httpErr) && (httpErr.statusCode == http.StatusTooManyRequests || httpErr.statusCode >= 500)
 }
 
-func isTimeout(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
+func parseRetryAfter(raw string, now time.Time) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
 	}
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds > 0 && seconds <= float64((24*time.Hour)/time.Second) {
+			return time.Duration(seconds * float64(time.Second)), true
+		}
+		return 0, false
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0, false
+	}
+	delay := when.Sub(now)
+	if delay <= 0 || delay > 24*time.Hour {
+		return 0, false
+	}
+	return delay, true
 }
 
 func buildAttachmentBody(username, content string, attachPaths []string) ([]byte, string, error) {
@@ -289,7 +319,7 @@ func postAttachmentBody(client *http.Client, webhookURL, host string, body []byt
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return &attachmentHTTPError{statusCode: resp.StatusCode, status: resp.Status, snippet: string(snippet)}
+		return &attachmentHTTPError{statusCode: resp.StatusCode, status: resp.Status, snippet: string(snippet), retryAfter: resp.Header.Get("Retry-After")}
 	}
 	return nil
 }
@@ -327,14 +357,29 @@ func transcodeOneImage(path, dir string, index int) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("open image fallback source %q: %w", path, err)
 	}
-	img, format, decodeErr := image.Decode(f)
-	_ = f.Close()
-	if decodeErr != nil {
+	config, format, configErr := image.DecodeConfig(f)
+	if configErr != nil {
+		_ = f.Close()
 		return "", false, nil // non-image attachments are preserved byte-for-byte
 	}
 	if format != "png" && format != "jpeg" {
+		_ = f.Close()
 		return "", false, nil
 	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > fallbackSourceMaxDimension || config.Height > fallbackSourceMaxDimension || int64(config.Width)*int64(config.Height) > fallbackSourceMaxPixels {
+		_ = f.Close()
+		return "", false, fmt.Errorf("image fallback source %q dimensions %dx%d exceed decode safety limit (%d per side, %d pixels)", path, config.Width, config.Height, fallbackSourceMaxDimension, fallbackSourceMaxPixels)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = f.Close()
+		return "", false, fmt.Errorf("rewind image fallback source %q: %w", path, err)
+	}
+	img, _, decodeErr := image.Decode(f)
+	_ = f.Close()
+	if decodeErr != nil {
+		return "", false, fmt.Errorf("decode image fallback source %q: %w", path, decodeErr)
+	}
+	img = compositeOnWhite(img)
 
 	var encoded []byte
 	for attempt, maxDimension := range []int{fallbackImageMaxDimension, 1200, 900, 675, 500} {
@@ -358,6 +403,14 @@ func transcodeOneImage(path, dir string, index int) (string, bool, error) {
 		return "", false, fmt.Errorf("write image fallback for %q: %w", path, err)
 	}
 	return dst, true, nil
+}
+
+func compositeOnWhite(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(dst, dst.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Over)
+	return dst
 }
 
 func resizeNearest(src image.Image, maxDimension int) image.Image {

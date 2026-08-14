@@ -1,7 +1,12 @@
 package discord
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -13,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -163,7 +167,24 @@ func TestPostWithAttachmentsFailsClosedBeforePost(t *testing.T) {
 	}
 }
 
-func TestPostWithAttachmentsRetriesTimeoutThenTranscodes(t *testing.T) {
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func attachmentResponse(status int, retryAfter string) *http.Response {
+	header := make(http.Header)
+	if retryAfter != "" {
+		header.Set("Retry-After", retryAfter)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader("rejected")),
+	}
+}
+
+func TestPostWithAttachmentsRetriesExplicit5xxThenTranscodes(t *testing.T) {
 	dir := t.TempDir()
 	pngPath := filepath.Join(dir, "evidence.png")
 	f, err := os.Create(pngPath)
@@ -184,12 +205,11 @@ func TestPostWithAttachmentsRetriesTimeoutThenTranscodes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var originalHits, fallbackHits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	originalHits, fallbackHits := 0, 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		mediaType, params, parseErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if parseErr != nil || mediaType != "multipart/form-data" {
-			t.Errorf("Content-Type = %q: %v", r.Header.Get("Content-Type"), parseErr)
-			return
+			t.Fatalf("Content-Type = %q: %v", r.Header.Get("Content-Type"), parseErr)
 		}
 		mr := multipart.NewReader(r.Body, params["boundary"])
 		filename := ""
@@ -199,8 +219,7 @@ func TestPostWithAttachmentsRetriesTimeoutThenTranscodes(t *testing.T) {
 				break
 			}
 			if nextErr != nil {
-				t.Errorf("multipart: %v", nextErr)
-				return
+				t.Fatalf("multipart: %v", nextErr)
 			}
 			if part.FileName() != "" {
 				filename = part.FileName()
@@ -208,35 +227,108 @@ func TestPostWithAttachmentsRetriesTimeoutThenTranscodes(t *testing.T) {
 			_, _ = io.Copy(io.Discard, part)
 		}
 		if strings.HasSuffix(filename, ".png") {
-			originalHits.Add(1)
-			time.Sleep(40 * time.Millisecond) // longer than the injected request budget
-			w.WriteHeader(http.StatusNoContent)
-			return
+			originalHits++
+			return attachmentResponse(http.StatusInternalServerError, ""), nil
 		}
 		if strings.Contains(filename, "-downscaled-") && strings.HasSuffix(filename, ".jpg") {
-			fallbackHits.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
+			fallbackHits++
+			return attachmentResponse(http.StatusNoContent, ""), nil
 		}
-		t.Errorf("unexpected attachment filename %q", filename)
-		w.WriteHeader(http.StatusBadRequest)
-	}))
-	defer srv.Close()
+		t.Fatalf("unexpected attachment filename %q", filename)
+		return nil, nil
+	})}
 
-	err = postWithAttachments(srv.URL, "127.0.0.1", "xo", "evidence", []string{pngPath}, attachmentPostOptions{
-		client:    &http.Client{Timeout: 10 * time.Millisecond},
+	err = postWithAttachments("https://discord.invalid/hook", "discord.invalid", "xo", "evidence", []string{pngPath}, attachmentPostOptions{
+		client:    client,
 		attempts:  2,
-		backoff:   func(int) {},
+		backoff:   func(int) time.Duration { return 0 },
+		wait:      func(time.Duration) {},
 		transcode: transcodeImageAttachments,
 	})
 	if err != nil {
 		t.Fatalf("postWithAttachments retry/transcode: %v", err)
 	}
-	if got := originalHits.Load(); got != 2 {
-		t.Errorf("original PNG attempts = %d, want 2", got)
+	if originalHits != 2 {
+		t.Errorf("original PNG attempts = %d, want 2", originalHits)
 	}
-	if got := fallbackHits.Load(); got != 1 {
-		t.Errorf("downscaled JPEG attempts = %d, want 1", got)
+	if fallbackHits != 1 {
+		t.Errorf("downscaled JPEG attempts = %d, want 1", fallbackHits)
+	}
+}
+
+func TestPostWithAttachmentsAmbiguousTransportIsNeverReplayed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "evidence.txt")
+	if err := os.WriteFile(path, []byte("evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	posts, transcodes := 0, 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		posts++ // model a server accepting the body before its response is lost
+		return nil, errors.New("response lost")
+	})}
+	err := postWithAttachments("https://discord.invalid/hook", "discord.invalid", "xo", "evidence", []string{path}, attachmentPostOptions{
+		client:   client,
+		attempts: 3,
+		backoff:  func(int) time.Duration { return time.Millisecond },
+		wait:     func(time.Duration) { t.Fatal("ambiguous transport must not back off for replay") },
+		transcode: func([]string) ([]string, func(), error) {
+			transcodes++
+			return nil, nil, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "delivery status unknown") || !strings.Contains(err.Error(), "not replayed") {
+		t.Fatalf("ambiguous error = %v", err)
+	}
+	if posts != 1 || transcodes != 0 {
+		t.Fatalf("posts=%d transcodes=%d, want at-most-once post and no fallback", posts, transcodes)
+	}
+}
+
+func TestPostAttachmentAttemptsRetryPolicyAndRetryAfter(t *testing.T) {
+	cases := []struct {
+		name       string
+		statuses   []int
+		retryAfter string
+		wantPosts  int
+		wantWait   time.Duration
+	}{
+		{"400 is terminal", []int{http.StatusBadRequest}, "", 1, 0},
+		{"429 honors decimal seconds", []int{http.StatusTooManyRequests, http.StatusNoContent}, "1.5", 2, 1500 * time.Millisecond},
+		{"429 honors HTTP date", []int{http.StatusTooManyRequests, http.StatusNoContent}, "Thu, 01 Jan 1970 00:00:02 GMT", 2, 2 * time.Second},
+		{"429 malformed uses backoff", []int{http.StatusTooManyRequests, http.StatusNoContent}, "later", 2, 77 * time.Millisecond},
+		{"429 missing uses backoff", []int{http.StatusTooManyRequests, http.StatusNoContent}, "", 2, 77 * time.Millisecond},
+		{"500 retries", []int{http.StatusInternalServerError, http.StatusNoContent}, "", 2, 77 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			posts := 0
+			var waits []time.Duration
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				status := tc.statuses[min(posts, len(tc.statuses)-1)]
+				posts++
+				return attachmentResponse(status, tc.retryAfter), nil
+			})}
+			err := postAttachmentAttempts(attachmentPostOptions{
+				client:   client,
+				attempts: 3,
+				backoff:  func(int) time.Duration { return 77 * time.Millisecond },
+				wait:     func(d time.Duration) { waits = append(waits, d) },
+				now:      func() time.Time { return time.Unix(0, 0) },
+			}, "https://discord.invalid/hook", "discord.invalid", []byte("body"), "text/plain")
+			if tc.statuses[len(tc.statuses)-1] == http.StatusNoContent && err != nil {
+				t.Fatalf("attempts: %v", err)
+			}
+			if posts != tc.wantPosts {
+				t.Fatalf("posts=%d, want %d", posts, tc.wantPosts)
+			}
+			if tc.wantWait == 0 {
+				if len(waits) != 0 {
+					t.Fatalf("waits=%v, want none", waits)
+				}
+			} else if len(waits) != 1 || waits[0] != tc.wantWait {
+				t.Fatalf("waits=%v, want [%s]", waits, tc.wantWait)
+			}
+		})
 	}
 }
 
@@ -297,4 +389,93 @@ func TestTranscodeImageAttachmentsBoundsDimensionsAndSize(t *testing.T) {
 	if config.Width > fallbackImageMaxDimension || config.Height > fallbackImageMaxDimension {
 		t.Fatalf("fallback dimensions = %dx%d, max %d", config.Width, config.Height, fallbackImageMaxDimension)
 	}
+}
+
+func TestTranscodeRejectsOversizedDimensionsBeforeDecode(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "huge-header.png")
+	if err := os.WriteFile(source, pngHeaderOnly(fallbackSourceMaxDimension+1, 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, format, err := image.DecodeConfig(f)
+	_ = f.Close()
+	if err != nil || format != "png" || config.Width != fallbackSourceMaxDimension+1 {
+		t.Fatalf("fixture DecodeConfig = %dx%d %q %v", config.Width, config.Height, format, err)
+	}
+	_, _, err = transcodeOneImage(source, t.TempDir(), 0)
+	if err == nil || !strings.Contains(err.Error(), "decode safety limit") {
+		t.Fatalf("oversized source error = %v", err)
+	}
+}
+
+func TestTranscodeCompositesAlphaOntoWhite(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "alpha.png")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 100, 50))
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 100; x++ {
+			if x < 50 {
+				img.SetNRGBA(x, y, color.NRGBA{R: 255, A: 0})
+			} else {
+				img.SetNRGBA(x, y, color.NRGBA{B: 255, A: 128})
+			}
+		}
+	}
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	converted, ok, err := transcodeOneImage(source, dir, 0)
+	if err != nil || !ok {
+		t.Fatalf("transcode = (%q, %v, %v)", converted, ok, err)
+	}
+	out, err := os.Open(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, _, err := image.Decode(out)
+	_ = out.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lr, lg, lb, _ := decoded.At(20, 25).RGBA()
+	if lr < 60000 || lg < 60000 || lb < 60000 {
+		t.Fatalf("fully transparent pixel became dark: rgb16=(%d,%d,%d)", lr, lg, lb)
+	}
+	rr, rg, rb, _ := decoded.At(80, 25).RGBA()
+	if rr < 25000 || rr > 40000 || rg < 25000 || rg > 40000 || rb < 60000 {
+		t.Fatalf("semi-transparent blue was not composited on white: rgb16=(%d,%d,%d)", rr, rg, rb)
+	}
+}
+
+func pngHeaderOnly(width, height int) []byte {
+	var out bytes.Buffer
+	out.Write([]byte{137, 80, 78, 71, 13, 10, 26, 10})
+	writeChunk := func(kind string, data []byte) {
+		_ = binary.Write(&out, binary.BigEndian, uint32(len(data)))
+		out.WriteString(kind)
+		out.Write(data)
+		crc := crc32.NewIEEE()
+		_, _ = crc.Write([]byte(kind))
+		_, _ = crc.Write(data)
+		_ = binary.Write(&out, binary.BigEndian, crc.Sum32())
+	}
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], uint32(width))
+	binary.BigEndian.PutUint32(ihdr[4:8], uint32(height))
+	ihdr[8], ihdr[9] = 8, 6 // 8-bit RGBA
+	writeChunk("IHDR", ihdr)
+	writeChunk("IEND", nil)
+	return out.Bytes()
 }
