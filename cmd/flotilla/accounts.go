@@ -1,13 +1,16 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/accounts"
@@ -29,8 +32,6 @@ func cmdAccounts(args []string) error {
 	}
 }
 
-const accountsAuthProbeTimeout = 10 * time.Second
-
 type accountRefreshReport struct {
 	SubscriptionID string `json:"subscription_id"`
 	Credential     string `json:"credential_status"`
@@ -40,29 +41,24 @@ type accountRefreshReport struct {
 	Warning        string `json:"warning,omitempty"`
 }
 
-type claudeAuthStatus struct {
-	LoggedIn *bool `json:"loggedIn"`
-}
-
-var runClaudeAuthStatus = func(ctx context.Context, configDir string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "claude", "auth", "status", "--json")
-	cmd.Env = accountEnv(configDir)
-	return cmd.Output()
-}
-
 var runClaudeAuthLogin = func(configDir string) error {
 	cmd := exec.Command("claude", "auth", "login", "--claudeai")
 	cmd.Env = accountEnv(configDir)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	stdout := newOAuthOutputBroker(os.Stderr)
+	stderr := newOAuthOutputBroker(os.Stderr)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	stdout.Flush()
+	stderr.Flush()
+	return err
 }
 
 func cmdAccountsRefresh(args []string) error {
 	fs := flag.NewFlagSet("accounts refresh", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "confirm starting the provider OAuth login flow")
-	probeOnly := fs.Bool("probe-only", false, "run the read-only credential/auth probe and exit")
+	probeOnly := fs.Bool("probe-only", false, "run the read-only credential-file probe and exit")
 	asJSON := fs.Bool("json", false, "emit the read-only probe as JSON (requires --probe-only)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -83,7 +79,7 @@ func cmdAccountsRefresh(args []string) error {
 		return fmt.Errorf("subscription account %q is not initialized; run `flotilla accounts init %s` first", id, id)
 	}
 
-	report := probeAccountRefresh(id, dir, time.Now())
+	report := probeAccountRefresh(id, time.Now())
 	if err := printAccountRefreshReport(report, *asJSON); err != nil {
 		return err
 	}
@@ -96,35 +92,137 @@ func cmdAccountsRefresh(args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Starting Claude subscription OAuth renewal for %q; this may replace credentials only in %s.\n", id, dir)
 	if err := runClaudeAuthLogin(dir); err != nil {
-		return fmt.Errorf("Claude OAuth renewal failed; provider details were withheld from flotilla output")
+		return fmt.Errorf("Claude OAuth renewal failed; raw provider details were withheld from flotilla output")
 	}
 	fmt.Printf("OAuth renewal completed for %q; run `flotilla accounts refresh --probe-only %s` to verify.\n", id, id)
 	return nil
 }
 
-func probeAccountRefresh(id, dir string, now time.Time) accountRefreshReport {
+func probeAccountRefresh(id string, now time.Time) accountRefreshReport {
 	h, _ := accounts.ProbeHealth(id, now)
 	report := accountRefreshReport{
 		SubscriptionID: id,
 		Credential:     h.Status,
-		Probe:          "unavailable",
+		Probe:          "ok",
 		Warning:        accountCredentialWarning(h.Status),
 	}
 	if !h.ExpiresAt.IsZero() {
 		report.ExpiresAt = h.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), accountsAuthProbeTimeout)
-	defer cancel()
-	raw, _ := runClaudeAuthStatus(ctx, dir)
-	var status claudeAuthStatus
-	if json.Unmarshal(raw, &status) == nil && status.LoggedIn != nil {
-		report.Probe = "ok"
-		report.LoggedIn = status.LoggedIn
-		if !*status.LoggedIn && report.Warning == "" {
-			report.Warning = "provider reports this account is not logged in"
-		}
+	if h.Status == accounts.StatusUnreadable {
+		report.Probe = "unavailable"
 	}
 	return report
+}
+
+// oauthOutputBroker is the credential boundary around the provider CLI. It
+// emits only the browser URL needed to finish OAuth and canonical progress
+// messages; provider text is never passed through verbatim.
+type oauthOutputBroker struct {
+	mu      sync.Mutex
+	dst     io.Writer
+	pending bytes.Buffer
+}
+
+func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
+	return &oauthOutputBroker{dst: dst}
+}
+
+func (b *oauthOutputBroker) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, _ = b.pending.Write(p)
+	for {
+		line, err := b.pending.ReadString('\n')
+		if err != nil {
+			_, _ = b.pending.WriteString(line)
+			// Interactive CLIs commonly render an input prompt without a
+			// trailing newline. Emit its canonical form immediately so stdin
+			// remains usable instead of waiting until the child exits.
+			if prompt := safeOAuthPrompt(b.pending.String()); prompt != "" {
+				fmt.Fprintln(b.dst, prompt)
+				b.pending.Reset()
+			}
+			break
+		}
+		b.emitSafeLine(line)
+	}
+	return len(p), nil
+}
+
+func (b *oauthOutputBroker) Flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pending.Len() != 0 {
+		b.emitSafeLine(b.pending.String())
+		b.pending.Reset()
+	}
+}
+
+func (b *oauthOutputBroker) emitSafeLine(line string) {
+	if authURL := allowedOAuthURL(line); authURL != "" {
+		fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+		return
+	}
+	if prompt := safeOAuthPrompt(line); prompt != "" {
+		fmt.Fprintln(b.dst, prompt)
+	}
+}
+
+func safeOAuthPrompt(line string) string {
+	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	switch {
+	case strings.HasPrefix(lower, "press enter to open"):
+		return "Press Enter to open the OAuth page in your browser."
+	case strings.HasPrefix(lower, "opening") && strings.Contains(lower, "browser"):
+		return "Opening the OAuth page in your browser."
+	case strings.HasPrefix(lower, "waiting for") && strings.Contains(lower, "auth"):
+		return "Waiting for OAuth authentication in your browser."
+	case strings.HasPrefix(lower, "login successful") || strings.HasPrefix(lower, "authentication successful"):
+		return "OAuth authentication succeeded."
+	}
+	return ""
+}
+
+func allowedOAuthURL(line string) string {
+	for _, field := range strings.Fields(stripANSI(line)) {
+		candidate := strings.Trim(field, "<>[](){}\"',.;")
+		if !strings.HasPrefix(candidate, "https://") {
+			continue
+		}
+		u, err := url.Parse(candidate)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || !allowedOAuthHost(u.Hostname()) {
+			continue
+		}
+		return u.String()
+	}
+	return ""
+}
+
+func stripANSI(s string) string {
+	var clean strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) {
+				final := s[i]
+				i++
+				if final >= 0x40 && final <= 0x7e {
+					break
+				}
+			}
+			continue
+		}
+		clean.WriteByte(s[i])
+		i++
+	}
+	return clean.String()
+}
+
+func allowedOAuthHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "claude.ai" || strings.HasSuffix(host, ".claude.ai") ||
+		host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com")
 }
 
 func accountCredentialWarning(status string) string {

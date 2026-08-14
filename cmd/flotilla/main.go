@@ -171,7 +171,7 @@ usage:
   flotilla backlog lint [flags] FILE [FILE...]        inspect backlog structure and inline-history hygiene (exit 0 clean, 1 warnings, 2 failures)
   flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
-  flotilla accounts refresh [--probe-only|--yes] <id> probe or renew isolated Claude OAuth credentials
+  flotilla accounts refresh [--probe-only|--yes] <id> inspect or renew isolated Claude OAuth credentials
   flotilla gmail [--grant <path>] smoke|labels-list|label-get|messages-list|message-get|threads-list|thread-get
                                                       PA-only authorized Gmail read broker (host-private binding; no writes)
   flotilla launch lint [--roster <path>] [--launch <path>]

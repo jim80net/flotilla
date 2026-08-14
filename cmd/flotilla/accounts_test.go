@@ -2,10 +2,11 @@ package main
 
 import (
 	"bytes"
-	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,18 +83,12 @@ func TestCmdAccountsRefreshProbeOnlySanitizesProviderOutput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, accounts.CredentialsFile), []byte(credential), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	originalStatus := runClaudeAuthStatus
-	t.Cleanup(func() { runClaudeAuthStatus = originalStatus })
-	runClaudeAuthStatus = func(context.Context, string) ([]byte, error) {
-		return []byte(`{"loggedIn":false,"authMethod":"STATUS_SECRET","apiProvider":"PROVIDER_SECRET","accessToken":"ACCESS_SECRET"}`), errors.New("provider emitted ERROR_SECRET")
-	}
-
 	out, _ := captureStdoutStderr(t, func() {
 		if err := cmdAccountsRefresh([]string{"--probe-only", "--json", "anthropic-work"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	for _, secret := range []string{"CREDENTIAL_SECRET", "REFRESH_SECRET", "STATUS_SECRET", "PROVIDER_SECRET", "ACCESS_SECRET", "ERROR_SECRET"} {
+	for _, secret := range []string{"CREDENTIAL_SECRET", "REFRESH_SECRET"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("refresh probe leaked %q: %s", secret, out)
 		}
@@ -102,8 +97,36 @@ func TestCmdAccountsRefreshProbeOnlySanitizesProviderOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("probe JSON: %v body=%q", err, out)
 	}
-	if report.Probe != "ok" || report.LoggedIn == nil || *report.LoggedIn || report.Warning == "" {
-		t.Fatalf("report = %+v, want logged-out warning from allowlisted fields", report)
+	if report.Probe != "ok" || report.LoggedIn != nil || report.Warning == "" {
+		t.Fatalf("report = %+v, want read-only file health without guessed login state", report)
+	}
+}
+
+func TestCmdAccountsRefreshProbeOnlyDoesNotInvokeProviderOrMutateConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_ACCOUNTS_ROOT", root)
+	dir, err := accounts.Init("anthropic-work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := `{"claudeAiOauth":{"accessToken":"CREDENTIAL_SECRET","refreshToken":"REFRESH_SECRET","expiresAt":9999999999999}}`
+	if err := os.WriteFile(filepath.Join(dir, accounts.CredentialsFile), []byte(credential), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	helperDir := t.TempDir()
+	helper := "#!/bin/sh\nprintf invoked > \"$CLAUDE_CONFIG_DIR/provider-mutated\"\n"
+	if err := os.WriteFile(filepath.Join(helperDir, "claude"), []byte(helper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", helperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	before := snapshotDirectory(t, dir)
+	if err := cmdAccountsRefresh([]string{"--probe-only", "--json", "anthropic-work"}); err != nil {
+		t.Fatal(err)
+	}
+	after := snapshotDirectory(t, dir)
+	if before != after {
+		t.Fatalf("probe-only mutated credential directory\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -113,11 +136,8 @@ func TestCmdAccountsRefreshRequiresExplicitConsent(t *testing.T) {
 	if _, err := accounts.Init("anthropic-work"); err != nil {
 		t.Fatal(err)
 	}
-	originalStatus, originalLogin := runClaudeAuthStatus, runClaudeAuthLogin
-	t.Cleanup(func() { runClaudeAuthStatus, runClaudeAuthLogin = originalStatus, originalLogin })
-	runClaudeAuthStatus = func(context.Context, string) ([]byte, error) {
-		return []byte(`{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}`), nil
-	}
+	originalLogin := runClaudeAuthLogin
+	t.Cleanup(func() { runClaudeAuthLogin = originalLogin })
 	loginCalls := 0
 	runClaudeAuthLogin = func(string) error { loginCalls++; return nil }
 
@@ -135,21 +155,15 @@ func TestCmdAccountsRefreshRequiresExplicitConsent(t *testing.T) {
 	}
 }
 
-func TestProbeAccountRefreshDoesNotInferLoggedOutFromUnknownJSON(t *testing.T) {
+func TestProbeAccountRefreshDoesNotGuessLoginState(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_ACCOUNTS_ROOT", root)
-	dir, err := accounts.Init("anthropic-work")
-	if err != nil {
+	if _, err := accounts.Init("anthropic-work"); err != nil {
 		t.Fatal(err)
 	}
-	originalStatus := runClaudeAuthStatus
-	t.Cleanup(func() { runClaudeAuthStatus = originalStatus })
-	runClaudeAuthStatus = func(context.Context, string) ([]byte, error) {
-		return []byte(`{"error":"TOKEN_SECRET"}`), errors.New("status failed")
-	}
-	report := probeAccountRefresh("anthropic-work", dir, time.Now())
-	if report.Probe != "unavailable" || report.LoggedIn != nil {
-		t.Fatalf("unknown provider JSON must remain unknown: %+v", report)
+	report := probeAccountRefresh("anthropic-work", time.Now())
+	if report.Probe != "ok" || report.LoggedIn != nil {
+		t.Fatalf("credential-file probe must not guess provider login state: %+v", report)
 	}
 }
 
@@ -160,11 +174,8 @@ func TestCmdAccountsRefreshYesRunsIsolatedClaudeLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalStatus, originalLogin := runClaudeAuthStatus, runClaudeAuthLogin
-	t.Cleanup(func() { runClaudeAuthStatus, runClaudeAuthLogin = originalStatus, originalLogin })
-	runClaudeAuthStatus = func(context.Context, string) ([]byte, error) {
-		return []byte(`{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}`), nil
-	}
+	originalLogin := runClaudeAuthLogin
+	t.Cleanup(func() { runClaudeAuthLogin = originalLogin })
 	loginCalls := 0
 	runClaudeAuthLogin = func(gotDir string) error {
 		loginCalls++
@@ -193,17 +204,95 @@ func TestCmdAccountsRefreshSuppressesProviderErrorDetails(t *testing.T) {
 	if _, err := accounts.Init("anthropic-work"); err != nil {
 		t.Fatal(err)
 	}
-	originalStatus, originalLogin := runClaudeAuthStatus, runClaudeAuthLogin
-	t.Cleanup(func() { runClaudeAuthStatus, runClaudeAuthLogin = originalStatus, originalLogin })
-	runClaudeAuthStatus = func(context.Context, string) ([]byte, error) { return nil, errors.New("STATUS_SECRET") }
+	originalLogin := runClaudeAuthLogin
+	t.Cleanup(func() { runClaudeAuthLogin = originalLogin })
 	runClaudeAuthLogin = func(string) error { return errors.New("TOKEN_SECRET") }
 
 	_, _ = captureStdoutStderr(t, func() {
 		err := cmdAccountsRefresh([]string{"--yes", "anthropic-work"})
-		if err == nil || strings.Contains(err.Error(), "TOKEN_SECRET") || strings.Contains(err.Error(), "STATUS_SECRET") {
+		if err == nil || strings.Contains(err.Error(), "TOKEN_SECRET") {
 			t.Fatalf("unsanitized login error: %v", err)
 		}
 	})
+}
+
+func TestCmdAccountsRefreshBrokersRealProviderSubprocessOutput(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_ACCOUNTS_ROOT", root)
+	if _, err := accounts.Init("anthropic-work"); err != nil {
+		t.Fatal(err)
+	}
+	helperDir := t.TempDir()
+	helper := `#!/bin/sh
+printf '%s\n' 'PROVIDER_LOGIN_SECRET_STDOUT'
+printf '%s\n' 'Open https://claude.ai/oauth/authorize?state=needed in your browser'
+printf '%s\n' 'PROVIDER_LOGIN_SECRET_STDERR' >&2
+printf '%s\n' 'Waiting for authentication...' >&2
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(helperDir, "claude"), []byte(helper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", helperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, errOut := captureStdoutStderr(t, func() {
+		err := cmdAccountsRefresh([]string{"--yes", "anthropic-work"})
+		if err == nil {
+			t.Fatal("expected provider failure")
+		}
+	})
+	combined := out + errOut
+	for _, secret := range []string{"PROVIDER_LOGIN_SECRET_STDOUT", "PROVIDER_LOGIN_SECRET_STDERR"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("raw provider output leaked %q: %s", secret, combined)
+		}
+	}
+	if !strings.Contains(combined, "OAuth URL: https://claude.ai/oauth/authorize?state=needed") ||
+		!strings.Contains(combined, "Waiting for OAuth authentication") {
+		t.Fatalf("broker hid required OAuth flow output: %q", combined)
+	}
+}
+
+func TestOAuthOutputBrokerEmitsNonNewlinePromptImmediately(t *testing.T) {
+	var out bytes.Buffer
+	broker := newOAuthOutputBroker(&out)
+	if _, err := broker.Write([]byte("\x1b[36mPress Enter to open the browser\x1b[0m")); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
+		t.Fatalf("brokered prompt = %q", got)
+	}
+}
+
+func snapshotDirectory(t *testing.T, root string) string {
+	t.Helper()
+	var snapshot strings.Builder
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&snapshot, "%s mode=%s size=%d mtime=%d", rel, info.Mode(), info.Size(), info.ModTime().UnixNano())
+		if !entry.IsDir() {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(&snapshot, " sha256=%x", sha256.Sum256(body))
+		}
+		snapshot.WriteByte('\n')
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot.String()
 }
 
 func TestAccountEnvReplacesInheritedClaudeConfigDir(t *testing.T) {
