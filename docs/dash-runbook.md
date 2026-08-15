@@ -47,6 +47,22 @@ The dash needs **no secrets** and **no Discord** — it only reads local files.
 
 ## Start it
 
+For a populated, public-safe product walk with no live fleet data, run from the
+repository root with the committed example set:
+
+```sh
+go run ./cmd/flotilla dash \
+  --roster flotilla.example.json \
+  --snapshot-file flotilla-detector-state.example.json \
+  --goals-file fleet-goals.example.json \
+  --parades-dir parades.example \
+  --research-dir research.example
+```
+
+The snapshot intentionally includes working, idle, awaiting-input,
+awaiting-approval, and errored desks. The parade and research fixtures include
+long-form content so mobile wrapping and populated detail views are walkable.
+
 ```bash
 # Default: binds 127.0.0.1:8787, resolves the snapshot/ack/backlog paths from the
 # roster directory exactly as `flotilla status` does.

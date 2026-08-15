@@ -1,0 +1,19 @@
+{
+  "desk_states": {
+    "xo": 3,
+    "xo-adj": 2,
+    "alpha-xo": 3,
+    "alpha-adj": 4,
+    "beta-xo": 3,
+    "backend": 2,
+    "frontend": 3,
+    "data": 6,
+    "aider-desk": 3,
+    "oc-desk": 2,
+    "grok-desk": 5,
+    "codex-desk": 2,
+    "pi-desk": 3
+  },
+  "signal_hash": "",
+  "xo_settled": false
+}
