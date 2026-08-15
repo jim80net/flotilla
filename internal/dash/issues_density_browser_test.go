@@ -86,6 +86,20 @@ with sync_playwright() as p:
             page.goto(url, wait_until="domcontentloaded")
             page.locator("#tab-issues").click()
             expect(page.locator(".issue-mobile-window")).to_be_visible()
+            state_filter = page.locator("#filter-state")
+            overflow = page.locator("#tracker-overflow > summary")
+            expect(state_filter).to_have_value("all")
+            expect(overflow).to_have_text("More")
+            controls = page.evaluate("""() => {
+                const select = document.querySelector('#filter-state').getBoundingClientRect();
+                const more = document.querySelector('#tracker-overflow > summary').getBoundingClientRect();
+                const head = document.querySelector('#issues-listpanel > .panel-head').getBoundingClientRect();
+                return {selectWidth: select.width, selectRight: select.right, moreLeft: more.left,
+                        moreRight: more.right, headRight: head.right, label: document.querySelector('#filter-state').selectedOptions[0].text};
+            }""")
+            assert controls["label"] == "moving + shipped", controls
+            assert controls["selectWidth"] >= 150, controls
+            assert controls["selectRight"] <= controls["moreLeft"] and controls["moreRight"] <= controls["headRight"] + 1, controls
             rows = page.locator("#issues-list .issue-row")
             initial_rows = rows.count()
             assert initial_rows <= 10, "initial rows are not bounded: %d" % initial_rows

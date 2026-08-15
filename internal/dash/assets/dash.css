@@ -2426,6 +2426,16 @@ html, body { overflow-x: clip; }
   .issue-scope-note.issue-scope-incomplete {
     align-items: flex-start; white-space: normal; line-height: 1.3;
   }
+
+  /* A phone-width Issues header is two deliberate rows: title, then controls.
+     Giving the native select the remaining row width keeps its selected option
+     readable, while the adjacent disclosure says what it is instead of "…". */
+  #issues-listpanel > .panel-head {
+    height: auto; min-height: 108px; grid-template-columns: minmax(0, 1fr); align-content: center;
+  }
+  .tracker-controls { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .tracker-controls #filter-state { width: 100%; }
+  .tracker-overflow > summary { width: 64px; font: .72rem var(--mono); }
   .issue-scope-note.issue-scope-incomplete span { overflow: visible; text-overflow: clip; }
   .issue-ledger-head { min-height: 34px; padding: 4px 8px; }
   .issue-ledger-kicker { display: none; }
