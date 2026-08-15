@@ -224,9 +224,16 @@
   function placeBelowIssuesHeader(node) {
     if (!node) return;
     node.scrollIntoView({ block: "start" });
-    var head = el("issues-listpanel").querySelector(":scope > .panel-head");
-    var targetTop = (head ? head.getBoundingClientRect().bottom : 0) + 8;
-    window.scrollBy(0, node.getBoundingClientRect().top - targetTop);
+    // Entering/leaving the sticky range can change the header's rendered
+    // bottom while this scroll is in progress. Converge on the live geometry
+    // so return focus remains visible for both one- and two-row phone headers.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      var head = el("issues-listpanel").querySelector(":scope > .panel-head");
+      var targetTop = (head ? head.getBoundingClientRect().bottom : 0) + 8;
+      var delta = node.getBoundingClientRect().top - targetTop;
+      if (Math.abs(delta) < 1) break;
+      window.scrollBy(0, delta);
+    }
   }
 
   function renderIssueList(doc) {
