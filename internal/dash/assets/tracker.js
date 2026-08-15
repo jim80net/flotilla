@@ -60,16 +60,47 @@
     return "/api/work-ledger" + q;
   }
 
+  function getWorkLedger() {
+    return fetch(workLedgerURL(), { cache: "no-store" }).then(function (res) {
+      if (res.ok) return res.json();
+      return res.json().catch(function () { return {}; }).then(function (doc) {
+        var err = new Error(doc.error || ("work ledger request failed (HTTP " + res.status + ")"));
+        err.code = doc.code || "tracker-error";
+        err.status = res.status;
+        throw err;
+      });
+    });
+  }
+
+  function issueTerminal(state, title, message, retry) {
+    return '<div class="issue-terminal issue-terminal-' + state + '" data-issue-terminal="' + state +
+      '" role="' + (state === "load-error" ? "alert" : "status") + '"><strong>' + escapeHtml(title) +
+      '</strong><span>' + escapeHtml(message) + "</span>" +
+      (retry ? '<button type="button" class="btn" data-issues-retry>Retry ledger</button>' : "") + "</div>";
+  }
+
+  function wireIssueTerminal() {
+    var retry = el("issues-list").querySelector("[data-issues-retry]");
+    if (retry) retry.addEventListener("click", loadIssues);
+  }
+
   function loadIssues() {
     showOnly("issues-listpanel");
     var epoch = ++viewEpoch;
     var list = el("issues-list");
     list.innerHTML = '<div class="empty">Loading fleet work ledger…</div>';
-    getJSON(workLedgerURL()).then(function (doc) {
+    getWorkLedger().then(function (doc) {
       if (epoch === viewEpoch) renderIssueList(doc);
     }).catch(function (err) {
       if (epoch === viewEpoch) {
-        list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
+        if (err.code === "no-repo") {
+          list.innerHTML = issueTerminal("no-repo", "Work ledger not configured",
+            "Start the dash with --repo owner/name or map a repository in the roster.", false);
+        } else {
+          list.innerHTML = issueTerminal("load-error", "Work ledger unavailable",
+            err.message || "The repository service could not be read.", true);
+          wireIssueTerminal();
+        }
         if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
       }
     });
@@ -265,7 +296,8 @@
         (unmapped.length ? "; " + unmapped.length + " roster domains need repository mapping" : "")) +
       ". Every indexed open issue is shown as moving.</span></div>";
     if (!flotillas.length) {
-      list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
+      list.innerHTML = scopeNote + issueTerminal("empty", "No fleet work matches this view",
+        "The ledger loaded successfully, but this filter has no moving or recently shipped work.", false);
       if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
       return;
     }

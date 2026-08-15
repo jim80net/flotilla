@@ -138,6 +138,21 @@ func TestIssuesList_NoRepoConfigured(t *testing.T) {
 	}
 }
 
+func TestWorkLedgerNoRepoCarriesStableTerminalCode(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	rec := doGet(t, srv, "/api/work-ledger")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code %d, want 503", rec.Code)
+	}
+	var body errorDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "no-repo" || !strings.Contains(body.Error, "no GitHub repo") {
+		t.Fatalf("no-repo error body = %+v", body)
+	}
+}
+
 func TestIssueGet_HappyPath(t *testing.T) {
 	f := &fakeTracker{issue: tracker.Issue{Number: 106, Title: "t", Body: "the body"}}
 	srv := trackerServer(t, f)

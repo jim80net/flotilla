@@ -1222,6 +1222,16 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* ── issues ─────────────────────────────────────────────────────────────── */
 .tracker-controls { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; }
 .tracker-overflow { display: none; }
+.issue-terminal {
+  min-height: 10rem; display: grid; place-content: center; justify-items: center; gap: .55rem;
+  padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--abyss-2); text-align: center;
+}
+.issue-terminal strong { color: var(--ink); font: 600 1rem var(--display); }
+.issue-terminal span { max-width: 34rem; color: var(--ink-3); font-size: .75rem; line-height: 1.5; }
+.issue-terminal-load-error { border-color: color-mix(in srgb, var(--err) 42%, var(--line)); }
+.issue-terminal-load-error strong { color: var(--err); }
+.issue-terminal .btn { margin-top: .25rem; min-height: 44px; }
 .filter-idea {
   font-size: .78rem;
   color: var(--amber);

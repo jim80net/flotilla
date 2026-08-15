@@ -360,6 +360,7 @@ type okDoc struct {
 // failure, never an empty list masquerading as "no issues").
 type errorDoc struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
 }
 
 // repoName returns the pinned repo for display (server-pinned, never client-set).
@@ -432,7 +433,30 @@ func writeTrackerError(w http.ResponseWriter, err error) {
 	if status >= 500 {
 		fmt.Fprintf(os.Stderr, "flotilla dash: tracker error (%d): %v\n", status, err)
 	}
-	writeError(w, status, err.Error())
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(errorDoc{Error: err.Error(), Code: trackerErrorCode(err)})
+}
+
+func trackerErrorCode(err error) string {
+	switch {
+	case errors.Is(err, tracker.ErrNoRepo):
+		return "no-repo"
+	case errors.Is(err, tracker.ErrGHMissing):
+		return "gh-missing"
+	case errors.Is(err, tracker.ErrUnauthenticated):
+		return "unauthenticated"
+	case errors.Is(err, tracker.ErrRateLimited):
+		return "rate-limited"
+	case errors.Is(err, tracker.ErrTimeout):
+		return "timeout"
+	case errors.Is(err, tracker.ErrNetwork):
+		return "network"
+	case errors.Is(err, tracker.ErrRepoNotFound):
+		return "repo-not-found"
+	default:
+		return "tracker-error"
+	}
 }
 
 // writeError writes a JSON error body with the given status.
