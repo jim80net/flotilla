@@ -53,6 +53,50 @@ function operatorVisualState(state, posture) { return posture === "blocked" ? "b
 	return vm
 }
 
+func TestFleetMapEmptyTopologyClearsScrollAffordance(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("assets", "dash.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(raw), "  function renderConversationRail(")
+	end := strings.Index(string(raw[start:]), "\n  // ledgerParticipant")
+	if start < 0 || end < 0 {
+		t.Fatal("could not extract conversation rail renderer")
+	}
+	source := `
+var removed = false;
+var rail = {
+  innerHTML: "tall roster",
+  onscroll: function () {},
+  parentElement: {classList: {
+    remove: function (name) { if (name === "rail-can-scroll-down") removed = true; },
+    toggle: function () {}
+  }}
+};
+function buildRailGroups() { return []; }
+function ensureSelection() {}
+function agentMap() { return {}; }
+function escapeHtml(value) { return String(value); }
+function el() { return rail; }
+var selectedDesk = "";
+` + string(raw[start:start+end]) + `
+renderConversationRail({}, {channels: [], note: "topology unavailable"}, {state: "fresh"});
+`
+	vm := goja.New()
+	if _, err := vm.RunString(source); err != nil {
+		t.Fatal(err)
+	}
+	if !vm.Get("removed").ToBoolean() {
+		t.Error("tall-roster fade survived empty topology")
+	}
+	if !goja.IsNull(vm.Get("rail").ToObject(vm).Get("onscroll")) {
+		t.Error("empty topology retained obsolete rail scroll handler")
+	}
+	if got := vm.Get("rail").ToObject(vm).Get("innerHTML").String(); !strings.Contains(got, "topology unavailable") {
+		t.Fatalf("empty topology diagnostic = %q", got)
+	}
+}
+
 // TestFleetMapCanonicalHierarchy745 executes the authored rail projection against a
 // channel-dump-shaped fixture: routing edges repeat every seat, while org_nodes supplies
 // the one canonical hierarchy. Generic identities stand in for the private deployment.

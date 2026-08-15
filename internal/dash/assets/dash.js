@@ -635,6 +635,8 @@
 
     if (!groups.length) {
       rail.innerHTML = '<div class="topo-note">' + escapeHtml(topology.note || "no channel bindings") + "</div>";
+      rail.onscroll = null;
+      rail.parentElement.classList.remove("rail-can-scroll-down");
       return;
     }
 
