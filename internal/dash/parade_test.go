@@ -170,6 +170,10 @@ func TestParadeDeckRenderMarkers(t *testing.T) {
 		t.Error("parade.js must load presenter-<slug>.png assets — parade v3 (b)")
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
+	html := doGet(t, srv, "/parade").Body.String()
+	if strings.Count(html, `detail-back`) != 2 {
+		t.Error("parade deck and archive must both expose the deliberate Dashboard detail-page control")
+	}
 	if !strings.Contains(css, ".pd-quote") {
 		t.Error("dash.css must style the decision-brief callout (.pd-quote) — parade v3 (c)")
 	}

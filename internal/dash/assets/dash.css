@@ -2879,6 +2879,8 @@ html, body { overflow-x: clip; }
   .pd-notes-toggle::before { content: "Notes"; font: 600 .64rem var(--display); }
   .pd-close { padding-inline: .5rem; }
   .pd-deck-bar .theme-toggle { width: 52px; padding: 0; justify-content: center; }
+  .pd-deck-back { width: 52px; padding: 0; font-size: 0; }
+  .pd-deck-back::before { content: "← Dash"; font: 600 .64rem var(--display); }
   .pd-stage {
     display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) 48px;
     gap: .35rem; padding: .2rem .3rem .35rem;
@@ -2916,8 +2918,14 @@ html, body { overflow-x: clip; }
 .parade-wrap { max-width: 820px; margin: 0 auto; padding: 1rem 1rem 3rem; }
 .parade-intro { font-size: .82rem; margin: .3rem 0 1.1rem; line-height: 1.5; }
 .parade-topnav { display: flex; align-items: center; gap: .25rem; }
-.pd-topback { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .8rem; border-radius: var(--r-sm); color: var(--ink-2); font-size: .82rem; text-decoration: none; }
-.pd-topback:hover { color: var(--ink); }
+.detail-back {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 .8rem;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2);
+  color: var(--cyan); font: 600 .76rem var(--display); letter-spacing: .025em; text-decoration: none;
+}
+.detail-back:hover { border-color: var(--cyan); color: var(--ink); }
+.detail-back:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.pd-deck-back { margin-left: auto; }
 
 /* ── Research library (/research) — private-LAN reading room (#822) ───────── */
 .research-page { min-height: 100dvh; }

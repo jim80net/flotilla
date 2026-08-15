@@ -427,6 +427,12 @@ with sync_playwright() as p:
                 page.goto(url + "/parade", wait_until="domcontentloaded")
                 expect(page.locator("html")).to_have_attribute("data-theme", theme)
                 expect(page.locator("#pd-counter")).to_have_text("1 / 2")
+                dashboard = page.locator(".pd-deck-back")
+                expect(dashboard).to_be_visible()
+                expect(dashboard).to_have_attribute("href", "/")
+                dashboard_box = dashboard.bounding_box()
+                assert dashboard_box and dashboard_box["width"] >= 44 and dashboard_box["height"] >= 44, dashboard_box
+                assert dashboard_box["x"] >= 0 and dashboard_box["x"] + dashboard_box["width"] <= width, dashboard_box
                 expect(page.locator("#pd-prev")).to_be_disabled()
                 expect(page.locator("#pd-next")).to_be_enabled()
                 expect(page.locator(".pd-nav-label")).to_have_count(2)

@@ -523,6 +523,9 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
+	if !strings.Contains(page, `aria-label="Detail page navigation"`) || !strings.Contains(page, `class="pd-topback detail-back"`) || !strings.Contains(page, `← Dashboard`) {
+		t.Error("R&D must expose the shared deliberate Dashboard detail-page control")
+	}
 	for _, marker := range []string{"Depth · decisions", "R&amp;D", "Waiting on you", "What we learned", "not status notes", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="learn"`, `id="research-decision-more"`, `id="research-learn-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
