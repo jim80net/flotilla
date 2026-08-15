@@ -2214,6 +2214,7 @@ html, body { overflow-x: clip; }
   .live-swarm { padding: .35rem .65rem; }
   .live-swarm-rate { display: none; }
   .live-swarm-items { flex: 1 1 auto; }
+  .live-swarm-empty { white-space: normal; line-height: 1.35; }
   .live-swarm-card { grid-template-columns: auto minmax(8ch, 1fr); min-height: 44px; max-width: min(70vw, 360px); }
   .live-swarm-when { display: none; }
   html.work-context-open, body.work-context-open {

@@ -119,6 +119,21 @@ def verify(page, width, height):
     doc = page.evaluate("() => ({scrollWidth: document.documentElement.scrollWidth, innerWidth})")
     if doc["scrollWidth"] > doc["innerWidth"]:
         raise AssertionError("fleet status causes horizontal overflow at %dpx: %r" % (width, doc))
+    if width <= 390:
+        empty = page.locator(".live-swarm-empty")
+        expect(empty).to_have_text("No seats working — send work or pull the next queue item.")
+        empty_metric = empty.evaluate("""el => {
+          const box = el.getBoundingClientRect();
+          const parent = el.parentElement.getBoundingClientRect();
+          return {left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+                  parentLeft: parent.left, parentRight: parent.right,
+                  scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
+                  whiteSpace: getComputedStyle(el).whiteSpace};
+        }""")
+        if empty_metric["whiteSpace"] != "normal" or empty_metric["scrollHeight"] > empty_metric["clientHeight"] + 1:
+            raise AssertionError("WORKING NOW empty message is clipped at %dpx: %r" % (width, empty_metric))
+        if empty_metric["left"] < empty_metric["parentLeft"] - .5 or empty_metric["right"] > empty_metric["parentRight"] + .5:
+            raise AssertionError("WORKING NOW empty message escapes its ticker at %dpx: %r" % (width, empty_metric))
     if evidence_dir:
         page.screenshot(path=os.path.join(evidence_dir, "fleet-status-%d.png" % width), full_page=True)
     print("FLEET_STATUS_%d=" % width + json.dumps({"header": metrics, "footer": footer_metrics}, sort_keys=True))
@@ -131,6 +146,7 @@ with sync_playwright() as p:
         page.add_init_script("window.EventSource = undefined")
         page.route("**/api/status", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(status)))
         verify(page, 390, 844)
+        verify(page, 360, 800)
         verify(page, 1440, 900)
     finally:
         browser.close()
