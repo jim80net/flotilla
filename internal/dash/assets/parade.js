@@ -720,7 +720,12 @@
   function renderList() {
     var box = el("pd-list");
     if (!box) return;
-    if (!PARADES.length) { box.innerHTML = '<div class="empty">No parades yet — the first one will appear here.</div>'; return; }
+    if (!PARADES.length) {
+      box.innerHTML = '<section class="pd-list-empty" role="status" aria-labelledby="pd-list-empty-title">' +
+        '<p class="pd-empty-eyebrow">Parade archive</p><h1 id="pd-list-empty-title">No parades yet</h1>' +
+        '<p>The first fleet progress review will appear here when it is published.</p></section>';
+      return;
+    }
     box.innerHTML = PARADES.map(function (p, i) {
       var slides = parseSlides(p.slides || "");
       var first = slides.length ? slides[0].title : "(empty)";

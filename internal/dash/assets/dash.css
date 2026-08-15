@@ -2864,6 +2864,14 @@ html, body { overflow-x: clip; }
 
 /* LIST: every parade newest-first — the progression. */
 .pd-list { display: flex; flex-direction: column; gap: .6rem; }
+.pd-list:has(.pd-list-empty) { min-height: min(62vh, 34rem); justify-content: center; }
+.pd-list-empty {
+  width: min(34rem, 100%); margin: 0 auto; padding: clamp(1.25rem, 5vw, 2.25rem); text-align: center;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--abyss-2); box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.08));
+}
+.pd-list-empty h1 { margin: .2rem 0 .65rem; font: 700 clamp(1.8rem, 5vw, 2.6rem)/1.08 var(--display); color: var(--ink); }
+.pd-list-empty p { margin: 0 auto; max-width: 28rem; color: var(--ink-2); line-height: 1.55; }
+.pd-list-empty .pd-empty-eyebrow { margin-bottom: .35rem; color: var(--cyan); font: 600 .72rem var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .pd-listcard { display: flex; flex-direction: column; gap: .2rem; width: 100%; text-align: left; min-height: 56px; padding: .7rem .9rem; background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink-2); font: inherit; cursor: pointer; }
 .pd-listcard:hover { border-color: var(--cyan-dim, var(--cyan)); }
 .pd-listcard:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
