@@ -200,6 +200,21 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 	}
 }
 
+func TestDashboardBindAddressIsDiagnosticNotOperatorChrome(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	html := doGet(t, srv, "/").Body.String()
+	headerEnd := strings.Index(html, "</header>")
+	if headerEnd < 0 {
+		t.Fatal("dashboard header missing")
+	}
+	if strings.Contains(html[:headerEnd], "meta-bind") || strings.Contains(html[:headerEnd], ">bound<") {
+		t.Error("bind address must not occupy primary operator chrome")
+	}
+	if !strings.Contains(html, `class="diagnostic-bind"`) || !strings.Contains(html, "Listening on") {
+		t.Error("bind address must remain available inside Startup diagnostics")
+	}
+}
+
 func TestDashboardHarnessQualityScoreboard805(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	html := doGet(t, srv, "/").Body.String()

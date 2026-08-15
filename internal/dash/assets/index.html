@@ -58,8 +58,6 @@
     </nav>
     <div class="bar-meta">
       <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme"><span data-theme-label>Theme</span></button>
-      <span class="meta-label">bound</span>
-      <code class="meta-bind">{{.Bind}}</code>
       <span id="conn" class="conn" role="status" aria-live="polite" aria-label="Live update link idle">
         <span class="conn-ring" aria-hidden="true"></span>
         <span class="conn-core" aria-hidden="true"></span>
@@ -341,6 +339,7 @@
     <span class="muted">Conversations &amp; Goals are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
     <details class="perf-diagnostics">
       <summary>Startup diagnostics</summary>
+      <span class="diagnostic-bind"><span class="muted">Listening on</span> <code>{{.Bind}}</code></span>
       <span id="perf-status" class="muted">No local startup sample yet</span>
       <span class="perf-actions">
         <button id="perf-copy" type="button" class="btn">Copy JSON</button>

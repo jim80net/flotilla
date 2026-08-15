@@ -211,13 +211,6 @@ code {
 .theme-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .theme-toggle[aria-pressed="true"] { border-color: var(--cyan-dim); color: var(--cyan); }
 .theme-toggle [data-theme-label] { white-space: nowrap; }
-.meta-label {
-  font-family: var(--display);
-  font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--ink-3);
-}
-.meta-bind { font-size: .78rem; }
-
 /* live-link indicator — CSS ring, not a unicode bullet */
 .conn {
   position: relative; width: 14px; height: 14px; flex-shrink: 0;
@@ -1077,6 +1070,8 @@ code {
 .perf-diagnostics { margin-left: auto; text-align: left; }
 .perf-diagnostics summary { cursor: pointer; color: var(--ink-2); }
 .perf-diagnostics[open] { display: grid; gap: 8px; min-width: min(360px, 100%); }
+.diagnostic-bind { color: var(--ink-2); font-size: .72rem; }
+.diagnostic-bind code { color: var(--cyan); }
 .perf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .perf-actions .btn { min-height: 32px; padding: 5px 10px; }
 
@@ -2343,7 +2338,6 @@ html, body { overflow-x: clip; }
     content: attr(data-theme-compact); font: 600 .66rem var(--display); letter-spacing: .04em;
   }
   .bar-meta .theme-toggle { margin-block: -11px; }
-  .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
   /* Standalone readers carry both a labeled theme control and Dashboard link.
      Give the full product brand its own row so neither 390 nor 360 clips it. */
   .parade-body .bar > .brand,
