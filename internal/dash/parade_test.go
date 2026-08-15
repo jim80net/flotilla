@@ -270,10 +270,14 @@ func TestParadeEmptyArchiveUsesCenteredCard(t *testing.T) {
 	js := doGet(t, srv, "/static/parade.js").Body.String()
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	for _, marker := range []string{`class="pd-list-empty"`, `id="pd-list-empty-title"`, `role="status"`, `No parades yet`} {
-		if !strings.Contains(js, marker) { t.Errorf("parade empty archive missing card marker %q", marker) }
+		if !strings.Contains(js, marker) {
+			t.Errorf("parade empty archive missing card marker %q", marker)
+		}
 	}
 	for _, marker := range []string{`.pd-list:has(.pd-list-empty)`, `.pd-list-empty {`, `justify-content: center`} {
-		if !strings.Contains(css, marker) { t.Errorf("parade empty archive missing centered-card style %q", marker) }
+		if !strings.Contains(css, marker) {
+			t.Errorf("parade empty archive missing centered-card style %q", marker)
+		}
 	}
 }
 
