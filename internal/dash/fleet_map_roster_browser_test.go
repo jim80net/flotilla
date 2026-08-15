@@ -22,6 +22,7 @@ func TestFleetMapStructuredRosterRendered942(t *testing.T) {
 
 	script := `
 import json
+import copy
 import sys
 from playwright.sync_api import sync_playwright, expect
 
@@ -49,6 +50,12 @@ topology = {
   ],
   "channels":[{"channel_id":"C_WRONG","xo_agent":"orphan-xo","members":["alpha-build"]}]
 }
+status_tall = copy.deepcopy(status)
+topology_tall = copy.deepcopy(topology)
+for i in range(20):
+  name = "trailing-desk-%02d" % i
+  status_tall["agents"].append({"name":name,"state":"idle"})
+  topology_tall["seats"].append({"seat_id":"%016d" % (6000000000000000+i),"name":name,"parent":"0102030405060708"})
 
 with sync_playwright() as p:
   browser = p.chromium.launch()
@@ -58,8 +65,8 @@ with sync_playwright() as p:
       page.add_init_script("window.EventSource = undefined")
       def route_api(route):
         path = route.request.url.split("?",1)[0]
-        if path.endswith("/api/status"): data = status
-        elif path.endswith("/api/topology"): data = topology
+        if path.endswith("/api/status"): data = status_tall if width == 1440 else status
+        elif path.endswith("/api/topology"): data = topology_tall if width == 1440 else topology
         elif path.endswith("/api/goals/meta"): data = {"found":True,"default_view":False}
         elif path.endswith("/api/goals"): data = {"found":True,"version":1,"default_view":False,"goals":[],"counts":{}}
         elif "/api/history" in path: data = {"ledger":[],"backlog":{"found":False,"unblocked":[]}}
@@ -68,7 +75,9 @@ with sync_playwright() as p:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(data))
       page.route("**/api/**", route_api)
       page.goto(url + "/#conv", wait_until="domcontentloaded")
-      expect(page.locator("#conv-rail .conv-item")).to_have_count(6)
+      expect(page.locator("#conv-rail .conv-item")).to_have_count(26 if width == 1440 else 6)
+      if width == 390:
+        page.locator(".conv-nav .conv-mobile-disclosure").click()
       headings = page.locator("#conv-rail .chan-id").all_text_contents()
       assert headings == ["Fleet Command", "Alpha", "Unassigned"], headings
       expect(page.locator(".conv-group-unassigned")).to_be_visible()
@@ -81,6 +90,16 @@ with sync_playwright() as p:
       for group in page.locator("#conv-rail .conv-group").all():
         box = group.bounding_box()
         assert box and box["x"] >= -0.5 and box["x"] + box["width"] <= width + 0.5, box
+      if width == 1440:
+        rail = page.locator("#conv-rail")
+        scroll = rail.evaluate("el => ({clientHeight:el.clientHeight,scrollHeight:el.scrollHeight,scrollTop:el.scrollTop})")
+        assert scroll["scrollHeight"] > scroll["clientHeight"], scroll
+        assert "rail-can-scroll-down" in page.locator(".conv-nav").get_attribute("class")
+        rail.evaluate("el => { el.scrollTop = el.scrollHeight }")
+        page.wait_for_function("() => !document.querySelector('.conv-nav').classList.contains('rail-can-scroll-down')")
+        last = page.locator('.conv-item[data-desk="trailing-desk-19"]')
+        visible = last.evaluate("el => { const r=el.getBoundingClientRect(), p=document.querySelector('#conv-rail').getBoundingClientRect(); return {top:r.top,bottom:r.bottom,parentTop:p.top,parentBottom:p.bottom} }")
+        assert visible["top"] >= visible["parentTop"] - .5 and visible["bottom"] <= visible["parentBottom"] + .5, visible
       page.close()
   finally:
     browser.close()

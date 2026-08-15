@@ -700,6 +700,12 @@
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
     }
+    function syncRailScrollAffordance() {
+      var canScrollDown = rail.scrollTop + rail.clientHeight < rail.scrollHeight - 1;
+      rail.parentElement.classList.toggle("rail-can-scroll-down", canScrollDown);
+    }
+    rail.onscroll = syncRailScrollAffordance;
+    window.requestAnimationFrame(syncRailScrollAffordance);
   }
 
   // ledgerParticipant normalizes a ledger from/to token to a bare desk name: a relay

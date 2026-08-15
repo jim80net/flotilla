@@ -302,6 +302,7 @@ code {
 }
 /* each panel is a flex column so a pinned head can sit over a filling body */
 .conv-nav, .conv-thread-col, .conv-context { display: flex; flex-direction: column; min-width: 0; }
+.conv-nav { position: relative; }
 .conv-nav .panel-head, .conv-thread-head, .conv-context > .panel-head { flex: 0 0 auto; }
 
 /* wide viewports → the fixed app-shell; the page never scrolls */
@@ -318,9 +319,17 @@ code {
     overflow: hidden;                     /* the shell frame itself never scrolls */
   }
   .conv-nav, .conv-thread-col, .conv-context { min-height: 0; }
-  .conv-rail-list    { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* nav scroll (picker) */
+  .conv-rail-list    { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; } /* nav scroll (picker) */
   .conv-thread       { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* THE one reading scroll */
   .conv-context-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* actions column */
+}
+@media (min-width: 1101px) {
+  .conv-nav.rail-can-scroll-down::after {
+    content: ""; position: absolute; z-index: 2; pointer-events: none;
+    right: 1px; bottom: 1px; left: 1px; height: 2.5rem;
+    border-radius: 0 0 var(--r) var(--r);
+    background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--surface) 94%, transparent));
+  }
 }
 /* F#383 residual (desktop not mobile-capped): at 1440+ give the work-queue column and
    the queue-item modal more measure. Breakpoint-gated only — phone/tablet keep the
