@@ -88,7 +88,7 @@
   <!-- Each SPA view is the tab panel its tab controls (cubic #446 P3): role="tabpanel"
        + aria-labelledby close the tab→panel relationship the aria-controls half implies. -->
   <main id="view-conversations" class="view conv-wrap" role="tabpanel" aria-labelledby="tab-conversations">
-    <aside class="panel conv-nav" aria-label="Desk conversations">
+    <aside class="panel conv-nav mobile-expanded" aria-label="Desk conversations">
       <div class="panel-head conv-rail-head">
         <div>
           <h2>Fleet map</h2>
@@ -96,7 +96,7 @@
         </div>
         <span id="rail-meta" class="xo-strip muted"></span>
         <button type="button" class="conv-mobile-disclosure" data-conv-disclosure="nav"
-          aria-expanded="false" aria-controls="conv-rail">Choose desk</button>
+          aria-expanded="true" aria-controls="conv-rail">Hide desks</button>
       </div>
       <div id="conv-rail" class="conv-rail-list" role="list"></div>
     </aside>
