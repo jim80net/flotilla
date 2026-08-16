@@ -1,0 +1,8 @@
+background tasks still running (2)
+backend-task  ● running
+frontend-task  ● running
+
+Exit session?
+1. Save and exit
+2. Cancel
+Enter to confirm

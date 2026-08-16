@@ -203,6 +203,10 @@ type DetectorConfig struct {
 	// OutboxSweepOnTick sweeps per-sender durable outboxes for pending inter-agent sends
 	// (#475). Invoked once per detector tick (off d.mu). Default nil ⇒ inert.
 	OutboxSweepOnTick func()
+	// InterstitialOnTick runs fleet-state popup gravity once per detector tick,
+	// off d.mu and optionally async through MirrorDispatch. It classifies and
+	// clears safe product chrome independently of any send. Default nil ⇒ inert.
+	InterstitialOnTick func()
 	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
 	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
 	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
@@ -1066,6 +1070,14 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 			run()
 		}
 	}
+	if d.cfg.InterstitialOnTick != nil {
+		run := func() { d.interstitialTickOne() }
+		if d.cfg.MirrorDispatch != nil {
+			d.cfg.MirrorDispatch(run)
+		} else {
+			run()
+		}
+	}
 }
 
 // DeskStateLabels returns the last committed per-desk state labels (lowercased agent
@@ -1089,6 +1101,15 @@ func (d *Detector) outboxSweepTickOne() {
 		}
 	}()
 	d.cfg.OutboxSweepOnTick()
+}
+
+func (d *Detector) interstitialTickOne() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: interstitial manager panicked (recovered; tick unaffected): %v", r)
+		}
+	}()
+	d.cfg.InterstitialOnTick()
 }
 
 // scheduleTickOne invokes the wall-clock scheduler with the same recover() backstop

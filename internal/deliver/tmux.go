@@ -389,6 +389,10 @@ func sendEnterArgs(target string) []string {
 	return []string{"send-keys", "-t", target, "--", "Enter"}
 }
 
+func sendEscapeArgs(target string) []string {
+	return []string{"send-keys", "-t", target, "--", "Escape"}
+}
+
 func sendCtrlCArgs(target string) []string {
 	return []string{"send-keys", "-t", target, "--", "C-c"}
 }
@@ -441,6 +445,26 @@ func SendEnter(target string) error {
 	defer cancel()
 	if err := exec.CommandContext(ctx, "tmux", sendEnterArgs(target)...).Run(); err != nil {
 		return fmt.Errorf("tmux send-keys enter: %w", err)
+	}
+	return nil
+}
+
+// SendEscape sends one non-text Escape key under the per-pane lock. The
+// interstitial manager gates every call on either an idle surface with a verified
+// empty composer or a structurally proven exit-confirmation modal, and re-probes
+// after it. This primitive never submits, interrupts, or types a body; callers
+// needing a multi-key sequence must re-check between calls.
+func SendEscape(target string) error {
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", sendEscapeArgs(target)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys Escape: %w", err)
 	}
 	return nil
 }
