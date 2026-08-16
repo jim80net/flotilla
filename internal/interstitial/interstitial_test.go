@@ -52,6 +52,41 @@ func TestQuotedControlsDoNotAuthorizeKeypress(t *testing.T) {
 	}
 }
 
+func TestExitProseDoesNotConvertRealInputGateToClearable(t *testing.T) {
+	t.Parallel()
+	observation := Observation{
+		Frame: "The guide says type exit when the session is done.\n\n" +
+			"Do you want to deploy?\n1. Allow\n2. Deny\nEnter to confirm\n",
+		State:    surface.StateAwaitingInput,
+		Composer: surface.ComposerUndetermined,
+	}
+	assertNoEscape(t, observation)
+}
+
+func TestCopiedControlRowInScrollbackDoesNotAuthorizeEscape(t *testing.T) {
+	t.Parallel()
+	observation := Observation{
+		Frame: "The prior screen rendered this exact row:\n[Opt out]  [Opt in]\n\n" +
+			"Turn complete.\n│ ❯ │\n",
+		State:    surface.StateIdle,
+		Composer: surface.ComposerCleared,
+	}
+	assertNoEscape(t, observation)
+}
+
+func assertNoEscape(t *testing.T, observation Observation) {
+	t.Helper()
+	if got := Classify(observation); got.Class != NotInterstitial {
+		t.Fatalf("Classify() = %+v, want NotInterstitial", got)
+	}
+	keys := 0
+	manager := NewManager(Options{SendEscape: func(string) error { keys++; return nil }})
+	result := manager.Reconcile("backend", "%1", func() (Observation, error) { return observation, nil })
+	if keys != 0 || result.Cleared || result.Gap != "" || result.Err != nil {
+		t.Fatalf("Reconcile()=%+v keys=%d, want untouched real input/idle", result, keys)
+	}
+}
+
 func TestManagerReprobesAfterEscapeAndStopsAtConsistentIdle(t *testing.T) {
 	t.Parallel()
 	frames := []Observation{
@@ -141,6 +176,27 @@ func TestUnknownInterstitialNamesGapWithoutKeypress(t *testing.T) {
 	})
 	if result.Gap != UnknownGapName || keys != 0 || gaps != 1 {
 		t.Fatalf("result=%+v keys=%d gaps=%d", result, keys, gaps)
+	}
+}
+
+func TestManagerNamesGapAfterBoundedEscapeExhaustion(t *testing.T) {
+	t.Parallel()
+	keys := 0
+	var gap string
+	manager := NewManager(Options{
+		SendEscape: func(string) error { keys++; return nil },
+		Wait:       func(time.Duration) {},
+		NamedGap:   func(_, name string) { gap = name },
+		MaxEscapes: 2,
+	})
+	observation := Observation{
+		Frame:    fixture(t, "product_banner.txt"),
+		State:    surface.StateIdle,
+		Composer: surface.ComposerCleared,
+	}
+	result := manager.Reconcile("backend", "%1", func() (Observation, error) { return observation, nil })
+	if keys != 2 || result.Attempts != 2 || result.Gap != clearFailedGap || gap != clearFailedGap {
+		t.Fatalf("result=%+v keys=%d callbackGap=%q, want two Escapes then %q", result, keys, gap, clearFailedGap)
 	}
 }
 

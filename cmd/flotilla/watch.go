@@ -863,7 +863,7 @@ func cmdWatch(args []string) error {
 					}
 					return deskStateLabels()
 				}),
-			InterstitialOnTick:  watchInterstitialOnTick(cfg, desks),
+			InterstitialOnTick:  watchInterstitialOnTick(currentRoster, desks),
 			MirrorDispatch:      func(run func()) { go run() }, // mirror / interstitial I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settleConsume,

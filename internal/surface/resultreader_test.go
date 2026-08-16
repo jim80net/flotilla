@@ -13,6 +13,8 @@ func TestSurfaceFromPaneCommand(t *testing.T) {
 	}{
 		{"claude", "claude-code", true},
 		{"grok", "grok", true},
+		{"aider", "aider", true},
+		{"pi", "pi", true},
 		{"bash", "", false},
 		{"", "", false},
 		{" Claude ", "claude-code", true},

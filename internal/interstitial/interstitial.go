@@ -45,6 +45,8 @@ type Assessment struct {
 
 var (
 	bracketControlRE = regexp.MustCompile(`(?:\[[^\]\n]{1,48}\]|【[^】\n]{1,48}】)`)
+	numberedActionRE = regexp.MustCompile(`^\s*(?:[›>]\s*)?[0-9]+[.)]\s+\S`)
+	exitWordingRE    = regexp.MustCompile(`(?i)\b(?:exit(?:ing)?|quit(?:ting)?|close session)\b`)
 	protectedGateRE  = regexp.MustCompile(`(?i)\b(?:sign[ -]?in|log[ -]?in|authentication|required payment|billing|upgrade plan|purchase|subscribe)\b`)
 	dismissActionRE  = regexp.MustCompile(`(?i)(?:\bopt[ -]?out\b|\b(?:no|not|never|later|skip|dismiss|decline|disable|close|private|without|cancel)\b)`)
 )
@@ -70,7 +72,7 @@ func Classify(observation Observation) Assessment {
 
 	controls := modalControls(tail)
 	if observation.State == surface.StateAwaitingInput {
-		if surface.InteractiveConfirmPrompt(tail) && exitConfirmation(tail) &&
+		if structuralExitConfirmation(tail) &&
 			(observation.Composer == surface.ComposerCleared || observation.Composer == surface.ComposerUndetermined) {
 			return Assessment{Class: Clearable, Reason: "exit confirmation chrome"}
 		}
@@ -94,27 +96,60 @@ func Classify(observation Observation) Assessment {
 	return Assessment{Class: UnknownInterstitial, Reason: "unrecognized interactive chrome"}
 }
 
-// modalControls recognizes rendered multi-action geometry, not bracketed words
-// anywhere in scrollback. The controls must share one row and the remainder of
-// that row may contain only terminal chrome/separators. This prevents quoted
-// prose or unrelated checklist items from authorizing a real keypress.
+// modalControls recognizes one current chrome region ending at the vouched
+// composer, not bracketed words anywhere in scrollback. The multi-action row
+// must be directly above the composer, or separated only by one structurally
+// shaped suggestion chip. Blank/prose/output rows break the region.
 func modalControls(frame string) []string {
-	for _, line := range strings.Split(frame, "\n") {
-		matches := bracketControlRE.FindAllString(line, -1)
-		if len(matches) < 2 {
-			continue
-		}
-		remainder := bracketControlRE.ReplaceAllString(line, "")
-		if strings.Trim(remainder, " \t│─┃━┌┐└┘·•>") != "" {
-			continue
-		}
-		controls := make([]string, 0, len(matches))
-		for _, match := range matches {
-			controls = append(controls, strings.TrimSpace(strings.Trim(match, "[]【】")))
-		}
+	lines := strings.Split(strings.TrimRight(frame, "\n"), "\n")
+	if len(lines) == 0 || !composerRow(lines[len(lines)-1]) {
+		return nil
+	}
+	row := len(lines) - 2
+	if row < 0 || strings.TrimSpace(lines[row]) == "" {
+		return nil
+	}
+	if controls := controlsOnRow(lines[row]); len(controls) >= 2 {
 		return controls
 	}
-	return nil
+	if !suggestionRow(lines[row]) || row-1 < 0 || strings.TrimSpace(lines[row-1]) == "" {
+		return nil
+	}
+	return controlsOnRow(lines[row-1])
+}
+
+func controlsOnRow(line string) []string {
+	matches := bracketControlRE.FindAllString(line, -1)
+	if len(matches) < 2 {
+		return nil
+	}
+	remainder := bracketControlRE.ReplaceAllString(line, "")
+	if strings.Trim(remainder, " \t│─┃━┌┐└┘·•>") != "" {
+		return nil
+	}
+	controls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		controls = append(controls, strings.TrimSpace(strings.Trim(match, "[]【】")))
+	}
+	return controls
+}
+
+func composerRow(line string) bool {
+	line = strings.TrimSpace(strings.Trim(line, "│"))
+	return strings.HasPrefix(line, "❯")
+}
+
+func suggestionRow(line string) bool {
+	trimmed := strings.TrimSpace(strings.Trim(line, "│"))
+	if strings.HasPrefix(trimmed, "> ") || strings.HasPrefix(trimmed, "› ") {
+		return true
+	}
+	matches := bracketControlRE.FindAllString(line, -1)
+	if len(matches) != 1 {
+		return false
+	}
+	remainder := bracketControlRE.ReplaceAllString(line, "")
+	return strings.Trim(remainder, " \t│─┃━┌┐└┘·•>") == ""
 }
 
 func hasDismissAction(controls []string) bool {
@@ -126,9 +161,42 @@ func hasDismissAction(controls []string) bool {
 	return false
 }
 
-func exitConfirmation(frame string) bool {
-	lower := strings.ToLower(frame)
-	return strings.Contains(lower, "exit") || strings.Contains(lower, "quit") || strings.Contains(lower, "close session")
+func structuralExitConfirmation(frame string) bool {
+	lines := strings.Split(strings.TrimRight(frame, "\n"), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	footer := strings.ToLower(strings.TrimSpace(lines[len(lines)-1]))
+	if footer != "enter to confirm" && footer != "press enter to confirm" {
+		return false
+	}
+	i := len(lines) - 2
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i-- // at most one visual spacer belongs to the same menu
+	}
+	var actions []string
+	for i >= 0 && numberedActionRE.MatchString(lines[i]) {
+		actions = append(actions, lines[i])
+		i--
+	}
+	if len(actions) < 2 {
+		return false
+	}
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i-- // at most one spacer between the question and actions
+	}
+	if i < 0 || strings.TrimSpace(lines[i]) == "" {
+		return false
+	}
+	if exitWordingRE.MatchString(lines[i]) {
+		return true
+	}
+	for _, action := range actions {
+		if exitWordingRE.MatchString(action) {
+			return true
+		}
+	}
+	return false
 }
 
 // Options are injected so clearing and waits are deterministic under test.

@@ -10,11 +10,37 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
+type interstitialWatchOps struct {
+	resolvePane func(string) (string, error)
+	paneCommand func(string) (string, error)
+	getDriver   func(string) (surface.Driver, bool)
+	acquireTxn  func(string) (release func(), err error)
+	capturePane func(string) (string, error)
+}
+
+func productionInterstitialWatchOps() interstitialWatchOps {
+	return interstitialWatchOps{
+		resolvePane: deliver.ResolvePane,
+		paneCommand: deliver.PaneCommand,
+		getDriver:   surface.Get,
+		acquireTxn: func(pane string) (func(), error) {
+			txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return txn.Release, nil
+		},
+		capturePane: deliver.CapturePane,
+	}
+}
+
 // watchInterstitialOnTick supplies fleet-state gravity independently of send:
-// every watch tick considers every configured desk. One batch may be in flight;
-// overlapping ticks skip rather than interleave pane transactions.
-func watchInterstitialOnTick(cfg *roster.Config, desks []string) func() {
+// every watch tick considers every configured desk against the current roster
+// snapshot and live pane command. One batch may be in flight; overlapping ticks
+// skip rather than interleave pane transactions.
+func watchInterstitialOnTick(currentRoster func() *roster.Config, desks []string) func() {
 	var running atomic.Bool
+	ops := productionInterstitialWatchOps()
 	manager := interstitial.NewManager(interstitial.Options{
 		SendEscape: deliver.SendEscape,
 		NamedGap: func(agent, gap string) {
@@ -26,38 +52,53 @@ func watchInterstitialOnTick(cfg *roster.Config, desks []string) func() {
 			return
 		}
 		defer running.Store(false)
+		cfg := currentRoster()
+		if cfg == nil {
+			return
+		}
 		for _, agent := range desks {
-			reconcileDeskInterstitial(cfg, manager, agent)
+			reconcileDeskInterstitialWithOps(manager, agent, agentSurface(cfg, agent), agentTitle(cfg, agent), ops)
 		}
 	}
 }
 
-func reconcileDeskInterstitial(cfg *roster.Config, manager *interstitial.Manager, agent string) {
-	driver, ok := surface.Get(agentSurface(cfg, agent))
+func reconcileDeskInterstitialWithOps(manager *interstitial.Manager, agent, rosterSurface, title string, ops interstitialWatchOps) {
+	// Resolve the concrete pane first. A roster/overlay surface is intent; the
+	// live foreground command is authority for a path that may emit a key.
+	pane, err := ops.resolvePane(title)
+	if err != nil {
+		return
+	}
+	command, err := ops.paneCommand(pane)
+	if err != nil {
+		return // unreadable live identity: fail closed, never roster-fallback
+	}
+	liveSurface, ok := surface.SurfaceFromPaneCommand(command)
+	if !ok {
+		return // shell or unknown future harness: leave the pane untouched
+	}
+	driver, ok := ops.getDriver(liveSurface)
 	if !ok {
 		return
 	}
 	probe, ok := driver.(surface.ComposerStateProbe)
 	if !ok {
-		// No verified composer means no permission to type. The classifier cannot
-		// establish consistent idle on this surface, so leave it untouched.
-		return
+		return // no verified composer capability means no permission to type
 	}
-	pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-	if err != nil {
-		return
+	if wanted := effectiveSurface(rosterSurface); wanted != liveSurface {
+		log.Printf("flotilla watch: interstitial manager using live surface %q for %q (roster/overlay says %q)", liveSurface, agent, wanted)
 	}
-	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+	release, err := ops.acquireTxn(pane)
 	if err != nil {
 		log.Printf("flotilla watch: interstitial transaction unavailable for %q: %v", agent, err)
 		return
 	}
-	defer txn.Release()
+	defer release()
 
 	result := manager.Reconcile(agent, pane, func() (interstitial.Observation, error) {
 		state := surface.AssessForFleet(driver, pane)
 		composer := probe.ComposerState(pane)
-		frame, err := deliver.CapturePane(pane)
+		frame, err := ops.capturePane(pane)
 		if err != nil {
 			return interstitial.Observation{}, err
 		}
