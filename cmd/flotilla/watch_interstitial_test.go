@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/interstitial"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -117,6 +118,37 @@ func TestReconcileInterstitialLeavesUnknownLiveHarnessUntouched(t *testing.T) {
 				t.Fatalf("Escape keys=%d, want untouched", keys)
 			}
 		})
+	}
+}
+
+func TestWatchInterstitialTickUsesOneCurrentRosterGeneration(t *testing.T) {
+	current := &roster.Config{Agents: []roster.Agent{{Name: "backend", Surface: "grok"}}}
+	var visited []string
+	ops := interstitialWatchOps{
+		resolvePane: func(title string) (string, error) {
+			visited = append(visited, title)
+			return "%1", nil
+		},
+		paneCommand: func(string) (string, error) { return "unknown-harness", nil },
+	}
+	manager := interstitial.NewManager(interstitial.Options{SendEscape: func(string) error {
+		t.Fatal("generation enumeration must not authorize a key")
+		return nil
+	}})
+	tick := watchInterstitialOnTickWithOps(func() *roster.Config { return current }, manager, ops)
+
+	tick()
+	if len(visited) != 1 || visited[0] != "backend" {
+		t.Fatalf("generation 1 visited %v, want [backend]", visited)
+	}
+
+	// One adopted generation removes backend and adds frontend. The next tick
+	// must enumerate only this same pinned snapshot, not the startup desk slice.
+	current = &roster.Config{Agents: []roster.Agent{{Name: "frontend", Surface: "claude-code"}}}
+	visited = nil
+	tick()
+	if len(visited) != 1 || visited[0] != "frontend" {
+		t.Fatalf("generation 2 visited %v, want [frontend] (removed backend must be absent)", visited)
 	}
 }
 

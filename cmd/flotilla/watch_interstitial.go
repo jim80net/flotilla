@@ -38,15 +38,18 @@ func productionInterstitialWatchOps() interstitialWatchOps {
 // every watch tick considers every configured desk against the current roster
 // snapshot and live pane command. One batch may be in flight; overlapping ticks
 // skip rather than interleave pane transactions.
-func watchInterstitialOnTick(currentRoster func() *roster.Config, desks []string) func() {
-	var running atomic.Bool
-	ops := productionInterstitialWatchOps()
+func watchInterstitialOnTick(currentRoster func() *roster.Config) func() {
 	manager := interstitial.NewManager(interstitial.Options{
 		SendEscape: deliver.SendEscape,
 		NamedGap: func(agent, gap string) {
 			log.Printf("flotilla watch: PRODUCT_GAP %s agent=%q (automatic clearing withheld; officer capture route remains available)", gap, agent)
 		},
 	})
+	return watchInterstitialOnTickWithOps(currentRoster, manager, productionInterstitialWatchOps())
+}
+
+func watchInterstitialOnTickWithOps(currentRoster func() *roster.Config, manager *interstitial.Manager, ops interstitialWatchOps) func() {
+	var running atomic.Bool
 	return func() {
 		if !running.CompareAndSwap(false, true) {
 			return
@@ -56,8 +59,11 @@ func watchInterstitialOnTick(currentRoster func() *roster.Config, desks []string
 		if cfg == nil {
 			return
 		}
-		for _, agent := range desks {
-			reconcileDeskInterstitialWithOps(manager, agent, agentSurface(cfg, agent), agentTitle(cfg, agent), ops)
+		for _, seat := range cfg.Agents {
+			if seat.Name == "" {
+				continue
+			}
+			reconcileDeskInterstitialWithOps(manager, seat.Name, agentSurface(cfg, seat.Name), agentTitle(cfg, seat.Name), ops)
 		}
 	}
 }

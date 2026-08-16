@@ -140,10 +140,9 @@ func composerRow(line string) bool {
 }
 
 func suggestionRow(line string) bool {
-	trimmed := strings.TrimSpace(strings.Trim(line, "│"))
-	if strings.HasPrefix(trimmed, "> ") || strings.HasPrefix(trimmed, "› ") {
-		return true
-	}
+	// A plain "> " / "› " prefix is indistinguishable from quoted prose and
+	// therefore cannot bridge a real keypress authority. The observed chip has
+	// a single bracketed-control geometry; unknown future shapes fail closed.
 	matches := bracketControlRE.FindAllString(line, -1)
 	if len(matches) != 1 {
 		return false

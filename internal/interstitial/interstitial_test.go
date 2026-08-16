@@ -74,6 +74,18 @@ func TestCopiedControlRowInScrollbackDoesNotAuthorizeEscape(t *testing.T) {
 	assertNoEscape(t, observation)
 }
 
+func TestQuotedBlockProseDoesNotBridgeControlsToComposer(t *testing.T) {
+	t.Parallel()
+	observation := Observation{
+		Frame: "[Opt out]  [Opt in]\n" +
+			"> The report quotes a suggestion rather than rendering a chip\n" +
+			"│ ❯ │\n",
+		State:    surface.StateIdle,
+		Composer: surface.ComposerCleared,
+	}
+	assertNoEscape(t, observation)
+}
+
 func assertNoEscape(t *testing.T, observation Observation) {
 	t.Helper()
 	if got := Classify(observation); got.Class != NotInterstitial {
