@@ -85,7 +85,7 @@ type walkCompleteMarker struct {
 }
 
 func latestWalkComplete(rosterDir, agent string) ([]byte, error) {
-	matches, err := filepath.Glob(filepath.Join(rosterDir, "state", agent+"-walk-*", "walk-complete.json"))
+	matches, err := filepath.Glob(filepath.Join(rosterDir, agent+"-walk-*", "walk-complete.json"))
 	if err != nil {
 		return nil, fmt.Errorf("walk-complete: discover markers: %w", err)
 	}

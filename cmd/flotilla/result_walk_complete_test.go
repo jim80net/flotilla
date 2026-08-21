@@ -8,12 +8,14 @@ import (
 )
 
 func TestLatestWalkCompleteReturnsDurablePackageInsteadOfPaneResult(t *testing.T) {
-	dir := t.TempDir()
-	walk := filepath.Join(dir, "state", "xo-walk-20260821")
+	root := t.TempDir()
+	rosterPath := filepath.Join(root, "state", "flotilla.json")
+	rosterDir := filepath.Dir(rosterPath)
+	walk := filepath.Join(rosterDir, "xo-walk-20260821")
 	if err := os.MkdirAll(filepath.Join(walk, "assets"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	scorecard := filepath.Join(dir, "state", "xo-sevenc-scorecard-20260821.md")
+	scorecard := filepath.Join(rosterDir, "xo-sevenc-scorecard-20260821.md")
 	capture := filepath.Join(walk, "assets", "walk-run.json")
 	for _, path := range []string{scorecard, capture} {
 		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
@@ -26,7 +28,7 @@ func TestLatestWalkCompleteReturnsDurablePackageInsteadOfPaneResult(t *testing.T
 		t.Fatal(err)
 	}
 
-	got, err := latestWalkComplete(dir, "xo")
+	got, err := latestWalkComplete(filepath.Dir(rosterPath), "xo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,9 +38,11 @@ func TestLatestWalkCompleteReturnsDurablePackageInsteadOfPaneResult(t *testing.T
 }
 
 func TestLatestWalkCompleteFailsClosedOnIncompleteNewestMarker(t *testing.T) {
-	dir := t.TempDir()
-	oldWalk := filepath.Join(dir, "state", "xo-walk-20260820")
-	newWalk := filepath.Join(dir, "state", "xo-walk-20260821")
+	root := t.TempDir()
+	rosterPath := filepath.Join(root, "state", "flotilla.json")
+	rosterDir := filepath.Dir(rosterPath)
+	oldWalk := filepath.Join(rosterDir, "xo-walk-20260820")
+	newWalk := filepath.Join(rosterDir, "xo-walk-20260821")
 	for _, walk := range []string{oldWalk, newWalk} {
 		if err := os.MkdirAll(walk, 0o700); err != nil {
 			t.Fatal(err)
@@ -51,7 +55,7 @@ func TestLatestWalkCompleteFailsClosedOnIncompleteNewestMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := latestWalkComplete(dir, "xo")
+	_, err := latestWalkComplete(filepath.Dir(rosterPath), "xo")
 	if err == nil || !strings.Contains(err.Error(), "incomplete marker") {
 		t.Fatalf("error = %v, want incomplete newest marker", err)
 	}
