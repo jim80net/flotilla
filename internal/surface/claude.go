@@ -73,6 +73,8 @@ func (c claudeCode) Submit(pane, text string) error { return c.send(pane, text) 
 //     glitch on an EXISTING non-shell pane — non-material into AND out of, so it
 //     never diffs as Working→Idle ("finished a turn") and fires a spurious wake;
 //     #55, converging with aider/opencode/grok)
+//   - provider/model-limit dead-end banner         → Errored (external pane
+//     evidence; a stopped session is not idle/available)
 //   - else the working-spinner is present          → Working, else Idle
 //
 // (Refines the surface-driver extraction's prior "read-error ⇒ Shell" fast-path,
@@ -98,6 +100,12 @@ func (c claudeCode) Assess(pane string) State {
 	if err != nil {
 		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as unknown, not a false finish)", pane, err)
 		return StateUnknown
+	}
+	// Some stopped sessions retain an idle-looking composer below their banner.
+	// The pane is observed by the detector; this does not rely on a wedged desk
+	// producing a self-report.
+	if unavailable, _ := deliver.SessionUncooperative(captured); unavailable {
+		return StateErrored
 	}
 	// Working requires cursor-vouched composer provenance. On cursor failure or
 	// copy/view mode, do not trust prompt glyphs in text: they may be historical.

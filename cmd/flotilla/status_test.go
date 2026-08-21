@@ -348,6 +348,32 @@ func TestStatusCloseOutDispositionTriState(t *testing.T) {
 	}
 }
 
+func TestStatusUnavailableLiveEvidenceOverridesIdleAvailabilityWithoutCloseOut(t *testing.T) {
+	// No CLOSE-OUT documents or roster dispositions: external detector evidence
+	// alone must keep a missing process and a model-limited process unavailable.
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "backend"}, {Name: "frontend"}, {Name: "xo"}}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"backend":  surface.StateShell,   // no live session/process
+		"frontend": surface.StateErrored, // provider/model-limit banner
+		"xo":       surface.StateIdle,
+	}}
+	loop := map[string]loopposture.Evidence{
+		"backend":  {Pane: surface.StateShell, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
+		"frontend": {Pane: surface.StateErrored, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
+		"xo":       {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1},
+	}
+	doc := buildStatusJSONWithDispositions(cfg, "xo", "", snap, loop, statusSeatDispositions(t.TempDir(), cfg))
+	if got := doc.Agents[0]; got.State != "crashed" || got.LoopPosture == "available" {
+		t.Fatalf("no-session backend = %+v, want crashed and not available", got)
+	}
+	if got := doc.Agents[1]; got.State != "errored" || got.LoopPosture == "available" {
+		t.Fatalf("model-limited frontend = %+v, want errored and not available", got)
+	}
+	if got := doc.Agents[2]; got.State != "idle" || got.LoopPosture != "available" {
+		t.Fatalf("healthy xo control = %+v, want idle/available", got)
+	}
+}
+
 func TestWriteStatus_NoSnapshot(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "infra"}, {Name: "research"}}}
 	dir := t.TempDir()
