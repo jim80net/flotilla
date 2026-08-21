@@ -13,6 +13,7 @@ import (
 type cancelOpts struct {
 	id         string
 	rosterPath string
+	standDown  bool
 }
 
 // parseCancelArgs accepts the outbox id on either side of --roster, matching the
@@ -24,6 +25,7 @@ func parseCancelArgs(args []string) (cancelOpts, error) {
 	}
 	fs := flag.NewFlagSet("cancel", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
+	standDown := fs.Bool("stand-down", false, "confirm this is an intentional work stand-down, never queue cleanup")
 	if err := fs.Parse(args); err != nil {
 		return cancelOpts{}, err
 	}
@@ -31,10 +33,10 @@ func parseCancelArgs(args []string) (cancelOpts, error) {
 	if id == "" && len(rest) > 0 {
 		id, rest = rest[0], rest[1:]
 	}
-	if id == "" || len(rest) != 0 {
-		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <outbox-id> [--roster <path>]")
+	if id == "" || len(rest) != 0 || !*standDown {
+		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <outbox-id> --stand-down [--roster <path>] (cancel is never queue cleanup)")
 	}
-	return cancelOpts{id: id, rosterPath: *rosterPath}, nil
+	return cancelOpts{id: id, rosterPath: *rosterPath, standDown: *standDown}, nil
 }
 
 func cmdCancel(args []string) error {

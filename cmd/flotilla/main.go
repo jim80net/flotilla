@@ -128,7 +128,7 @@ usage:
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla send --from <officer> --officer-capture-sha <sha256> --officer-confirm-clean-composer <agent> <message>
                                                       audited route around an uncertain classifier; coordinator-only
-  flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
+  flotilla cancel <outbox-id> --stand-down [--roster <path>]  intentionally stand down one queued send (never cleanup)
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)

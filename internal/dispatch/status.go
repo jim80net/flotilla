@@ -114,8 +114,22 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		st.Detail = "queued in sender outbox; waiting for recipient idle"
 		return st
 	}
-	st.Detail = "nonce not found in consumed, inbound, or outbox"
+	st.Detail = "nonce not found in consumed, inbound, or outbox; " + retainedWindowDetail(NewRegistry(rosterDir))
 	return st
+}
+
+func retainedWindowDetail(registry *Registry) string {
+	start, end, entries, capacity := registry.RetainedWindow()
+	if entries == 0 {
+		return fmt.Sprintf("consumed-retained-window=empty entries=0 capacity=%d", capacity)
+	}
+	format := func(value time.Time) string {
+		if value.IsZero() {
+			return "unknown"
+		}
+		return value.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("consumed-retained-window=[%s,%s] entries=%d capacity=%d", format(start), format(end), entries, capacity)
 }
 
 func lookupQuarantinedNonce(rosterDir, nonce string, now time.Time) *Status {

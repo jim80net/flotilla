@@ -11,14 +11,14 @@ import (
 
 func TestParseCancelArgsAcceptsFlagsOnEitherSide(t *testing.T) {
 	for _, args := range [][]string{
-		{"queued-id", "--roster", "/tmp/fleet.json"},
-		{"--roster", "/tmp/fleet.json", "queued-id"},
+		{"queued-id", "--stand-down", "--roster", "/tmp/fleet.json"},
+		{"--roster", "/tmp/fleet.json", "--stand-down", "queued-id"},
 	} {
 		opts, err := parseCancelArgs(args)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if opts.id != "queued-id" || opts.rosterPath != "/tmp/fleet.json" {
+		if opts.id != "queued-id" || opts.rosterPath != "/tmp/fleet.json" || !opts.standDown {
 			t.Fatalf("parse %v = %+v", args, opts)
 		}
 	}
@@ -29,6 +29,13 @@ func TestParseCancelArgsRejectsMissingAndExtraPositionals(t *testing.T) {
 		if _, err := parseCancelArgs(args); err == nil || !strings.Contains(err.Error(), "usage:") {
 			t.Fatalf("parse %v error = %v, want usage", args, err)
 		}
+	}
+}
+
+func TestParseCancelArgsRefusesCancelAsCleanupWithoutExplicitStandDown(t *testing.T) {
+	_, err := parseCancelArgs([]string{"queued-id", "--roster", "/tmp/fleet.json"})
+	if err == nil || !strings.Contains(err.Error(), "never queue cleanup") {
+		t.Fatalf("error = %v, want explicit stand-down refusal", err)
 	}
 }
 
@@ -43,7 +50,7 @@ func TestCmdCancelAdvancesOutboxPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cmdCancel([]string{id, "--roster", rosterPath}); err != nil {
+	if err := cmdCancel([]string{id, "--stand-down", "--roster", rosterPath}); err != nil {
 		t.Fatal(err)
 	}
 	if got := outbox.ListAll(dir); len(got) != 0 {
@@ -59,7 +66,7 @@ func TestCmdCancelFailsClosedWhenRosterDoesNotResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(dir, "missing.json")
-	if err := cmdCancel([]string{id, "--roster", missing}); err == nil || !strings.Contains(err.Error(), "cancel: stat roster") {
+	if err := cmdCancel([]string{id, "--stand-down", "--roster", missing}); err == nil || !strings.Contains(err.Error(), "cancel: stat roster") {
 		t.Fatalf("missing roster error = %v", err)
 	}
 	if got := outbox.ListAll(dir); len(got) != 1 || got[0].ID != id {

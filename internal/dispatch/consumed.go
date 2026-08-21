@@ -242,6 +242,28 @@ func (r *Registry) Load() []ConsumedEntry {
 	return out
 }
 
+// RetainedWindow reports the observable bounds of the capped consumed registry.
+// A negative lookup is otherwise ambiguous: the nonce may never have existed, may
+// never have been registered, or may have aged out of the retained ring.
+func (r *Registry) RetainedWindow() (start, end time.Time, entries, capacity int) {
+	loaded := r.Load()
+	capacity = maxConsumedEntries
+	entries = len(loaded)
+	for _, entry := range loaded {
+		at := entry.ConsumedAt.UTC()
+		if at.IsZero() {
+			continue
+		}
+		if start.IsZero() || at.Before(start) {
+			start = at
+		}
+		if end.IsZero() || at.After(end) {
+			end = at
+		}
+	}
+	return start, end, entries, capacity
+}
+
 // Consume records under rosterDir. Convenience for callers without a Registry handle.
 func Consume(rosterDir string, e ConsumedEntry) (inserted bool, err error) {
 	return NewRegistry(rosterDir).Consume(e)
