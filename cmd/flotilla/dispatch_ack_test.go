@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/dispatch"
@@ -104,6 +105,21 @@ func TestDispatchAckConvergesOnCoordinatorSendTimeConsume707(t *testing.T) {
 	t.Setenv("FLOTILLA_SELF", "xo")
 	if err := cmdDispatchAck([]string{"--roster", rosterPath, nonce}); err != nil {
 		t.Fatalf("coordinator dispatch-ack = %v, want already-durable success", err)
+	}
+}
+
+func TestDispatchAckAlreadyDurableWordingDistinguishesConsumeAtSendFromDeskAck978(t *testing.T) {
+	nonce := "flotilla-dispatch-cafebabe"
+	consumedAtSend := dispatchAckAlreadyDurableMessage(dispatch.ConsumedEntry{Reason: dispatch.ReasonCoordinatorRecipient}, nonce, "xo")
+	deskRan := dispatchAckAlreadyDurableMessage(dispatch.ConsumedEntry{Reason: dispatch.ReasonDurableAck}, nonce, "backend")
+	if !strings.Contains(consumedAtSend, "consumed-at-send") || !strings.Contains(consumedAtSend, "desk-ran-ack=false") {
+		t.Fatalf("coordinator wording = %q, want consumed-at-send and no desk-run claim", consumedAtSend)
+	}
+	if !strings.Contains(deskRan, "reason=durable-ack") || !strings.Contains(deskRan, "desk-ran-ack=true") {
+		t.Fatalf("desk wording = %q, want explicit durable desk ack", deskRan)
+	}
+	if consumedAtSend == deskRan {
+		t.Fatal("consume-at-send and desk-run ack wording must be distinct")
 	}
 }
 
