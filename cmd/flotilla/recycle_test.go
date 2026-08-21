@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,7 +131,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			return r.process, nil
 		},
 		handoffTime: func(string, string) (time.Time, error) { return r.handoffAt, nil },
-		newerSuccess: func() (recycleStatusRecord, bool, error) {
+		newerSuccess: func(recycleProcessIdentity) (recycleStatusRecord, bool, error) {
 			if r.newerSuccessAtCall > 0 && r.processCalls >= r.newerSuccessAtCall {
 				return recycleStatusRecord{Agent: "backend", At: "2026-08-21T10:00:30Z", Token: "NEW", OK: true}, true, nil
 			}
@@ -248,7 +249,7 @@ func TestRunRecycleRefusesNewerSuccessfulGenerationBeforeClose(t *testing.T) {
 	r := happyRec()
 	ops := fakeRecycleOps(r)
 	calls := 0
-	ops.newerSuccess = func() (recycleStatusRecord, bool, error) {
+	ops.newerSuccess = func(recycleProcessIdentity) (recycleStatusRecord, bool, error) {
 		calls++
 		if calls < 3 {
 			return recycleStatusRecord{}, false, nil
@@ -264,32 +265,98 @@ func TestRunRecycleRefusesNewerSuccessfulGenerationBeforeClose(t *testing.T) {
 	}
 }
 
-func TestReadRecycleStatusAndSuccessfulAfter(t *testing.T) {
+func TestSuccessfulRecycleForGenerationRefusesLaterStaleRetry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := lastRecyclePath(home, "backend")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := `{"agent":"backend","at":"2026-08-21T10:01:00Z","handoff_path":"/tmp/handoff","token":"GEN","ok":true,"result":"done"}`
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	raw := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z","result":"done"}`
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := readRecycleStatus(path)
-	if err != nil || !rec.OK || rec.Token != "GEN" {
+	if err != nil || !rec.OK || rec.Token != "GEN-1" {
 		t.Fatalf("rec=%+v err=%v", rec, err)
 	}
-	rec, newer, err := successfulRecycleAfter("backend", time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC))
-	if err != nil || !newer || rec.Token != "GEN" {
-		t.Fatalf("successfulRecycleAfter rec=%+v newer=%t err=%v", rec, newer, err)
+	rec, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
+	if err != nil || !stale || rec.Token != "GEN-1" {
+		t.Fatalf("successfulRecycleForGeneration rec=%+v stale=%t err=%v", rec, stale, err)
+	}
+	newProcess := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", newProcess, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
+		t.Fatalf("new process generation stale=%t err=%v, want legitimate future recycle", stale, err)
 	}
 	stdout, _ := captureStdoutStderr(t, func() {
 		if err := cmdRecycle([]string{"status", "--json", "backend"}); err != nil {
 			t.Errorf("cmdRecycle status: %v", err)
 		}
 	})
-	if !strings.Contains(stdout, `"token": "GEN"`) || !strings.Contains(stdout, `"ok": true`) {
+	if !strings.Contains(stdout, `"token": "GEN-1"`) || !strings.Contains(stdout, `"process_pid": 421`) || !strings.Contains(stdout, `"ok": true`) {
 		t.Fatalf("status JSON = %s", stdout)
+	}
+}
+
+func TestRunRecycleRefusesSuccessfulSameProcessGenerationBeforeDeskTouch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	status := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z"}`
+	if err := os.WriteFile(path, []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := happyRec()
+	r.process = recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	ops := fakeRecycleOps(r)
+	ops.newerSuccess = func(process recycleProcessIdentity) (recycleStatusRecord, bool, error) {
+		return successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if !errors.Is(err, errRecycleStaleRetry) || !strings.Contains(err.Error(), "process generation") {
+		t.Fatalf("err = %v, want named stale process-generation refusal", err)
+	}
+	if r.closed || r.respawned || len(r.delivered) != 0 || r.stamped {
+		t.Fatalf("stale retry touched desk: %+v", r)
+	}
+}
+
+func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 123, time.UTC)}
+	writeLastRecycle("backend", testPlan(), "done", nil, worktreeCloseNote{}, process)
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
+	}
+}
+
+func TestStaleRetryRefusalDoesNotClobberSuccessfulRecycleStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z"}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLastRecycle("backend", testPlan(), "", fmt.Errorf("wrapped: %w", errRecycleStaleRetry), worktreeCloseNote{}, recycleProcessIdentity{})
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("stale refusal clobbered successful status:\n got %s\nwant %s", got, original)
 	}
 }
 
