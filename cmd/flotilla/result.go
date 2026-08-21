@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -17,15 +20,15 @@ import (
 func cmdResult(args []string) error {
 	fs := flag.NewFlagSet("result", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
+	walkComplete := fs.Bool("walk-complete", false, "read the newest durable walk-complete marker instead of pane prose")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: flotilla result [--roster <path>] <agent>")
+		return fmt.Errorf("usage: flotilla result [--roster <path>] [--walk-complete] <agent>")
 	}
 	agentName := rest[0]
-
 	cfg, err := roster.Load(*rosterPath)
 	if err != nil {
 		return err
@@ -34,6 +37,15 @@ func cmdResult(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *walkComplete {
+		result, err := latestWalkComplete(filepath.Dir(*rosterPath), agentName)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(result))
+		return nil
+	}
+
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
@@ -58,4 +70,47 @@ func cmdResult(args []string) error {
 	}
 	fmt.Println(result)
 	return nil
+}
+
+type walkCompleteMarker struct {
+	Schema    int    `json:"schema"`
+	Completed bool   `json:"completed"`
+	Scorecard string `json:"scorecard"`
+	Seeing    struct {
+		Complete int `json:"complete"`
+		Total    int `json:"total"`
+	} `json:"seeing"`
+	GeneratedWork   []string `json:"generated_work"`
+	CaptureManifest string   `json:"capture_manifest"`
+}
+
+func latestWalkComplete(rosterDir, agent string) ([]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(rosterDir, "state", agent+"-walk-*", "walk-complete.json"))
+	if err != nil {
+		return nil, fmt.Errorf("walk-complete: discover markers: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("walk-complete: no durable marker for %s", agent)
+	}
+	sort.Strings(matches)
+	path := matches[len(matches)-1]
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("walk-complete: read %s: %w", path, err)
+	}
+	var marker walkCompleteMarker
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		return nil, fmt.Errorf("walk-complete: invalid marker %s: %w", path, err)
+	}
+	if marker.Schema != 1 || !marker.Completed || marker.Scorecard == "" ||
+		marker.Seeing.Total < 1 || marker.Seeing.Complete != marker.Seeing.Total ||
+		len(marker.GeneratedWork) == 0 || marker.CaptureManifest == "" {
+		return nil, fmt.Errorf("walk-complete: incomplete marker %s", path)
+	}
+	for _, evidence := range []string{marker.Scorecard, marker.CaptureManifest} {
+		if _, err := os.Stat(evidence); err != nil {
+			return nil, fmt.Errorf("walk-complete: referenced evidence %s: %w", evidence, err)
+		}
+	}
+	return raw, nil
 }

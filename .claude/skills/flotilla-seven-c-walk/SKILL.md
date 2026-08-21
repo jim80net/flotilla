@@ -125,3 +125,21 @@ section.
 
 End the scorecard with total, delta vs prior, and every filed issue URL. Skip-as-satisfied
 (~6h) is allowed only with an explicit backlog note — never a silent skip.
+
+## Durable completion and collection
+
+After the scorecard, independent seeing pass, and generated work exist, finalize the
+walk. The command fails closed unless `walk-run.json` is successful, the scorecard is
+present, seeing is complete, and at least one generated-work reference is supplied:
+
+```bash
+python .claude/skills/flotilla-seven-c-walk/scripts/walk_complete.py \
+  --walk-dir state/<xo>-walk-<YYYYMMDD> \
+  --scorecard state/<xo>-sevenc-scorecard-<YYYYMMDD>.md \
+  --seeing-complete <count> --seeing-total <count> \
+  --generated-work <issue-or-artifact-reference>
+```
+
+This atomically writes `walk-complete.json` beside the walk assets. Collect a walk with
+`flotilla result --walk-complete <xo>`; that path reads and validates the newest marker
+instead of treating the pane's last sentence as the completed result.
