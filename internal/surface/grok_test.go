@@ -115,6 +115,8 @@ func TestGrokAssess(t *testing.T) {
 		{"capture error → unknown (NOT a false finished-a-turn)", "node", nil, false, "", boom, StateUnknown},
 		{"classifier routes: working (arrow)", "grok", nil, false, "⠙ Waiting… 0.4s ⇣127k [✗]", nil, StateWorking},
 		{"classifier routes: idle (completed)", "grok", nil, false, "Turn completed in 3.9s.\n│ ❯ │", nil, StateIdle},
+		{"provider-stopped idle chrome → errored", "grok", nil, false, "Provider stopped\nTurn completed in 3.9s.\n│ ❯ │", nil, StateErrored},
+		{"provider-stopped choice chrome stays awaiting-input", "grok", nil, false, "Provider stopped\nExit session?\n  1. Exit\n  2. Cancel\nEnter to confirm", nil, StateAwaitingInput},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

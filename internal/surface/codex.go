@@ -79,7 +79,14 @@ func (c codex) Assess(pane string) State {
 			cursorY, cursorVouched = y, true
 		}
 	}
-	return c.classify(captured, cursorY, cursorVouched)
+	state := c.classify(captured, cursorY, cursorVouched)
+	if state == StateAwaitingInput || state == StateAwaitingApproval {
+		return state
+	}
+	if unavailable, _ := deliver.SessionUncooperative(captured); unavailable {
+		return StateErrored
+	}
+	return state
 }
 
 // Rotate resets context by injecting Codex's /clear (documented slash command — fresh chat).

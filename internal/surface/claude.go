@@ -101,6 +101,11 @@ func (c claudeCode) Assess(pane string) State {
 		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as unknown, not a false finish)", pane, err)
 		return StateUnknown
 	}
+	// Structurally live choice chrome outranks terminal wording co-present in
+	// the banner: the operator can still choose Switch model / Exit.
+	if InteractiveConfirmPrompt(captured) {
+		return StateAwaitingInput
+	}
 	// Some stopped sessions retain an idle-looking composer below their banner.
 	// The pane is observed by the detector; this does not rely on a wedged desk
 	// producing a self-report.
@@ -118,12 +123,6 @@ func (c claudeCode) Assess(pane string) State {
 	}
 	if busy {
 		return StateWorking
-	}
-	// Interactive confirmation chrome (worktree-exit, numbered confirm, AskUserQuestion-
-	// style menus) must not read as plain Idle — recycle refuses idle∧cleared on the same
-	// frames, and status/loop_posture must not claim a safe seam (#557).
-	if InteractiveConfirmPrompt(captured) {
-		return StateAwaitingInput
 	}
 	return StateIdle
 }
