@@ -95,6 +95,36 @@ func TestWorkingRecipientWithDetectorProgressNeverAccruesFutileAttempts(t *testi
 	}
 }
 
+func TestConfirmedDeliveryDuringWorkingWindowSuppressesWedgeAndRetainsQueuedSends(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	d := NewDetector(DetectorConfig{
+		XOAgent: "xo", Desks: []string{"xo"}, Assess: func(string) surface.State { return surface.StateWorking },
+		Now: func() time.Time { return now }, AckAge: func() time.Duration { return 0 }, Persist: func(Snapshot) error { return nil },
+	}, filepath.Join(t.TempDir(), "missing-snapshot.json"))
+	d.Tick()
+	d.RecipientDeliveryConfirmed("xo")
+
+	in := NewInjector(func(string, string) error { return surface.ErrBusy }, 1)
+	in.now = func() time.Time { return now }
+	in.internalWedgeDispatch = func(run func()) { run() }
+	in.SetRecipientProgress(d.RecipientDeliveryEvidence)
+	queued := 0
+	in.reEnqueue = func(Job, time.Duration) { queued++ }
+	alarms := 0
+	in.SetInternalWedgeAlert(func(string, string) { alarms++ })
+
+	for i := 0; i < futileAttemptThreshold; i++ {
+		in.handleBusy(Job{Agent: "xo", Kind: KindSend, MessageID: "pending", Sender: "backend"}, surface.ErrBusy)
+		now = now.Add(4 * time.Second)
+	}
+	if alarms != 0 {
+		t.Fatalf("confirmed delivery + Working raised %d wedge alarms", alarms)
+	}
+	if queued != futileAttemptThreshold {
+		t.Fatalf("queued sends = %d, want %d retained retries", queued, futileAttemptThreshold)
+	}
+}
+
 func TestStaticWorkingDetectorProductionSeamAlarmsAsUnprogressing(t *testing.T) {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	d := NewDetector(DetectorConfig{

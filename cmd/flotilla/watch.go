@@ -367,6 +367,7 @@ func cmdWatch(args []string) error {
 	// racing the later binding.
 	var recipientProgressMu sync.RWMutex
 	var recipientProgress func(string, time.Time) (outbox.RecipientClass, bool)
+	var recipientConfirmed func(string)
 	injector.SetRecipientProgress(func(recipient string, since time.Time) (outbox.RecipientClass, bool) {
 		recipientProgressMu.RLock()
 		progress := recipientProgress
@@ -414,6 +415,12 @@ func cmdWatch(args []string) error {
 	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, func(agent string) bool { return currentRoster().IsCoordinator(agent) }))
 	injector.SetTurnConfirmed(func(recipient string) {
 		reopenRecipientQuarantine(rosterDir, currentRoster(), recipient, time.Now().UTC())
+		recipientProgressMu.RLock()
+		confirmed := recipientConfirmed
+		recipientProgressMu.RUnlock()
+		if confirmed != nil {
+			confirmed(recipient)
+		}
 	})
 	injector.SetRecipientClosedOut(func(recipient string) bool {
 		return recipientRoutingHeld(rosterDir, currentRoster(), recipient)
@@ -1089,6 +1096,7 @@ func cmdWatch(args []string) error {
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		recipientProgressMu.Lock()
 		recipientProgress = det.RecipientDeliveryEvidence
+		recipientConfirmed = det.RecipientDeliveryConfirmed
 		recipientProgressMu.Unlock()
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight

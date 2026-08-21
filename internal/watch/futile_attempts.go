@@ -44,10 +44,12 @@ func (in *Injector) noteFutileAttempt(recipient string, observedClass outbox.Rec
 		state = futileAttemptState{first: now}
 	}
 	// ErrBusy means Working in the shared recipient taxonomy, but it is only benign
-	// when the detector independently observed progress during this exact window.
+	// when the detector independently observed progress during the retained rolling
+	// window. Use a rolling cutoff rather than state.first: deleting a benign counter
+	// must not make the very next retry forget the same recent progress event.
 	// A stale/missing detector observation fails closed and continues counting.
 	if observedClass == outbox.RecipientWorking && in.recipientProgress != nil {
-		class, progressed := in.recipientProgress(recipient, state.first)
+		class, progressed := in.recipientProgress(recipient, now.Add(-futileAttemptWindow))
 		if class == outbox.RecipientWorking && progressed {
 			if !state.alarmed {
 				delete(in.futileAttempts, recipient)

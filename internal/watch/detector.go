@@ -889,6 +889,18 @@ func (d *Detector) RecipientDeliveryEvidence(agent string, since time.Time) (out
 	return class, !progressAt.IsZero() && !progressAt.Before(since)
 }
 
+// RecipientDeliveryConfirmed records positive proof that the recipient accepted a
+// work turn. This is progress for futile-delivery judgment even if the next detector
+// snapshot already finds the pane Working and therefore observes no state edge.
+func (d *Detector) RecipientDeliveryConfirmed(agent string) {
+	if agent == "" {
+		return
+	}
+	d.mu.Lock()
+	d.deskLastProgressAt[agent] = d.now()
+	d.mu.Unlock()
+}
+
 func (d *Detector) notifyOperatorActivity() {
 	if d.cfg.Activity == nil {
 		return
