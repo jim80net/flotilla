@@ -334,8 +334,32 @@ func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) {
+	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) || rec.Mode != "full" {
 		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
+	}
+}
+
+func TestLaterSelfRecycleOnSameProcessRemainsEligible(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	plan := testPlan()
+	plan.selfPath = true
+	writeLastRecycle("backend", plan, "self recycle complete", nil, worktreeCloseNote{}, process)
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Mode != "self" {
+		t.Fatalf("self recycle status mode = %q, want self", rec.Mode)
+	}
+	commandAlreadyRunning := time.Now().UTC().Add(-time.Hour)
+	if _, stale, err := successfulRecycleForGeneration("backend", process, commandAlreadyRunning); err != nil || !stale {
+		t.Fatalf("self success appearing during running command stale=%t err=%v", stale, err)
+	}
+	laterCommand := time.Now().UTC().Add(time.Hour)
+	if _, stale, err := successfulRecycleForGeneration("backend", process, laterCommand); err != nil || stale {
+		t.Fatalf("later legitimate self-recycle on unchanged process stale=%t err=%v", stale, err)
 	}
 }
 

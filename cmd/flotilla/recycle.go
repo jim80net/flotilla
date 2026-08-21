@@ -53,6 +53,7 @@ type recycleStatusRecord struct {
 	HandoffPath      string `json:"handoff_path"`
 	Token            string `json:"token"`
 	OK               bool   `json:"ok"`
+	Mode             string `json:"mode,omitempty"`
 	ProcessPID       int    `json:"process_pid,omitempty"`
 	ProcessStartedAt string `json:"process_started_at,omitempty"`
 	Result           string `json:"result,omitempty"`
@@ -866,7 +867,11 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 		if err != nil {
 			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle process start time %q: %w", rec.ProcessStartedAt, err)
 		}
-		if rec.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
+		// A full recycle retires this exact process generation, so another command
+		// aimed at it is stale regardless of wall time. A self recycle rotates
+		// context in-place; the unchanged PID must remain eligible for a later
+		// chapter, while at.After(after) below still catches a concurrent success.
+		if rec.Mode != "self" && rec.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
 			return rec, true, nil
 		}
 	}
@@ -939,6 +944,11 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		"token":        p.token,
 		"ok":           runErr == nil,
 		"result":       strings.TrimSpace(msg),
+	}
+	if p.selfPath {
+		rec["mode"] = "self"
+	} else {
+		rec["mode"] = "full"
 	}
 	if process.PID > 0 && !process.StartedAt.IsZero() {
 		rec["process_pid"] = process.PID
