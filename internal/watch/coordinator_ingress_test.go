@@ -80,6 +80,33 @@ func TestCoordinatorIngressDetectorGoalLoopAliasesAdjutant(t *testing.T) {
 	}
 }
 
+func TestInjectorDetectorFallsBackToLeaderWhenAdjutantClosedOut(t *testing.T) {
+	delivered := make(chan string, 2)
+	in := NewInjector(func(agent, _ string) error {
+		delivered <- agent
+		return nil
+	}, 2)
+	in.SetCoordinatorIngress(NewCoordinatorIngress(adjutantRoster()))
+	in.SetRecipientClosedOut(func(agent string) bool { return agent == "alpha-adj" })
+	in.Start()
+	defer in.Stop()
+
+	in.Enqueue(Job{Agent: "alpha-xo", Message: "detector wake", Kind: KindDetector})
+	select {
+	case got := <-delivered:
+		if got != "alpha-xo" {
+			t.Fatalf("detector delivered to %q, want leader alpha-xo", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for leader detector delivery")
+	}
+	select {
+	case got := <-delivered:
+		t.Fatalf("unexpected second delivery to %q; closed-out adjutant must receive zero", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
 func TestCoordinatorIngressKindSendToCoordinatorBypassesAdjutant674(t *testing.T) {
 	g := NewCoordinatorIngress(adjutantRoster())
 	job := Job{

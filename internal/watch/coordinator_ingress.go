@@ -24,8 +24,9 @@ const VerbatimBodyMarker = "--- operator message (verbatim) ---\n"
 // This type wires mechanical ingress aliasing (watch inject + dash route). Judgment layers
 // (arc assembly, intent segmentation, charter tuning) live in the adjutant seat + buffer substrate.
 type CoordinatorIngress struct {
-	Config  *roster.Config
-	Current func() *roster.Config
+	Config             *roster.Config
+	Current            func() *roster.Config
+	recipientClosedOut func(string) bool
 }
 
 func NewCoordinatorIngressDynamic(current func() *roster.Config) *CoordinatorIngress {
@@ -82,7 +83,12 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 	if job.Kind != KindDetector {
 		return []Job{job}
 	}
-	// System wake: adjutant front office only.
+	// System wake: adjutant front office only while that seat is live. A held
+	// adjutant cannot consume the wake; preserve it on the leader instead of
+	// redirecting into the injector's closed-out suppression path.
+	if g.recipientClosedOut != nil && g.recipientClosedOut(adj) {
+		return []Job{job}
+	}
 	redirected := job
 	redirected.Agent = adj
 	return []Job{redirected}

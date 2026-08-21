@@ -228,10 +228,20 @@ func (in *Injector) SetTurnConfirmed(fn func(recipient string)) { in.onTurnConfi
 
 // SetRecipientClosedOut installs the shared routing-hold predicate. It suppresses only internal
 // detector/heartbeat deliveries; eligible operator/work sends remain the controlled restore edge.
-func (in *Injector) SetRecipientClosedOut(fn func(recipient string) bool) { in.recipientClosedOut = fn }
+func (in *Injector) SetRecipientClosedOut(fn func(recipient string) bool) {
+	in.recipientClosedOut = fn
+	if in.coordinatorIngress != nil {
+		in.coordinatorIngress.recipientClosedOut = fn
+	}
+}
 
 // SetCoordinatorIngress installs #533 adjutant front-office ingress aliasing before coordinator delivery.
-func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) { in.coordinatorIngress = g }
+func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) {
+	in.coordinatorIngress = g
+	if g != nil {
+		g.recipientClosedOut = in.recipientClosedOut
+	}
+}
 
 // SetOperatorRelayBuffer installs the durable adjutant buffer append hook for operator relays
 // routed through the front office (#593 / buffer-v2 B1). channelID and operatorID key
