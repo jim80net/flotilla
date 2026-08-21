@@ -339,6 +339,45 @@ func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
 	}
 }
 
+func TestFullRecycleRecordsRetiredGenerationAndLeavesSuccessorEligible(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	retired := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	successor := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 5, 31, 0, 0, time.UTC)}
+	r := happyRec()
+	r.process = retired
+	ops := fakeRecycleOps(r)
+	ops.process = func(string) (recycleProcessIdentity, error) {
+		r.processCalls++
+		if r.respawned {
+			return successor, nil
+		}
+		return retired, nil
+	}
+	var recorded recycleProcessIdentity
+	ops.recordRetired = func(process recycleProcessIdentity) { recorded = process }
+	plan := testPlan()
+	msg, wt, err := runRecycle(ops, plan)
+	if err != nil {
+		t.Fatalf("full 421→422 recycle failed: %v", err)
+	}
+	live, err := ops.process("sess:0.1")
+	if err != nil || live != successor {
+		t.Fatalf("post-respawn live generation = %+v err=%v, want %+v", live, err, successor)
+	}
+	if recorded != retired {
+		t.Fatalf("recorded generation = %+v, want retired %+v (not successor %+v)", recorded, retired, successor)
+	}
+	writeLastRecycle("backend", plan, msg, nil, wt, recorded)
+	laterCommand := time.Now().UTC().Add(time.Hour)
+	if _, stale, err := successfulRecycleForGeneration("backend", successor, laterCommand); err != nil || stale {
+		t.Fatalf("legitimate next chapter on successor stale=%t err=%v", stale, err)
+	}
+	if _, stale, err := successfulRecycleForGeneration("backend", retired, laterCommand); err != nil || !stale {
+		t.Fatalf("stale command targeting retired generation stale=%t err=%v", stale, err)
+	}
+}
+
 func TestStaleRetryRefusalDoesNotClobberSuccessfulRecycleStatus(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
