@@ -62,7 +62,15 @@ func cmdSettle(args []string) error {
 		RosterPath: *rosterPath, Remote: strings.TrimSpace(*remote),
 		Ref: strings.TrimSpace(*ref), Files: append([]string(nil), files...),
 	}
-	return runSettle(plan, realSettleOps())
+	return runSettle(plan, realSettleOps(settleGitRoot(plan.RosterPath)))
+}
+
+func settleGitRoot(rosterPath string) string {
+	rosterDir := filepath.Dir(rosterPath)
+	if filepath.Base(rosterDir) == "state" {
+		return filepath.Dir(rosterDir)
+	}
+	return rosterDir
 }
 
 func runSettle(plan settlePlan, ops settleOps) error {
@@ -73,7 +81,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return errors.New("settle: --reason, --remote, and --ref must be non-empty")
 	}
 	stateDir := filepath.Dir(plan.RosterPath)
-	backlogPath := filepath.Join(stateDir, "state", "flotilla-"+plan.Actor+"-backlog.md")
+	backlogPath := filepath.Join(stateDir, "flotilla-"+plan.Actor+"-backlog.md")
 	raw, err := ops.readFile(backlogPath)
 	if err != nil {
 		return fmt.Errorf("settle: read required backlog %s: %w", backlogPath, err)
@@ -102,7 +110,8 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if err != nil {
 		return fmt.Errorf("settle: inspect staged files: %w", err)
 	}
-	if strings.TrimSpace(staged) != "" {
+	committed := strings.TrimSpace(staged) != ""
+	if committed {
 		if _, commitErr := ops.git("commit", "-m", "settle("+plan.Actor+"): "+plan.Reason); commitErr != nil {
 			return fmt.Errorf("settle: commit: %w", commitErr)
 		}
@@ -114,6 +123,29 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
 		return errors.New("settle: captured empty HEAD")
+	}
+	remoteLine, err := ops.git("ls-remote", "--exit-code", plan.Remote, plan.Ref)
+	if err != nil {
+		return fmt.Errorf("settle: read remote tip for delta proof: %w", err)
+	}
+	remoteFields := strings.Fields(remoteLine)
+	if len(remoteFields) < 2 || remoteFields[0] == "" {
+		return fmt.Errorf("settle: remote delta proof returned malformed tip %q", strings.TrimSpace(remoteLine))
+	}
+	remoteTip := remoteFields[0]
+	if _, err := ops.git("merge-base", "--is-ancestor", remoteTip, sha); err != nil {
+		return fmt.Errorf("settle: remote tip %s is not an ancestor of captured %s: %w", remoteTip, sha, err)
+	}
+	deltaRaw, err := ops.git("rev-list", "--count", remoteTip+".."+sha)
+	if err != nil {
+		return fmt.Errorf("settle: count per-push delta: %w", err)
+	}
+	wantDelta := "0"
+	if committed {
+		wantDelta = "1"
+	}
+	if delta := strings.TrimSpace(deltaRaw); delta != wantDelta {
+		return fmt.Errorf("settle: refusing push: captured delta is %s commit(s), want %s for this settle", delta, wantDelta)
 	}
 	if _, err := ops.git("push", plan.Remote, sha+":"+plan.Ref); err != nil {
 		return fmt.Errorf("settle: push captured %s: %w", sha, err)
@@ -131,7 +163,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return fmt.Errorf("settle: append audit: %w", err)
 	}
 	for _, suffix := range []string{"alive", "settled"} {
-		marker := filepath.Join(stateDir, "state", "flotilla-"+plan.Actor+"-"+suffix)
+		marker := filepath.Join(stateDir, "flotilla-"+plan.Actor+"-"+suffix)
 		if err := ops.touch(marker); err != nil {
 			return fmt.Errorf("settle: touch %s: %w", marker, err)
 		}
@@ -140,11 +172,12 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	return nil
 }
 
-func realSettleOps() settleOps {
+func realSettleOps(gitRoot string) settleOps {
 	return settleOps{
 		readFile: os.ReadFile,
 		git: func(args ...string) (string, error) {
 			cmd := exec.Command("git", args...)
+			cmd.Dir = gitRoot
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
