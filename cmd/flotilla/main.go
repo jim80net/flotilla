@@ -51,6 +51,8 @@ func run(args []string) error {
 		return cmdDispatchStatus(args[1:])
 	case "dispatch-ack":
 		return cmdDispatchAck(args[1:])
+	case "settle":
+		return cmdSettle(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
 	case "synthesis":
@@ -131,6 +133,7 @@ usage:
   flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
+  flotilla settle --from <seat> [--file <path>]       commit drained work, prove backup ancestry, then mark settled
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
