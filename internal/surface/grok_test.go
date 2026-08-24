@@ -246,6 +246,9 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	// classifier reads the line at cursorY; the box left/right borders (│) must be stripped.
 	const cleared = "  ╭────────╮\n  │ ❯                                              │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 	const pending = "  ╭────────╮\n  │ ❯ characterization pending body do not submit  │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
+	// Live Grok 4.6 chrome (2026-08-24) prefixes the model with remaining weekly usage.
+	const weeklyLimitCleared = "  ╭────────╮\n  │ ❯                                              │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
+	const weeklyLimitPending = "  ╭────────╮\n  │ ❯ draft must remain fail-closed                 │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
 	// A multi-line pending body: the cursor on the THIRD (continuation) row, which has no ❯.
 	const multiline = "  ╭────────╮\n  │ ❯ line ONE                                     │\n  │   line TWO                                     │\n  │   line THREE                                   │\n  ╰──── Grok 4.5 (high) · always-approve ─╯"
 	// The approval modal: the cursor sits on the ◆ Run line (no ❯), with the ┃ block below.
@@ -261,6 +264,8 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	}{
 		{"empty composer at cursor → Cleared", cleared, 1, ComposerCleared},
 		{"composer with a pending body → Pending", pending, 1, ComposerPending},
+		{"weekly-limit Grok 4.6 empty composer → Cleared", weeklyLimitCleared, 1, ComposerCleared},
+		{"weekly-limit Grok 4.6 draft → Pending", weeklyLimitPending, 1, ComposerPending},
 		{"composer visible off-cursor → Cleared", offCursor, 0, ComposerCleared},
 		// A lone user-typed box-drawing │ must NOT false-read Cleared (the recycle gate would discard
 		// the draft) — only the trailing RIGHT border is stripped, not a typed │ in the body.

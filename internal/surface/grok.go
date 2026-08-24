@@ -197,9 +197,10 @@ var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate li
 
 // grokComposerFooter is the bottom border of the Grok 4.x composer. The live
 // renderer places the model and approval mode on this row, immediately below
-// the prompt row. Requiring that adjacency distinguishes actual TUI chrome from
-// an agent quoting a prompt-shaped line in conversation.
-var grokComposerFooter = regexp.MustCompile(`^[ \t]*╰─+[ \t]+Grok [^·\r\n]+ · [^·\r\n]+ ─╯[ \t]*$`)
+// the prompt row. Current releases may prefix that chrome with a weekly-limit
+// percentage. Requiring the complete anchored row and prompt adjacency
+// distinguishes actual TUI chrome from quoted prompt-shaped conversation.
+var grokComposerFooter = regexp.MustCompile(`^[ \t]*╰─+[ \t]+(?:Weekly limit left: [0-9]+% · )?Grok [^·\r\n]+ · [^·\r\n]+ ─╯[ \t]*$`)
 
 // grokWeeklyUsage is the authoritative weekly-usage row from `/usage show`.
 // PROVENANCE: LIVE-CAPTURED 2026-07-13 from the official Grok CLI 0.2.93
