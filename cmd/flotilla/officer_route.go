@@ -34,6 +34,7 @@ type officerIdleProof struct {
 	CaptureSHA string
 	CursorX    int
 	CursorY    int
+	Visible    bool
 	EmptyProof string
 	PreState   surface.State
 }
@@ -76,33 +77,47 @@ func captureDigest(body string) string {
 }
 
 // crossDriverEmptyMainComposer is the automated watch-side proof. It does not
-// add a marker regex: it asks the existing, independently implemented
-// registered drivers to inspect the same pane. Any Working report vetoes; at
-// least one driver other than the selected uncertain driver must positively
-// report Idle + ComposerCleared.
+// add a marker regex: it asks the existing registered drivers to inspect the
+// same pane. Any unsafe state report vetoes. A foreign driver may positively
+// report Idle + ComposerCleared; the selected driver may do so only for Grok,
+// whose prompt/footer structural proof does not depend on cursor visibility.
 func crossDriverEmptyMainComposer(selected surface.Driver, pane string) (bool, string) {
 	return crossDriverEmptyMainComposerWith(selected, pane, surface.RegisteredDrivers())
 }
 
 func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, candidates []surface.Driver) (bool, string) {
-	clearedBy := ""
+	selectedGrokCleared := false
+	independentClearedBy := ""
 	for _, candidate := range candidates {
 		state := candidate.Assess(pane)
 		if officerUnsafeState(state) {
 			return false, state.String() + "-veto:" + candidate.Name()
 		}
-		if candidate.Name() == selected.Name() || state != surface.StateIdle {
+		if state != surface.StateIdle {
 			continue
 		}
 		probe, ok := candidate.(surface.ComposerStateProbe)
 		if ok && probe.ComposerState(pane) == surface.ComposerCleared {
-			clearedBy = candidate.Name()
+			if candidate.Name() == selected.Name() {
+				if selected.Name() == "grok" {
+					selectedGrokCleared = true
+				}
+				continue
+			}
+			independentClearedBy = candidate.Name()
 		}
 	}
-	if clearedBy == "" {
-		return false, "no-independent-idle-cleared-driver"
+	if selectedGrokCleared {
+		return true, "selected:grok-idle-cleared"
 	}
-	return true, "independent-idle-cleared:" + clearedBy
+	if independentClearedBy != "" {
+		return true, "independent-idle-cleared:" + independentClearedBy
+	}
+	return false, "no-independent-idle-cleared-driver"
+}
+
+func selectedGrokComposerProof(d surface.Driver, emptyProof string) bool {
+	return d.Name() == "grok" && emptyProof == "selected:grok-idle-cleared"
 }
 
 func officerUnsafeState(state surface.State) bool {
@@ -166,7 +181,7 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 		if sample.state != surface.StateIdle && sample.state != surface.StateUnknown {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported %s", i+1, sample.state)
 		}
-		if sample.inMode || !sample.visible {
+		if sample.inMode || (!sample.visible && !selectedGrokComposerProof(d, sample.emptyProof)) {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d has unsafe cursor state (visible=%t mode=%t)", i+1, sample.visible, sample.inMode)
 		}
 		if expectedCaptureSHA != "" && sample.captureSHA != expectedCaptureSHA {
@@ -179,7 +194,22 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 	if first.captureSHA != second.captureSHA || first.cursorX != second.cursorX || first.cursorY != second.cursorY || first.visible != second.visible || first.inMode != second.inMode || first.state != second.state || first.emptyProof != second.emptyProof {
 		return officerIdleProof{}, fmt.Errorf("pane changed during officer idle settle interval")
 	}
-	return officerIdleProof{CaptureSHA: first.captureSHA, CursorX: first.cursorX, CursorY: first.cursorY, EmptyProof: first.emptyProof, PreState: first.state}, nil
+	return officerIdleProof{CaptureSHA: first.captureSHA, CursorX: first.cursorX, CursorY: first.cursorY, Visible: first.visible, EmptyProof: first.emptyProof, PreState: first.state}, nil
+}
+
+func officerIdleProofDescription(proof officerIdleProof) string {
+	cursorProof := "visible-cursor"
+	if !proof.Visible {
+		cursorProof = "selected-grok-structural-composer-with-hidden-cursor"
+	}
+	return "two idle/stable " + cursorProof + " samples + " + proof.EmptyProof
+}
+
+func officerComposerDispositionAllowed(d surface.Driver, proof officerIdleProof, disposition surface.ComposerDisposition) bool {
+	if disposition == surface.ComposerUndetermined {
+		return true
+	}
+	return disposition == surface.ComposerCleared && selectedGrokComposerProof(d, proof.EmptyProof)
 }
 
 func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane, liveSurface, liveCommand, message, expectedCaptureSHA string, cleanComposerConfirmed bool, probeFailed string, deps officerRouteDeps) error {
@@ -189,15 +219,16 @@ func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane
 	}
 	disposition := "unavailable"
 	if probe, ok := d.(surface.ComposerStateProbe); ok {
-		disposition = probe.ComposerState(pane).String()
-		if disposition != surface.ComposerUndetermined.String() {
+		composerDisposition := probe.ComposerState(pane)
+		disposition = composerDisposition.String()
+		if !officerComposerDispositionAllowed(d, proof, composerDisposition) {
 			return fmt.Errorf("officer route is only for classifier gaps; composer disposition is %s", disposition)
 		}
 	}
 	record := officerRouteAudit{
 		At: deps.now().UTC(), Officer: officer, Authority: authority, Path: path, Agent: agent, Pane: pane,
 		LiveSurface: liveSurface, LiveCommand: liveCommand, SelectedDriver: d.Name(), CaptureSHA: proof.CaptureSHA, CursorX: proof.CursorX, CursorY: proof.CursorY,
-		Proof: "two idle/stable visible-cursor samples + " + proof.EmptyProof, ProbeFailed: probeFailed, PreState: proof.PreState.String(), ClassifierDisposition: disposition,
+		Proof: officerIdleProofDescription(proof), ProbeFailed: probeFailed, PreState: proof.PreState.String(), ClassifierDisposition: disposition,
 		Outcome: "attempt-owned-durable", TerminalOutcome: "delivery-status-unknown-no-replay",
 		ReplayDisposition: "never-replay-after-submit-begins",
 	}
@@ -248,7 +279,7 @@ func officerDetectorIdleOverride(d surface.Driver, agent, pane, liveSurface, liv
 		At: deps.now().UTC(), Officer: "watch-daemon", Authority: "automated-independent-idle-proof", Path: "detector-assess",
 		Agent: agent, Pane: pane, LiveSurface: liveSurface, LiveCommand: liveCommand, SelectedDriver: d.Name(),
 		CaptureSHA: proof.CaptureSHA, CursorX: proof.CursorX, CursorY: proof.CursorY,
-		Proof:       "two idle/stable visible-cursor samples + " + proof.EmptyProof,
+		Proof:       officerIdleProofDescription(proof),
 		ProbeFailed: "AssessForFleet=Unknown", PreState: surface.StateUnknown.String(), ClassifierDisposition: disposition,
 		Outcome: "detector-idle-override", TerminalOutcome: "detector-idle-override",
 		ReplayDisposition: "not-a-delivery",

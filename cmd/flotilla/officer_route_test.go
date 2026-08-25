@@ -258,6 +258,21 @@ func TestCrossDriverEmptyProofRequiresIdleClearedAndWorkingVetoes(t *testing.T) 
 	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected, control}); !ok || detail != "independent-idle-cleared:claude-code" {
 		t.Fatalf("idle+cleared control = ok=%t detail=%q", ok, detail)
 	}
+	selected.disposition = surface.ComposerCleared
+	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected}); !ok || detail != "selected:grok-idle-cleared" {
+		t.Fatalf("selected grok idle+cleared = ok=%t detail=%q", ok, detail)
+	}
+	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected, control}); !ok || detail != "selected:grok-idle-cleared" {
+		t.Fatalf("selected grok proof must survive later foreign proof = ok=%t detail=%q", ok, detail)
+	}
+	selected.disposition = surface.ComposerPending
+	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected}); ok || detail != "no-independent-idle-cleared-driver" {
+		t.Fatalf("selected grok pending = ok=%t detail=%q", ok, detail)
+	}
+	otherSelected := &officerRouteDriver{name: "claude-code", states: []surface.State{surface.StateIdle}, disposition: surface.ComposerCleared}
+	if ok, detail := crossDriverEmptyMainComposerWith(otherSelected, "%1", []surface.Driver{otherSelected}); ok || detail != "no-independent-idle-cleared-driver" {
+		t.Fatalf("non-grok selected idle+cleared = ok=%t detail=%q", ok, detail)
+	}
 	working := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateWorking}, disposition: surface.ComposerUndetermined}
 	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{control, working}); ok || detail != "working-veto:codex" {
 		t.Fatalf("working veto = ok=%t detail=%q", ok, detail)
@@ -276,6 +291,109 @@ func TestCrossDriverEmptyProofRequiresIdleClearedAndWorkingVetoes(t *testing.T) 
 				t.Fatalf("modal veto = ok=%t detail=%q want %q", ok, detail, tc.want)
 			}
 		})
+	}
+}
+
+func TestOfficerRouteGrokIdleComposerAllowsOwnProofAndHiddenCursor(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		capture string
+		visible bool
+	}{
+		{
+			name: "weekly-limit footer visible cursor",
+			capture: "transcript\n╭────────────────────────╮\n│ ❯                      │\n" +
+				"╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯",
+			visible: true,
+		},
+		{
+			name: "weekly-limit footer hidden cursor",
+			capture: "transcript\n╭────────────────────────╮\n│ ❯                      │\n" +
+				"╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯",
+			visible: false,
+		},
+		{
+			name: "ordinary footer visible cursor",
+			capture: "transcript\n╭────────────────────────╮\n│ ❯                      │\n" +
+				"╰──── Grok 4.6 (high) · always-approve ─╯",
+			visible: true,
+		},
+		{
+			name: "ordinary footer hidden cursor",
+			capture: "transcript\n╭────────────────────────╮\n│ ❯                      │\n" +
+				"╰──── Grok 4.6 (high) · always-approve ─╯",
+			visible: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drv := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateIdle}, disposition: surface.ComposerCleared}
+			var audits []officerRouteAudit
+			submitted := false
+			deps := officerDeps(tc.capture, &audits, &submitted)
+			deps.cursor = func(string) (int, int, bool, bool, error) { return 6, 2, tc.visible, false, nil }
+			deps.empty = func(d surface.Driver, pane string) (bool, string) {
+				return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+			}
+
+			err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "cos", "%1", "grok", "grok", "work", "", false, "ErrTransient", deps)
+			if err != nil || !submitted {
+				t.Fatalf("grok idle route err=%v submitted=%t", err, submitted)
+			}
+			if len(audits) != 2 || audits[0].ClassifierDisposition != surface.ComposerCleared.String() {
+				t.Fatalf("audit = %+v", audits)
+			}
+			if !tc.visible && audits[0].Proof != "two idle/stable selected-grok-structural-composer-with-hidden-cursor samples + selected:grok-idle-cleared" {
+				t.Fatalf("hidden-cursor proof = %q", audits[0].Proof)
+			}
+		})
+	}
+}
+
+func TestOfficerRouteGrokHiddenCursorStillRefusesBusyPendingAndInMode(t *testing.T) {
+	const capture = "transcript\n╭────────────────────────╮\n│ ❯ draft                │\n╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
+	for _, tc := range []struct {
+		name        string
+		state       surface.State
+		disposition surface.ComposerDisposition
+		inMode      bool
+	}{
+		{name: "working", state: surface.StateWorking, disposition: surface.ComposerCleared},
+		{name: "pending composer", state: surface.StateIdle, disposition: surface.ComposerPending},
+		{name: "copy mode", state: surface.StateIdle, disposition: surface.ComposerCleared, inMode: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			drv := &officerRouteDriver{name: "grok", states: []surface.State{tc.state}, disposition: tc.disposition}
+			var audits []officerRouteAudit
+			submitted := false
+			deps := officerDeps(capture, &audits, &submitted)
+			deps.cursor = func(string) (int, int, bool, bool, error) { return 6, 2, false, tc.inMode, nil }
+			deps.empty = func(d surface.Driver, pane string) (bool, string) {
+				return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+			}
+
+			if err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "cos", "%1", "grok", "grok", "work", "", false, "ErrTransient", deps); err == nil {
+				t.Fatal("unsafe Grok pane unexpectedly authorized")
+			}
+			if submitted || len(audits) != 0 {
+				t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
+			}
+		})
+	}
+}
+
+func TestOfficerRouteGrokHiddenCursorRequiresSelectedStructuralProof(t *testing.T) {
+	drv := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateIdle}, disposition: surface.ComposerUndetermined}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps("stable idle", &audits, &submitted)
+	deps.cursor = func(string) (int, int, bool, bool, error) { return 6, 2, false, false, nil }
+	deps.empty = func(surface.Driver, string) (bool, string) { return true, "independent-idle-cleared:claude-code" }
+
+	if err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "cos", "%1", "grok", "grok", "work", "", false, "ErrTransient", deps); err == nil {
+		t.Fatal("hidden cursor without selected Grok structural proof unexpectedly authorized")
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
 	}
 }
 
