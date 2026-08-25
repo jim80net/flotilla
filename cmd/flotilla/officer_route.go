@@ -206,10 +206,13 @@ func officerIdleProofDescription(proof officerIdleProof) string {
 }
 
 func officerComposerDispositionAllowed(d surface.Driver, proof officerIdleProof, disposition surface.ComposerDisposition) bool {
+	if selectedGrokComposerProof(d, proof.EmptyProof) {
+		return disposition == surface.ComposerCleared
+	}
 	if disposition == surface.ComposerUndetermined {
 		return true
 	}
-	return disposition == surface.ComposerCleared && selectedGrokComposerProof(d, proof.EmptyProof)
+	return false
 }
 
 func deliverOfficerRoute(d surface.Driver, officer, authority, path, agent, pane, liveSurface, liveCommand, message, expectedCaptureSHA string, cleanComposerConfirmed bool, probeFailed string, deps officerRouteDeps) error {

@@ -397,6 +397,47 @@ func TestOfficerRouteGrokHiddenCursorRequiresSelectedStructuralProof(t *testing.
 	}
 }
 
+func TestOfficerComposerDispositionRequiresSelectedGrokProofAtFinalGate(t *testing.T) {
+	grok := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateIdle}}
+	for _, tc := range []struct {
+		name        string
+		proof       officerIdleProof
+		disposition surface.ComposerDisposition
+		want        bool
+	}{
+		{
+			name:        "selected Grok proof degraded to Undetermined",
+			proof:       officerIdleProof{Visible: false, EmptyProof: "selected:grok-idle-cleared"},
+			disposition: surface.ComposerUndetermined,
+			want:        false,
+		},
+		{
+			name:        "selected Grok proof remains Cleared",
+			proof:       officerIdleProof{Visible: false, EmptyProof: "selected:grok-idle-cleared"},
+			disposition: surface.ComposerCleared,
+			want:        true,
+		},
+		{
+			name:        "independent proof retains Undetermined allowance",
+			proof:       officerIdleProof{Visible: true, EmptyProof: "independent-idle-cleared:claude-code"},
+			disposition: surface.ComposerUndetermined,
+			want:        true,
+		},
+		{
+			name:        "officer-confirmed capture retains Undetermined allowance",
+			proof:       officerIdleProof{Visible: true, EmptyProof: "officer-confirmed exact capture"},
+			disposition: surface.ComposerUndetermined,
+			want:        true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := officerComposerDispositionAllowed(grok, tc.proof, tc.disposition); got != tc.want {
+				t.Fatalf("officerComposerDispositionAllowed = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOfficerDetectorUnknownOverridesOnlyWithAuditedIndependentIdleProof(t *testing.T) {
 	const capture = "stable idle frame"
 	drv := &officerRouteDriver{states: []surface.State{surface.StateIdle, surface.StateIdle}, disposition: surface.ComposerUndetermined}
