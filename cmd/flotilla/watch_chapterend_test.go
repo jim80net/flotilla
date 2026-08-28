@@ -110,6 +110,35 @@ func TestParseCoordinatorRecycleTenure(t *testing.T) {
 	}
 }
 
+func TestCoordinatorTenureEligibilityRequiresClaimForProductXO1037(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{
+	  "xo_agent":"fleet-xo","cos_agent":"cos",
+	  "agents":[
+	    {"name":"fleet-xo"},{"name":"cos"},
+	    {"name":"product-xo","coordinator":true}
+	  ]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coordinatorTenureEligible(cfg, "product-xo", "## Backlog\n- [done] gather\n") {
+		t.Fatal("claimless dormant product XO must not be tenure-recycled")
+	}
+	if !coordinatorTenureEligible(cfg, "product-xo", "## Backlog\n- [next] owned product work\n") {
+		t.Fatal("product XO with an unblocked claim must remain tenure-eligible")
+	}
+	for _, root := range []string{"fleet-xo", "cos"} {
+		if !coordinatorTenureEligible(cfg, root, "") {
+			t.Fatalf("standing root %q must retain tenure eligibility", root)
+		}
+	}
+}
+
 func TestCoordinatorTenureDueSeedsAndUsesSuccessfulRotation(t *testing.T) {
 	rosterDir := t.TempDir()
 	homeDir := t.TempDir()
