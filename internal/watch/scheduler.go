@@ -30,6 +30,14 @@ const scheduleLateGrace = 90 * time.Second
 type ScheduleState struct {
 	// LastFired[name] = RFC3339 occurrence instant last committed.
 	LastFired map[string]string `json:"last_fired"`
+	// Deadlines stores the independently committed pre-wall and overdue stages
+	// for one-shot deadline clocks.
+	Deadlines map[string]DeadlineState `json:"deadlines,omitempty"`
+}
+
+type DeadlineState struct {
+	PreWallFiredAt string `json:"pre_wall_fired_at,omitempty"`
+	OverdueFiredAt string `json:"overdue_fired_at,omitempty"`
 }
 
 // LoadScheduleState reads the schedule sidecar fail-safe. A missing or corrupt
@@ -40,15 +48,18 @@ func LoadScheduleState(path string) ScheduleState {
 		if !os.IsNotExist(err) {
 			log.Printf("flotilla watch: schedule sidecar read failed for %q: %v (treating as never-fired)", path, err)
 		}
-		return ScheduleState{LastFired: map[string]string{}}
+		return ScheduleState{LastFired: map[string]string{}, Deadlines: map[string]DeadlineState{}}
 	}
 	var s ScheduleState
 	if err := json.Unmarshal(raw, &s); err != nil {
 		log.Printf("flotilla watch: schedule sidecar at %q is corrupt: %v (treating as never-fired)", path, err)
-		return ScheduleState{LastFired: map[string]string{}}
+		return ScheduleState{LastFired: map[string]string{}, Deadlines: map[string]DeadlineState{}}
 	}
 	if s.LastFired == nil {
 		s.LastFired = map[string]string{}
+	}
+	if s.Deadlines == nil {
+		s.Deadlines = map[string]DeadlineState{}
 	}
 	return s
 }
@@ -84,15 +95,17 @@ func (s ScheduleState) Save(path string) error {
 }
 
 type parsedSchedule struct {
-	name   string
-	hour   int
-	minute int
-	loc    *time.Location
-	to     string
-	prompt string
+	name     string
+	hour     int
+	minute   int
+	loc      *time.Location
+	deadline time.Time
+	preWall  time.Duration
+	to       string
+	prompt   string
 }
 
-// Scheduler fires roster schedules on daily wall-clock cadence inside flotilla watch.
+// Scheduler fires daily and one-shot deadline roster clocks inside flotilla watch.
 type Scheduler struct {
 	entries   []parsedSchedule
 	statePath string
@@ -109,6 +122,18 @@ type Scheduler struct {
 func NewScheduler(schedules []roster.Schedule, statePath, rosterDir string, enqueue func(Job)) *Scheduler {
 	entries := make([]parsedSchedule, 0, len(schedules))
 	for _, sch := range schedules {
+		if strings.TrimSpace(sch.Deadline) != "" {
+			deadline, deadlineErr := time.Parse(time.RFC3339, sch.Deadline)
+			preWall, preWallErr := time.ParseDuration(sch.PreWall)
+			if deadlineErr != nil || preWallErr != nil || preWall <= 0 {
+				log.Printf("flotilla watch: deadline schedule %q skipped: invalid deadline/pre_wall", sch.Name)
+				continue
+			}
+			entries = append(entries, parsedSchedule{
+				name: sch.Name, deadline: deadline, preWall: preWall, to: sch.To, prompt: sch.Prompt,
+			})
+			continue
+		}
 		h, m, loc, err := roster.ParseDailyAt(sch.At)
 		if err != nil {
 			// Validated at roster load; skip defensively rather than crash the daemon.
@@ -145,6 +170,10 @@ func (sc *Scheduler) Tick() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	for _, ent := range sc.entries {
+		if !ent.deadline.IsZero() {
+			sc.tickDeadline(now, ent)
+			continue
+		}
 		occ, ok := dueOccurrence(now, ent.hour, ent.minute, ent.loc, sc.lastFiredInstant(ent.name))
 		if !ok {
 			continue
@@ -164,6 +193,41 @@ func (sc *Scheduler) Tick() {
 		}
 		sc.enqueue(Job{Agent: ent.to, Message: body, Kind: KindDetector})
 	}
+}
+
+func (sc *Scheduler) tickDeadline(now time.Time, ent parsedSchedule) {
+	stage := sc.state.Deadlines[ent.name]
+	kind := ""
+	switch {
+	case !now.Before(ent.deadline) && stage.OverdueFiredAt == "":
+		kind = "overdue"
+	case !now.Before(ent.deadline.Add(-ent.preWall)) && now.Before(ent.deadline) && stage.PreWallFiredAt == "":
+		kind = "pre-wall"
+	default:
+		return
+	}
+	body, err := resolveSchedulePrompt(sc.rosterDir, ent.prompt)
+	if err != nil {
+		log.Printf("flotilla watch: deadline schedule %q SKIP: resolve prompt: %v", ent.name, err)
+		return
+	}
+	body = deadlinePrefix(kind, ent.name, ent.deadline) + body
+	firedAt := now.UTC().Format(time.RFC3339)
+	if kind == "pre-wall" {
+		stage.PreWallFiredAt = firedAt
+	} else {
+		stage.OverdueFiredAt = firedAt
+	}
+	sc.state.Deadlines[ent.name] = stage
+	if err := sc.state.Save(sc.statePath); err != nil {
+		log.Printf("flotilla watch: deadline sidecar persist failed: %v (continuing — at worst one extra fire after restart)", err)
+	}
+	log.Printf("flotilla watch: deadline %s %q → %s (due %s)", kind, ent.name, ent.to, ent.deadline.Format(time.RFC3339))
+	sc.enqueue(Job{Agent: ent.to, Message: body, Kind: KindDetector})
+}
+
+func deadlinePrefix(kind, name string, deadline time.Time) string {
+	return fmt.Sprintf("[deadline %s: %s due %s]\n\n", kind, name, deadline.Format(time.RFC3339))
 }
 
 // Run is the scheduler poll loop: an immediate catch-up sweep on start, then a

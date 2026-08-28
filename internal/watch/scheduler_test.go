@@ -24,6 +24,77 @@ func TestScheduleStateSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeadlineScheduleWakesOwningSeatBeforeExpiry(t *testing.T) {
+	dir := t.TempDir()
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
+	now := due.Add(-20 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 0 {
+		t.Fatalf("before pre-wall window jobs = %d, want zero", len(jobs))
+	}
+	now = due.Add(-10 * time.Minute)
+	sc.Tick()
+	sc.Tick()
+	if len(jobs) != 1 {
+		t.Fatalf("pre-wall jobs = %d, want one durable wake", len(jobs))
+	}
+	if jobs[0].Agent != "flotilla-dev-adj" || !strings.HasPrefix(jobs[0].Message, "[deadline pre-wall: oauth-expiry due 2026-08-28T12:59:00Z]") {
+		t.Fatalf("pre-wall job = %+v", jobs[0])
+	}
+}
+
+func TestDeadlineScheduleEmitsOverdueWakeAfterPreWall(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	schedules := []roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+	}}
+	sc := NewScheduler(schedules, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	now := due.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	// Recreate the scheduler to prove the overdue stage is independent of the
+	// durably recorded pre-wall stage across a daemon restart.
+	sc = NewScheduler(schedules, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	now = due.Add(6 * time.Minute)
+	sc.Tick()
+	sc.Tick()
+	if len(jobs) != 2 {
+		t.Fatalf("deadline jobs = %d, want pre-wall plus one overdue wake", len(jobs))
+	}
+	if !strings.HasPrefix(jobs[1].Message, "[deadline overdue: oauth-expiry due 2026-08-28T12:59:00Z]") {
+		t.Fatalf("overdue body = %q", jobs[1].Message)
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.PreWallFiredAt == "" || state.OverdueFiredAt == "" {
+		t.Fatalf("deadline state = %+v, want both stages committed", state)
+	}
+}
+
+func TestDeadlineScheduleRestartAfterExpiryWakesOverdueOnly(t *testing.T) {
+	dir := t.TempDir()
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
+	sc.now = func() time.Time { return due.Add(6 * time.Minute) }
+	sc.CatchUp()
+	if len(jobs) != 1 || !strings.HasPrefix(jobs[0].Message, "[deadline overdue:") {
+		t.Fatalf("restart catch-up jobs = %+v, want overdue only", jobs)
+	}
+}
+
 func TestSchedulerNoDoubleFire(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")
