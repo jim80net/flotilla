@@ -716,8 +716,16 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		rec["error"] = runErr.Error()
 	}
 	final := filepath.Join(dir, "last-recycle.json")
-	if history := priorRecycleStatusHistory(final); len(history) > 0 {
-		rec["history"] = history
+	audit := priorRecycleStatusAudit(final)
+	if len(audit.History) > 0 {
+		rec["history"] = audit.History
+	}
+	if audit.FirstSuccess == nil && runErr == nil {
+		entry := recycleStatusHistoryEntry{At: at.Format(time.RFC3339Nano), Token: p.token, OK: true}
+		audit.FirstSuccess = &entry
+	}
+	if audit.FirstSuccess != nil {
+		rec["first_success"] = audit.FirstSuccess
 	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {

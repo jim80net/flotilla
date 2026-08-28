@@ -29,6 +29,11 @@ type recycleStatusHistoryEntry struct {
 	OK    bool   `json:"ok"`
 }
 
+type recycleStatusAudit struct {
+	History      []recycleStatusHistoryEntry
+	FirstSuccess *recycleStatusHistoryEntry
+}
+
 // recordSuccessfulRecycleCooldown persists the lifecycle latch shared by
 // commanded and watch-dispatched recycle. The successor process can therefore
 // observe the success even when watch did not launch the original command.
@@ -89,19 +94,20 @@ func admitChapterEndAfterRecycle(statusDir string, r chapterend.Result, backlogM
 	}
 }
 
-func priorRecycleStatusHistory(path string) []recycleStatusHistoryEntry {
+func priorRecycleStatusAudit(path string) recycleStatusAudit {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return recycleStatusAudit{}
 	}
 	var previous struct {
-		At      string                      `json:"at"`
-		Token   string                      `json:"token"`
-		OK      bool                        `json:"ok"`
-		History []recycleStatusHistoryEntry `json:"history"`
+		At           string                      `json:"at"`
+		Token        string                      `json:"token"`
+		OK           bool                        `json:"ok"`
+		History      []recycleStatusHistoryEntry `json:"history"`
+		FirstSuccess *recycleStatusHistoryEntry  `json:"first_success"`
 	}
 	if json.Unmarshal(raw, &previous) != nil {
-		return nil
+		return recycleStatusAudit{}
 	}
 	history := append([]recycleStatusHistoryEntry(nil), previous.History...)
 	if previous.Token != "" {
@@ -110,7 +116,14 @@ func priorRecycleStatusHistory(path string) []recycleStatusHistoryEntry {
 	if len(history) > maxRecycleStatusHistory {
 		history = history[len(history)-maxRecycleStatusHistory:]
 	}
-	return history
+	firstSuccess := previous.FirstSuccess
+	// Backfill status files written before first_success existed. Once learned,
+	// this immutable record survives independently of the rolling history window.
+	if firstSuccess == nil && previous.OK && previous.Token != "" {
+		entry := recycleStatusHistoryEntry{At: previous.At, Token: previous.Token, OK: true}
+		firstSuccess = &entry
+	}
+	return recycleStatusAudit{History: history, FirstSuccess: firstSuccess}
 }
 
 func writeJSONAtomic(path string, value any) error {

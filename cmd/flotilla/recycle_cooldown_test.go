@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,7 +79,7 @@ func TestWatcherTenureRecycleThenSuccessorCoordinatorMarkDoesNotFireAgain1037(t 
 	}
 }
 
-func TestRecycleStatusHistoryPreservesFirstSuccessfulToken1037(t *testing.T) {
+func TestRecycleStatusAuditPreservesFirstSuccessfulTokenBeyondRollingWindow1037(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	first := testPlan()
@@ -86,26 +87,37 @@ func TestRecycleStatusHistoryPreservesFirstSuccessfulToken1037(t *testing.T) {
 	first.token = "first-commanded-token"
 	writeLastRecycle(first.agent, first, "first success", nil, worktreeCloseNote{})
 
-	second := first
-	second.token = "second-auto-token"
-	writeLastRecycle(second.agent, second, "second success", nil, worktreeCloseNote{})
+	for i := 0; i < 9; i++ {
+		later := first
+		later.token = fmt.Sprintf("later-%d", i)
+		writeLastRecycle(later.agent, later, "later success", nil, worktreeCloseNote{})
+	}
 
 	raw, err := os.ReadFile(filepath.Join(home, ".flotilla", first.agent, "last-recycle.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
-		Token   string                      `json:"token"`
-		History []recycleStatusHistoryEntry `json:"history"`
+		Token        string                      `json:"token"`
+		History      []recycleStatusHistoryEntry `json:"history"`
+		FirstSuccess recycleStatusHistoryEntry   `json:"first_success"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Token != "second-auto-token" {
+	if got.Token != "later-8" {
 		t.Fatalf("current token=%q", got.Token)
 	}
-	if len(got.History) != 1 || got.History[0].Token != "first-commanded-token" || !got.History[0].OK {
-		t.Fatalf("history=%+v, want first successful token retained", got.History)
+	if len(got.History) != maxRecycleStatusHistory {
+		t.Fatalf("rolling history length=%d, want %d", len(got.History), maxRecycleStatusHistory)
+	}
+	for _, entry := range got.History {
+		if entry.Token == "first-commanded-token" {
+			t.Fatalf("first token unexpectedly remained in rolling history: %+v", got.History)
+		}
+	}
+	if got.FirstSuccess.Token != "first-commanded-token" || !got.FirstSuccess.OK {
+		t.Fatalf("first_success=%+v, want immutable first successful token", got.FirstSuccess)
 	}
 }
 
