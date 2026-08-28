@@ -36,6 +36,7 @@ type ScheduleState struct {
 }
 
 type DeadlineState struct {
+	Deadline       string `json:"deadline"`
 	PreWallFiredAt string `json:"pre_wall_fired_at,omitempty"`
 	OverdueFiredAt string `json:"overdue_fired_at,omitempty"`
 }
@@ -197,6 +198,10 @@ func (sc *Scheduler) Tick() {
 
 func (sc *Scheduler) tickDeadline(now time.Time, ent parsedSchedule) {
 	stage := sc.state.Deadlines[ent.name]
+	deadlineID := ent.deadline.UTC().Format(time.RFC3339Nano)
+	if stage.Deadline != deadlineID {
+		stage = DeadlineState{Deadline: deadlineID}
+	}
 	kind := ""
 	switch {
 	case !now.Before(ent.deadline) && stage.OverdueFiredAt == "":

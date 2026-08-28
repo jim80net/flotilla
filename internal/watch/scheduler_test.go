@@ -30,7 +30,7 @@ func TestDeadlineScheduleWakesOwningSeatBeforeExpiry(t *testing.T) {
 	var jobs []Job
 	sc := NewScheduler([]roster.Schedule{{
 		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
-		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+		To: "backend", Prompt: "refresh the OAuth credential",
 	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
 	now := due.Add(-20 * time.Minute)
 	sc.now = func() time.Time { return now }
@@ -44,7 +44,7 @@ func TestDeadlineScheduleWakesOwningSeatBeforeExpiry(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Fatalf("pre-wall jobs = %d, want one durable wake", len(jobs))
 	}
-	if jobs[0].Agent != "flotilla-dev-adj" || !strings.HasPrefix(jobs[0].Message, "[deadline pre-wall: oauth-expiry due 2026-08-28T12:59:00Z]") {
+	if jobs[0].Agent != "backend" || !strings.HasPrefix(jobs[0].Message, "[deadline pre-wall: oauth-expiry due 2026-08-28T12:59:00Z]") {
 		t.Fatalf("pre-wall job = %+v", jobs[0])
 	}
 }
@@ -56,7 +56,7 @@ func TestDeadlineScheduleEmitsOverdueWakeAfterPreWall(t *testing.T) {
 	var jobs []Job
 	schedules := []roster.Schedule{{
 		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
-		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+		To: "backend", Prompt: "refresh the OAuth credential",
 	}}
 	sc := NewScheduler(schedules, statePath, dir, func(j Job) { jobs = append(jobs, j) })
 	now := due.Add(-10 * time.Minute)
@@ -86,12 +86,47 @@ func TestDeadlineScheduleRestartAfterExpiryWakesOverdueOnly(t *testing.T) {
 	var jobs []Job
 	sc := NewScheduler([]roster.Schedule{{
 		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
-		To: "flotilla-dev-adj", Prompt: "refresh the OAuth credential",
+		To: "backend", Prompt: "refresh the OAuth credential",
 	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
 	sc.now = func() time.Time { return due.Add(6 * time.Minute) }
 	sc.CatchUp()
 	if len(jobs) != 1 || !strings.HasPrefix(jobs[0].Message, "[deadline overdue:") {
 		t.Fatalf("restart catch-up jobs = %+v, want overdue only", jobs)
+	}
+}
+
+func TestDeadlineScheduleSameNameNewDeadlineRearmsPreWall(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	firstDue := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	newScheduler := func(due time.Time) *Scheduler {
+		return NewScheduler([]roster.Schedule{{
+			Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+			To: "backend", Prompt: "refresh the OAuth credential",
+		}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	}
+	sc := newScheduler(firstDue)
+	now := firstDue.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	now = firstDue.Add(time.Minute)
+	sc.Tick()
+
+	secondDue := firstDue.Add(24 * time.Hour)
+	sc = newScheduler(secondDue)
+	now = secondDue.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 3 {
+		t.Fatalf("jobs after renewed same-name deadline = %d, want old pre-wall+overdue and new pre-wall", len(jobs))
+	}
+	if !strings.HasPrefix(jobs[2].Message, "[deadline pre-wall: oauth-expiry due 2026-08-29T12:59:00Z]") {
+		t.Fatalf("renewed deadline body = %q", jobs[2].Message)
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.Deadline != secondDue.Format(time.RFC3339) || state.PreWallFiredAt == "" || state.OverdueFiredAt != "" {
+		t.Fatalf("renewed deadline state = %+v", state)
 	}
 }
 
