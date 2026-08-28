@@ -269,11 +269,12 @@ type Config struct {
 	// messages first. A busy/unavailable parade seat falls back to CosAgent, which
 	// retains the response SLA. Empty preserves the CoS-only path.
 	ParadeAgent string `json:"parade_agent,omitempty"`
-	// Schedules are daemon-native daily wall-clock dispatches (#413): each entry
-	// names a slot (at, with explicit timezone), a target agent (to), and a prompt
-	// (inline or a host-local file path — file preferred for long prompts). Durable
-	// last-fired state lives in <roster-dir>/flotilla-schedule-state.json (not in
-	// the roster). Empty ⇒ the scheduler is inert.
+	// Schedules are daemon-native wall-clock dispatches (#413). Each entry sets
+	// exactly one of At (daily, explicit timezone) or Deadline (one-shot RFC3339
+	// instant requiring positive PreWall), plus a target and prompt. Durable stage
+	// state lives in <roster-dir>/flotilla-schedule-state.json. Watch constructs
+	// the scheduler at process start; roster schedule edits do not hot-reload and
+	// require a watch restart. Empty means the scheduler is inert.
 	Schedules []Schedule `json:"schedules,omitempty"`
 
 	// CosLedger is where the CoS context-mirror appends its deterministic

@@ -15,16 +15,39 @@ when a `channel_id` + bot token are present.
 
 ### Wall-clock schedules (`schedules[]`)
 
-The roster may declare daily wall-clock dispatches the daemon fires without
-operator input (flotilla#413). Each entry needs a unique `name`, an `at` time
-with an **explicit timezone** (e.g. `12:07Z` or `03:07+00:00`), a `to` agent,
+The roster may declare daily dispatches and one-shot deadline clocks the daemon
+fires without operator input. Every entry needs a unique `name`, a `to` agent,
 and a `prompt` (inline text or a **host-local file path** — preferred for long
-prompts). Durable last-fired state lives beside the roster at
-`<roster-dir>/flotilla-schedule-state.json` so a restart does not double-fire or
-silently skip a slot missed while the daemon was down (catch-up fires once with
-a `[schedule late: …]` prefix). Delivery uses the same injector path as
-change-detector wakes (`KindDetector` — dropped when the target pane is busy,
-re-evaluated on the next poll).
+prompts). Set exactly one clock form:
+
+- `at`: a daily time with an **explicit timezone**, such as `12:07Z` or
+  `03:07+00:00`.
+- `deadline`: an absolute RFC3339 instant plus a positive Go-duration
+  `pre_wall`, such as `"deadline":"2030-01-15T12:59:00Z","pre_wall":"15m"`.
+  The owning `to` seat is woken once in the pre-wall window and once more if the
+  deadline becomes overdue. Starting after expiry emits the overdue wake only.
+
+```json
+"schedules": [
+  { "name": "morning-parade", "at": "12:07Z", "to": "xo", "prompt": "prompts/morning-parade.md" },
+  { "name": "oauth-refresh-deadline", "deadline": "2030-01-15T12:59:00Z", "pre_wall": "15m", "to": "backend", "prompt": "Review and refresh the expiring OAuth credential." }
+]
+```
+
+Durable state lives beside the roster at
+`<roster-dir>/flotilla-schedule-state.json`. Daily catch-up fires once with a
+`[schedule late: …]` prefix; deadline pre-wall and overdue stages are persisted
+independently. Advancing a deadline under the same stable name starts a new
+occurrence.
+
+**Schedule configuration does not hot-reload.** Watch constructs the scheduler
+once at process start. Saving a new `at`, `deadline`, `pre_wall`, target, or
+prompt in the roster has no effect until `flotilla watch` is restarted. In
+particular, a new deadline instant under an existing name remains silent in the
+running process until that restart.
+
+Delivery uses the same injector path as change-detector wakes (`KindDetector` —
+dropped when the target pane is busy, re-evaluated on the next poll).
 
 ## Prerequisites
 

@@ -98,11 +98,11 @@ func TestDeadlineScheduleRestartAfterExpiryWakesOverdueOnly(t *testing.T) {
 func TestDeadlineScheduleSameNameNewDeadlineRearmsPreWall(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")
-	firstDue := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	firstDue := time.Date(2026, 8, 28, 12, 59, 0, 123456789, time.UTC)
 	var jobs []Job
 	newScheduler := func(due time.Time) *Scheduler {
 		return NewScheduler([]roster.Schedule{{
-			Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+			Name: "oauth-expiry", Deadline: due.Format(time.RFC3339Nano), PreWall: "15m",
 			To: "backend", Prompt: "refresh the OAuth credential",
 		}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
 	}
@@ -125,8 +125,37 @@ func TestDeadlineScheduleSameNameNewDeadlineRearmsPreWall(t *testing.T) {
 		t.Fatalf("renewed deadline body = %q", jobs[2].Message)
 	}
 	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
-	if state.Deadline != secondDue.Format(time.RFC3339) || state.PreWallFiredAt == "" || state.OverdueFiredAt != "" {
+	if state.Deadline != secondDue.UTC().Format(time.RFC3339Nano) || state.PreWallFiredAt == "" || state.OverdueFiredAt != "" {
 		t.Fatalf("renewed deadline state = %+v", state)
+	}
+}
+
+func TestDeadlineScheduleEquivalentOffsetIdentityDoesNotRefire(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	dueUTC := time.Date(2026, 8, 28, 12, 59, 0, 123456789, time.UTC)
+	var jobs []Job
+	newScheduler := func(deadline string) *Scheduler {
+		return NewScheduler([]roster.Schedule{{
+			Name: "oauth-expiry", Deadline: deadline, PreWall: "15m",
+			To: "backend", Prompt: "refresh the OAuth credential",
+		}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	}
+	now := dueUTC.Add(-10 * time.Minute)
+	sc := newScheduler(dueUTC.Format(time.RFC3339Nano))
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+
+	offset := time.FixedZone("UTC-05", -5*60*60)
+	sc = newScheduler(dueUTC.In(offset).Format(time.RFC3339Nano))
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 1 {
+		t.Fatalf("equivalent offset deadline jobs=%d, want no extra pre-wall fire", len(jobs))
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.Deadline != "2026-08-28T12:59:00.123456789Z" {
+		t.Fatalf("canonical deadline identity=%q, want UTC RFC3339Nano", state.Deadline)
 	}
 }
 
