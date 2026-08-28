@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -12,6 +13,7 @@ import (
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -105,9 +107,121 @@ func recordDirectInboundTrack(cfg *roster.Config, rosterPath, sender, recipient,
 		fmt.Fprintf(os.Stderr, "flotilla: inbound track %q from %q failed: %v\n", recipient, sender, err)
 	}
 	if decision == inbound.TrackSkipped {
-		if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message); err != nil {
+		if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "flotilla: consume coordinator dispatch for %q failed: %v\n", recipient, err)
 		}
+	}
+}
+
+// closeOutDocumentState reads the durable seat disposition without consuming or editing it.
+// CLOSE-OUT documents are audit records and remain on disk after restoration, so their explicit
+// event time is compared with later turn-confirmed delivery proof in the quarantine registry.
+func closeOutDocumentState(rosterDir, recipient string) (exists bool, latest time.Time, err error) {
+	if err := sessionmirror.ValidateAgentName(recipient); err != nil {
+		return false, time.Time{}, err
+	}
+	dir := filepath.Join(rosterDir, "desks", recipient)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, time.Time{}, nil
+		}
+		return false, time.Time{}, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "CLOSE-OUT-") || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		exists = true
+		raw, readErr := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if readErr != nil {
+			return true, time.Time{}, readErr
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			const prefix = "**When:**"
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, prefix) {
+				continue
+			}
+			stamp := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			at, parseErr := time.Parse(time.RFC3339, stamp)
+			if parseErr != nil {
+				// Fleet close-out records historically use minute precision (for example
+				// 2026-08-13T20:03Z); accept it alongside full RFC3339 timestamps.
+				at, parseErr = time.Parse("2006-01-02T15:04Z07:00", stamp)
+			}
+			if parseErr != nil {
+				return true, time.Time{}, fmt.Errorf("parse %s close-out time %q: %w", entry.Name(), stamp, parseErr)
+			}
+			if at.After(latest) {
+				latest = at
+			}
+		}
+	}
+	return exists, latest, nil
+}
+
+// recipientClosedOut joins an explicit roster flag with the durable seat close-out record.
+// A close-out document is the current disposition until it is explicitly lifted; a delivery
+// confirmation never overrides that administrative state. Any unreadable disposition fails
+// closed toward quarantine (quiet, never authorizing escalation).
+func recipientClosedOut(rosterDir string, cfg *roster.Config, recipient string) bool {
+	if cfg != nil {
+		if closed, present := cfg.RecipientClosedOutDisposition(recipient); present {
+			return closed
+		}
+	}
+	exists, _, err := closeOutDocumentState(rosterDir, recipient)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: read close-out disposition for %q failed; suppressing undelivered escalation: %v\n", recipient, err)
+		return true
+	}
+	if !exists {
+		return false
+	}
+	return true
+}
+
+// recipientRoutingHeld extends the administrative close-out disposition through the quarantine
+// reopen edge. Explicit closed_out:false permits a real work/send to land, but internal wakes remain
+// suppressed until that eligible confirmed turn has actually lifted every active marker.
+func recipientRoutingHeld(rosterDir string, cfg *roster.Config, recipient string) bool {
+	if recipientClosedOut(rosterDir, cfg, recipient) {
+		return true
+	}
+	active, err := dispatch.NewQuarantineRegistry(rosterDir).HasActiveRecipient(recipient)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: read routing-hold quarantine for %q failed; suppressing internal wake: %v\n", recipient, err)
+		return true
+	}
+	return active
+}
+
+// reopenRecipientQuarantine lifts only the reversible quarantine marker after a confirmed turn
+// reaches a recipient whose explicit roster disposition is no longer closed out. It never consumes
+// or removes the preserved inbound rows and never fabricates an acknowledgement.
+func reopenRecipientQuarantine(rosterDir string, cfg *roster.Config, recipient string, now time.Time) {
+	// Use the exact same doc-aware disposition as the quarantine trigger. An eligible send
+	// confirmed into a still-closed composer is not proof that the provider/seat was restored.
+	if cfg == nil || recipientClosedOut(rosterDir, cfg, recipient) {
+		return
+	}
+	registry := dispatch.NewQuarantineRegistry(rosterDir)
+	hasActive, activeErr := registry.HasActiveRecipient(recipient)
+	if activeErr != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: inspect dispatch quarantine for %q failed: %v\n", recipient, activeErr)
+		return
+	}
+	if !hasActive {
+		return
+	}
+	reopened, err := registry.ReopenRecipient(recipient, now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: reopen dispatch quarantine for %q failed: %v\n", recipient, err)
+		return
+	}
+	if reopened > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla: reopened %d quarantined dispatch row(s) for %q after confirmed delivery; preserved rows resume normal acknowledgement flow\n", reopened, recipient)
 	}
 }
 
@@ -143,6 +257,7 @@ func deliverOrQueueSend(cfg *roster.Config, rosterPath, sender, recipient string
 		fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", recipient, pane)
 		mirrorSendToLedger(cfg, sender, recipient, message)
 		recordDirectInboundTrack(cfg, rosterPath, sender, recipient, message)
+		reopenRecipientQuarantine(filepath.Dir(rosterPath), cfg, recipient, time.Now().UTC())
 		return false, nil
 	}
 	var busy errRetryableBusy

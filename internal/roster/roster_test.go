@@ -15,6 +15,23 @@ func writeTemp(t *testing.T, body string) string {
 	return p
 }
 
+func TestRecipientClosedOutExplicitRosterDisposition(t *testing.T) {
+	p := writeTemp(t, `{"agents":[{"name":"xo"},{"name":"closed","closed_out":true},{"name":"restored","closed_out":false},{"name":"open"}]}`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RecipientClosedOut("closed") || cfg.RecipientClosedOut("open") || cfg.RecipientClosedOut("unknown") {
+		t.Fatalf("closed-out resolution: closed=%v open=%v unknown=%v", cfg.RecipientClosedOut("closed"), cfg.RecipientClosedOut("open"), cfg.RecipientClosedOut("unknown"))
+	}
+	if closed, present := cfg.RecipientClosedOutDisposition("restored"); !present || closed {
+		t.Fatalf("explicit provider-restored disposition = (%v,%v), want (false,true)", closed, present)
+	}
+	if _, present := cfg.RecipientClosedOutDisposition("open"); present {
+		t.Fatal("absent closed_out must remain distinguishable from explicit false")
+	}
+}
+
 func TestLoadValid(t *testing.T) {
 	p := writeTemp(t, `{
 		"guild_id": "g", "channel_id": "c", "operator_user_id": "op",

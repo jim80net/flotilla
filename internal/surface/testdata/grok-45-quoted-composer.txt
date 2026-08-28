@@ -1,0 +1,7 @@
+  The report quoted the following two Grok rows while explaining the interface:
+
+  │ ❯                                                        │
+  This prose is not part of the composer box.
+  ╰────────────────── Grok 4.5 (high) · always-approve ─╯
+
+  Turn completed in 2.1s.

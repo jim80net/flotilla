@@ -25,7 +25,7 @@ type codex struct {
 	paneCommand    func(string) (string, error)
 	isShell        func(string) bool
 	capturePane    func(string) (string, error)
-	classify       func(string) State
+	classify       func(captured string, cursorY int, cursorVouched bool) State
 	send           func(string, string) error
 	inject         func(string, string) error
 	paneCWD        func(string) (string, error)
@@ -73,7 +73,13 @@ func (c codex) Assess(pane string) State {
 	if err != nil {
 		return StateUnknown
 	}
-	return c.classify(captured)
+	cursorY, cursorVouched := -1, false
+	if c.cursorPosition != nil {
+		if _, y, inMode, cursorErr := c.cursorPosition(pane); cursorErr == nil && !inMode {
+			cursorY, cursorVouched = y, true
+		}
+	}
+	return c.classify(captured, cursorY, cursorVouched)
 }
 
 // Rotate resets context by injecting Codex's /clear (documented slash command — fresh chat).
@@ -160,26 +166,35 @@ const (
 )
 
 // Approval modal chrome — on-request permission prompt LIVE-CAPTURED 2026-07-03; auto-review
-// strings binary-sourced 0.142.5 (not elicited live this session).
-var codexApprovalMarkers = []string{
-	"Would you like to run the following command?", // LIVE 2026-07-03 on-request shell approval
-	"Would you like to make the following edits?",  // binary 0.142.5 (edit approval sibling)
-	"[ ! ] Action Required",
-	"[ . ] Action Required",
-	"Approve for me",
-	"main needs approval",
-	"main needs input",
-	"parent needs approval",
-	"Choose how you'd like Codex to proceed",
+// strings binary-sourced 0.142.5 (not elicited live this session). These are
+// exact rendered rows; approval provenance additionally requires a neighboring
+// modal action row, so prose quoting one of these strings cannot block delivery.
+var codexApprovalStatusLines = map[string]struct{}{
+	"Would you like to run the following command?": {}, // LIVE 2026-07-03 on-request shell approval
+	"Would you like to make the following edits?":  {}, // binary 0.142.5 (edit approval sibling)
+	"[ ! ] Action Required":                        {},
+	"[ . ] Action Required":                        {},
+	"Approve for me":                               {},
+	"main needs approval":                          {},
+	"main needs input":                             {},
+	"parent needs approval":                        {},
+	"Choose how you'd like Codex to proceed":       {},
 }
 
 // Working-turn chrome (binary-sourced footer/status — revalidate post-auth).
-var codexWorkingMarkers = []string{
-	" to interrupt",                   // footer hint (leading key glyph varies)
-	"while a task is in progress",     // disabled-action suffix
-	"Waiting for background terminal", // background exec in-turn
-	"a turn is running",               // mode-switch guard
+// These are complete rendered rows, not substrings: prose that quotes or starts
+// with one of the rows has no status provenance.
+var codexWorkingStatusLines = map[string]struct{}{
+	"Ctrl+L is disabled while a task is in progress.":  {},
+	"Waiting for background terminal":                  {},
+	"Mode switch is disabled while a turn is running.": {},
 }
+
+// codexWorkingSpinner is the LIVE-CAPTURED Codex status row. Anchoring the
+// whole render shape prevents a bare/quoted "esc to interrupt" in response
+// text from becoming working chrome. The response bullet is excluded for the
+// same reason as Claude's spinner detector: output can itself say "Working".
+var codexWorkingSpinner = regexp.MustCompile(`^[^\s›●\w]\s+Working\s+\([^)]*\bto interrupt\)\s*$`)
 
 // Rate-limit overlay markers are INFERRED from the event report and the shared
 // selector rendering, pending an exact live capture under #690. Safety does not
@@ -188,24 +203,72 @@ var codexWorkingMarkers = []string{
 var (
 	codexRateLimitHeadingRE = regexp.MustCompile(`(?i)\bapproaching rate limits\b`)
 	codexRateLimitChoiceRE  = regexp.MustCompile(`(?im)^\s*(?:›\s*)?\d+\.\s+switch to gpt-[^\s]*mini\b`)
+	codexApprovalChoiceRE   = regexp.MustCompile(`^›\s+\d+\.\s+\S.*$`)
 )
 
-func parseCodexState(captured string) State {
+func parseCodexState(captured string, cursorY int, cursorVouched bool) State {
 	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
 	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return StateAwaitingInput
 	}
 	tail := strings.Join(lastNNonEmptyLines(captured, codexTail), "\n")
-	if containsAny(tail, codexApprovalMarkers) {
+	if codexHasApprovalChrome(tail) {
 		return StateAwaitingApproval
 	}
-	if containsAny(tail, codexWorkingMarkers) {
+	if cursorVouched && codexHasWorkingMarkerAtComposer(captured, cursorY) {
 		return StateWorking
 	}
 	if codexHasNonComposerSelector(tail) {
 		return StateAwaitingInput
 	}
 	return StateIdle
+}
+
+// codexHasApprovalChrome requires two pieces of modal structure: an exact
+// approval status row and, within the next three rows, either the exact
+// auto-review action or a numbered highlighted choice. The glyph alone is not
+// provenance: composers and quoted prose can begin with the same `›`.
+func codexHasApprovalChrome(captured string) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	for i, line := range lines {
+		if _, ok := codexApprovalStatusLines[strings.TrimSpace(line)]; !ok {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+3; j++ {
+			action := trimSpace(lines[j])
+			if action == "Approve for me" {
+				return true
+			}
+			if codexApprovalChoiceRE.MatchString(action) && !codexHasStructuredComposerAt(lines, j) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// codexHasWorkingMarkerAtComposer binds working chrome to the live terminal
+// cursor. The status row must be immediately above a cursor-vouched composer;
+// an identical phrase in output, quoted source, or scrollback has no working
+// provenance.
+func codexHasWorkingMarkerAtComposer(captured string, cursorY int) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY <= 0 || cursorY >= len(lines) {
+		return false
+	}
+	if !codexHasStructuredComposerAt(lines, cursorY) {
+		return false
+	}
+	return codexIsWorkingStatusLine(lines[cursorY-1])
+}
+
+func codexIsWorkingStatusLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if codexWorkingSpinner.MatchString(line) {
+		return true
+	}
+	_, ok := codexWorkingStatusLines[line]
+	return ok
 }
 
 func codexOverlayName(captured string) string {
@@ -402,17 +465,38 @@ func codexHasIdleComposerFooter(lines []string, promptRow int) bool {
 	return false
 }
 
+// codexHasStructuredComposerAt is the single composer identity predicate used
+// by both working-marker provenance and selector exclusion. A leading `›` is
+// insufficient because highlighted selector rows use the same glyph; the idle
+// footer supplies the structural distinction.
+func codexHasStructuredComposerAt(lines []string, promptRow int) bool {
+	if promptRow < 0 || promptRow >= len(lines) {
+		return false
+	}
+	if !strings.HasPrefix(trimSpace(lines[promptRow]), codexComposerPrompt) {
+		return false
+	}
+	return codexHasIdleComposerFooter(lines, promptRow)
+}
+
 func codexHasNonComposerSelector(captured string) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	highlighted := false
 	for i, line := range lines {
-		if !strings.HasPrefix(trimSpace(line), codexComposerPrompt) {
+		trimmed := trimSpace(line)
+		if !strings.HasPrefix(trimmed, codexComposerPrompt) {
+			continue
+		}
+		if codexHasStructuredComposerAt(lines, i) {
+			return false
+		}
+		// A cropped bare composer has no selector content. Treating it as a
+		// highlighted option would turn quoted response prose above it into a
+		// false AwaitingInput state.
+		if strings.TrimSpace(strings.TrimPrefix(trimmed, codexComposerPrompt)) == "" {
 			continue
 		}
 		highlighted = true
-		if codexHasIdleComposerFooter(lines, i) {
-			return false
-		}
 	}
 	return highlighted
 }

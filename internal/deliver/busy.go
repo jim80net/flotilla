@@ -48,6 +48,17 @@ import (
 // the Enter-only retry + escalation, never a silent drop.
 var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯●\w]\s+[^\s\x{2026}]+\x{2026}`)
 
+// claudeComposer identifies the live Claude Code composer row. ParseBusy uses
+// its position as render provenance: only the status row immediately above the
+// composer can describe the current turn.
+var claudeComposer = regexp.MustCompile(`^[ \t\x{00a0}]*❯(?:[ \t\x{00a0}]|$)`)
+
+// claudeInterruptStatus matches the live Claude status-bar render observed on
+// an interruptible turn. It is anchored to the complete row and is considered
+// only below the cursor-vouched composer; prose elsewhere that merely quotes
+// "esc to interrupt" is not status chrome.
+var claudeInterruptStatus = regexp.MustCompile(`^[ \t]*⏵⏵ auto mode on \(shift\+tab to cycle\) · esc to interrupt(?: · [^·\r\n]+)*[ \t]*$`)
+
 // CapturePane returns the visible contents of a tmux pane (`capture-pane -p`).
 // Shared by busy-detection and the heartbeat's pane-activity fingerprint.
 func CapturePane(target string) (string, error) {
@@ -131,23 +142,19 @@ func parseCursorSnapshotOutput(out string) (cursorX, cursorY int, visible, inMod
 	return x, y, fields[2] == "1", fields[3] == "1", nil
 }
 
-// ParseBusy is the testable core: true when the captured pane shows an active
-// working marker. It scopes the scan to the bottom of the pane (the live
-// status/footer area): the active spinner is always just above the composer, and
-// an old working line scrolled up in history would otherwise false-positive as
-// busy and wrongly skip a tick. It scans the tail LINE-BY-LINE (not a joined
-// blob) so the workingSpinner regex can anchor each candidate status line and
-// reject the "❯" composer prompt. Exported so a surface driver can classify pane
-// state from captured text. (Kept the "esc to interrupt" legacy hint as a cheap
-// secondary signal; current claude-code renders the glyph+gerund spinner instead.)
-func ParseBusy(captured string) bool {
+// ParseBusyAt uses the terminal cursor as provenance for the live composer.
+// A historical spinner+prompt pair elsewhere in the capture cannot classify
+// Working because the terminal does not vouch for that prompt row.
+func ParseBusyAt(captured string, cursorY int) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	const tail = 8
-	if len(lines) > tail {
-		lines = lines[len(lines)-tail:]
+	if cursorY <= 0 || cursorY >= len(lines) || !claudeComposer.MatchString(lines[cursorY]) {
+		return false
 	}
-	for _, ln := range lines {
-		if strings.Contains(ln, "esc to interrupt") || workingSpinner.MatchString(ln) {
+	if workingSpinner.MatchString(lines[cursorY-1]) {
+		return true
+	}
+	for _, line := range lines[cursorY+1:] {
+		if claudeInterruptStatus.MatchString(line) {
 			return true
 		}
 	}

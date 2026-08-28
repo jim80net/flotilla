@@ -1,0 +1,9 @@
+  A completed response remains visible above the composer.
+
+  Worked for 12s                                                               █
+                                                                                █
+  ╭────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                          │
+  ╰──────────────────────────────────── Grok 4.6 (high) · always-approve ─╯
+
+  Shift+Tab:mode  │  Ctrl+.:shortcuts

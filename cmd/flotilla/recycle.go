@@ -700,9 +700,10 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
 		return
 	}
+	at := time.Now().UTC()
 	rec := map[string]any{
 		"agent":        agent,
-		"at":           time.Now().UTC().Format(time.RFC3339Nano),
+		"at":           at.Format(time.RFC3339Nano),
 		"handoff_path": p.designatedPath,
 		"token":        p.token,
 		"ok":           runErr == nil,
@@ -714,11 +715,22 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	if runErr != nil {
 		rec["error"] = runErr.Error()
 	}
+	final := filepath.Join(dir, "last-recycle.json")
+	audit := priorRecycleStatusAudit(final)
+	if len(audit.History) > 0 {
+		rec["history"] = audit.History
+	}
+	if audit.FirstSuccess == nil && runErr == nil {
+		entry := recycleStatusHistoryEntry{At: at.Format(time.RFC3339Nano), Token: p.token, OK: true}
+		audit.FirstSuccess = &entry
+	}
+	if audit.FirstSuccess != nil {
+		rec["first_success"] = audit.FirstSuccess
+	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return
 	}
-	final := filepath.Join(dir, "last-recycle.json")
 	tmp, err := os.CreateTemp(dir, "last-recycle-*.json.tmp")
 	if err != nil {
 		log.Printf("flotilla: recycle: could not write the status record: %v", err)
@@ -737,6 +749,12 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	if err := os.Rename(tmpName, final); err != nil {
 		os.Remove(tmpName)
 		log.Printf("flotilla: recycle: could not finalize the status record: %v", err)
+		return
+	}
+	if runErr == nil {
+		if err := recordSuccessfulRecycleCooldown(dir, p.token, at); err != nil {
+			log.Printf("flotilla: recycle: could not record chapter-end cooldown: %v", err)
+		}
 	}
 }
 

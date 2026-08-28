@@ -162,9 +162,8 @@ func TestWakeAgentDispatchesDeskHeartbeat(t *testing.T) {
 	}
 }
 
-// G6 — the cap-escalation (#183 §8e) raises ONE loud alert that NAMES the wedged desk + routes to its
-// OWNING XO (the channel it is a member of / its parent), via the loud Alert path — NOT a quiet wake.
-func TestDeskEscalateRoutesToOwningXOViaLoudAlert(t *testing.T) {
+// G6 — cap escalation names the wedged desk and uses the internal wedge destination.
+func TestDeskEscalateRoutesInternally(t *testing.T) {
 	// Legacy star: the leaf "backend" is owned by "xo" (the channel it is a member of). AgentsAbove is
 	// empty for the leaf, so this proves the §8e channel-membership fallback (not AgentsAbove).
 	rosterPath := writeRosterFile(t, `{
@@ -175,8 +174,12 @@ func TestDeskEscalateRoutesToOwningXOViaLoudAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var recipient string
 	var alerts []string
-	escalate := newDeskEscalate(cfg, "xo", func(m string) { alerts = append(alerts, m) })
+	escalate := newDeskEscalate(cfg, "xo", func(r, m string) {
+		recipient = r
+		alerts = append(alerts, m)
+	})
 
 	escalate("backend")
 
@@ -188,6 +191,52 @@ func TestDeskEscalateRoutesToOwningXOViaLoudAlert(t *testing.T) {
 	}
 	if !strings.Contains(alerts[0], "xo") {
 		t.Errorf("the escalation must route to the owning XO (xo); got %q", alerts[0])
+	}
+	if recipient != "backend" {
+		t.Fatalf("internal destination recipient = %q, want affected seat backend", recipient)
+	}
+}
+
+func TestDeskHeartbeatLifecycleRoutesWedgeAndFormatNoticeInternally(t *testing.T) {
+	cfg := loadWarrantCfg(t)
+	var internal []watch.Job
+	lifecycle := newDeskHeartbeatLifecycle(func() *roster.Config { return cfg }, "xo", func(coordinator, message string) {
+		internal = append(internal, watch.Job{Agent: coordinator, Message: message, Kind: watch.KindDetector})
+	})
+
+	lifecycle.escalate("backend")
+	deskWarrantedGate(cfg,
+		func(string) ([]byte, bool, error) { return []byte("# Notes\nmissing backlog heading\n"), true, nil },
+		func(string) string { return "/state/flotilla-backend-backlog.md" },
+		lifecycle.alert)("backend")
+
+	if len(internal) != 2 {
+		t.Fatalf("wedge + sectionless lifecycle notices must route internally, got %+v", internal)
+	}
+	for _, job := range internal {
+		if job.Agent != "xo" || job.Kind != watch.KindDetector {
+			t.Fatalf("internal lifecycle route = %+v, want owning coordinator detector job", job)
+		}
+	}
+}
+
+func TestInternalWedgeAlertResolvesOwningCoordinatorPane(t *testing.T) {
+	rosterPath := writeRosterFile(t, `{
+	  "xo_agent":"meta","agents":[{"name":"meta"},{"name":"team-xo"},{"name":"worker"}],
+	  "channels":[
+	    {"channel_id":"C0","xo_agent":"meta","members":["meta","team-xo"]},
+	    {"channel_id":"C1","xo_agent":"team-xo","members":["team-xo","worker"]}]}`)
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobs []watch.Job
+	internal := newInternalWedgeAlert(func() *roster.Config { return cfg }, "meta", func(coordinator, message string) {
+		jobs = append(jobs, watch.Job{Agent: coordinator, Message: message, Kind: watch.KindDetector})
+	})
+	internal("worker", "delivery wedge")
+	if len(jobs) != 1 || jobs[0].Agent != "team-xo" || jobs[0].Kind != watch.KindDetector || jobs[0].Message != "delivery wedge" {
+		t.Fatalf("internal wedge route = %+v, want one detector enqueue to team-xo", jobs)
 	}
 }
 

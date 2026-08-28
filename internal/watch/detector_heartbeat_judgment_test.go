@@ -11,13 +11,13 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
-// The #189 per-recipient JUDGMENT adds a HeartbeatWarranted(agent) bool conjunct to the detector's
+// The #189 per-recipient JUDGMENT adds an atomic warrant classification to the detector's
 // desk-heartbeat decision — the LAST gate, evaluated only AFTER the #183 HARD gate (XO-excl /
-// HeartbeatEnabled), the settle/stop checks, and the cadence. The conjunct is a PURE lookup against
-// a per-recipient warrant computed OFF d.mu (the seam returns an already-decided boolean; it does NO
-// file I/O under the lock). It can ONLY suppress a beat #183 would have sent — never resurrect one.
+// HeartbeatEnabled), the settle/stop checks, and the cadence. The classification is a PURE lookup against
+// per-recipient evidence computed OFF d.mu (the seam returns an already-decided classification; it does NO
+// file I/O under the lock). It can only narrow a beat #183 would have sent — never resurrect one.
 //
-// These tests extend the §9 hbFixture with a per-agent `warranted` map (defaulting to true when the
+// These tests extend the §9 hbFixture with a per-agent `warranted` map (defaulting to positive when the
 // seam is nil so #183 is byte-identical) and a recording wrapper that asserts the off-mutex
 // invariant: the seam, when invoked from the under-lock decision, performs NO backlog file I/O.
 
@@ -27,8 +27,8 @@ type hbjFixture struct {
 	states      map[string]surface.State
 	enabled     map[string]bool
 	settleNow   map[string]bool
-	warranted   map[string]bool // agent → HeartbeatWarranted (the #189 judgment); absent ⇒ true
-	warrantHits []string        // agents the warrant seam was consulted for, in order
+	warranted   map[string]DeskHeartbeatWarrant // agent → atomic warrant; absent ⇒ positive
+	warrantHits []string                        // agents the warrant seam was consulted for, in order
 	beats       []string
 	escalations []string
 	clock       time.Time
@@ -39,7 +39,7 @@ func newHBJFixture() *hbjFixture {
 		states:    map[string]surface.State{},
 		enabled:   map[string]bool{},
 		settleNow: map[string]bool{},
-		warranted: map[string]bool{},
+		warranted: map[string]DeskHeartbeatWarrant{},
 		clock:     time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
 }
@@ -57,6 +57,16 @@ func (f *hbjFixture) set(agent string, s surface.State) {
 }
 
 func (f *hbjFixture) setWarranted(agent string, w bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if w {
+		f.warranted[agent] = DeskHeartbeatPositiveWarrant
+	} else {
+		f.warranted[agent] = DeskHeartbeatNotWarranted
+	}
+}
+
+func (f *hbjFixture) setWarrant(agent string, w DeskHeartbeatWarrant) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.warranted[agent] = w
@@ -114,8 +124,8 @@ func (f *hbjFixture) config(xo string, desks, enabledDesks []string, cadence, ca
 		},
 	}
 	if wireWarrant {
-		cfg.HeartbeatWarranted = func(a string) bool {
-			// This wrapper stands in for the cmd-side seam: it returns an ALREADY-COMPUTED boolean
+		cfg.HeartbeatWarranted = func(a string) DeskHeartbeatWarrant {
+			// This wrapper stands in for the cmd-side seam: it returns an ALREADY-COMPUTED classification
 			// (the off-lock read happened earlier). It records the consult and asserts it does NO
 			// file I/O here (the off-mutex invariant — the read must live at the cmd wiring, off d.mu).
 			f.mu.Lock()
@@ -123,7 +133,7 @@ func (f *hbjFixture) config(xo string, desks, enabledDesks []string, cadence, ca
 			f.warrantHits = append(f.warrantHits, a)
 			w, ok := f.warranted[a]
 			if !ok {
-				return true // default warranted (matches the missing-ledger fallback)
+				return DeskHeartbeatPositiveWarrant // #183-compatible default
 			}
 			return w
 		}
@@ -148,6 +158,95 @@ func (f *hbjFixture) escLog() []string {
 	return append([]string(nil), f.escalations...)
 }
 
+func TestDeskHeartbeatClosedOutIsCapNeutralAndRestorationRearms(t *testing.T) {
+	for _, agent := range []string{"cos-tech-writer", "cos-ux-designer"} {
+		t.Run(agent, func(t *testing.T) {
+			f := newHBJFixture()
+			cfg := f.config("xo", []string{"xo", agent}, []string{agent}, 1, 3, true)
+			held := true
+			cfg.RecipientClosedOut = func(string) bool { return held }
+			settleMarker := true
+			cfg.DeskSettleConsume = func(string) bool {
+				wasSet := settleMarker
+				settleMarker = false
+				return wasSet
+			}
+			f.setWarranted(agent, true)
+			f.set("xo", surface.StateIdle)
+			f.set(agent, surface.StateIdle)
+			d := f.newDet(t, cfg)
+			d.deskSettled[agent] = true
+			seed(d, map[string]surface.State{"xo": surface.StateIdle, agent: surface.StateIdle}, "h0")
+			for i := 0; i < 6; i++ {
+				d.Tick()
+				f.advance(time.Minute)
+			}
+			if len(f.beatLog()) != 0 || len(f.escLog()) != 0 {
+				t.Fatalf("closed-out desk beat/wedged: beats=%v escalations=%v", f.beatLog(), f.escLog())
+			}
+			held = false
+			for i := 0; i < 4; i++ {
+				d.Tick()
+				f.advance(time.Minute)
+			}
+			if len(f.beatLog()) != 3 || len(f.escLog()) != 1 || f.escLog()[0] != agent {
+				t.Fatalf("restored genuine obligation did not resume normal cap: beats=%v escalations=%v", f.beatLog(), f.escLog())
+			}
+		})
+	}
+}
+
+func TestDeskHeartbeatCloseOutLandingAfterSnapshotCancelsSideEffects(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "desk"}, []string{"desk"}, 1, 3, true)
+	held := false
+	cfg.RecipientClosedOut = func(string) bool {
+		value := held
+		if value {
+			held = false // restoration races after the beat check; escalation must share its decision
+		}
+		return value
+	}
+	cfg.HeartbeatWarranted = func(string) DeskHeartbeatWarrant {
+		held = true // disposition lands after its phase-1 check
+		return DeskHeartbeatPositiveWarrant
+	}
+	f.set("xo", surface.StateIdle)
+	f.set("desk", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "desk": surface.StateIdle}, "h0")
+	d.deskBeatEligibleAt["desk"] = f.clock.Add(-time.Minute)
+	d.deskNoProgress["desk"] = 2
+	d.Tick()
+	if len(f.beatLog()) != 0 || len(f.escLog()) != 0 {
+		t.Fatalf("late close-out emitted side effects: beats=%v escalations=%v", f.beatLog(), f.escLog())
+	}
+	if d.deskNoProgress["desk"] != 0 || d.deskStopped["desk"] {
+		t.Fatalf("late close-out retained cap episode: cap=%d stopped=%v", d.deskNoProgress["desk"], d.deskStopped["desk"])
+	}
+}
+
+func TestDeskHeartbeatCloseOutBetweenBeatAndEscalationCancelsEscalation(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "desk"}, []string{"desk"}, 1, 3, true)
+	held := false
+	cfg.RecipientClosedOut = func(string) bool { return held }
+	cfg.WakeDeskHeartbeat = func(string) { held = true }
+	f.set("xo", surface.StateIdle)
+	f.set("desk", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "desk": surface.StateIdle}, "h0")
+	d.deskBeatEligibleAt["desk"] = f.clock.Add(-time.Minute)
+	d.deskNoProgress["desk"] = 2
+	d.Tick()
+	if len(f.escLog()) != 0 {
+		t.Fatalf("close-out after beat check emitted stale escalation: %v", f.escLog())
+	}
+	if d.deskNoProgress["desk"] != 0 || d.deskStopped["desk"] {
+		t.Fatalf("late close-out retained cap episode: cap=%d stopped=%v", d.deskNoProgress["desk"], d.deskStopped["desk"])
+	}
+}
+
 // (J1) WARRANTED-TRUE behaves exactly as #183: an idle, eligible, cadence-elapsed, not-settled desk
 // is beaten on its cadence.
 func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {
@@ -164,6 +263,82 @@ func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {
 	d.Tick() // cadence elapsed ⇒ owed a beat; warranted ⇒ beat delivered
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("warranted desk must beat, got %v", got)
+	}
+}
+
+// A fail-safe beat warrant (missing/torn/sectionless ledger) keeps #183's continuation beat but is
+// not positive evidence of owed work. It therefore remains cap-neutral across capN+ beats: the desk
+// is never escalated, stopped, or suppressed merely because it stays correctly idle.
+func TestDeskHeartbeatJudgment_FailSafeBeatNeverWedges(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
+	f.setWarrant("backend", DeskHeartbeatFailSafeWarrant)
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+
+	d.Tick() // anchor
+	for i := 0; i < 5; i++ {
+		f.advance(time.Minute)
+		d.Tick()
+	}
+	if got := f.beatLog(); len(got) != 5 {
+		t.Fatalf("fail-safe warrant must preserve continuation beats across capN, got %v", got)
+	}
+	if got := f.escLog(); len(got) != 0 {
+		t.Fatalf("no positive obligation must never wedge or escalate, got %v", got)
+	}
+	if d.deskNoProgress["backend"] != 0 || d.deskStopped["backend"] {
+		t.Fatalf("parked desk must remain cap-neutral: noProgress=%d stopped=%v", d.deskNoProgress["backend"], d.deskStopped["backend"])
+	}
+}
+
+func TestDeskHeartbeatJudgment_PaneIdleButLiveBusyNeverBeatsOrWedges(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
+	f.setWarrant("backend", DeskHeartbeatPositiveWarrant)
+	cfg.HeartbeatLiveState = func(string) surface.State { return surface.StateWorking }
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle) // the reported misclassification
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+
+	for i := 0; i < 5; i++ {
+		f.advance(time.Minute)
+		d.Tick()
+	}
+	if got := f.beatLog(); len(got) != 0 {
+		t.Fatalf("fresh live-busy join must suppress duplicate heartbeat, got %v", got)
+	}
+	if got := f.escLog(); len(got) != 0 {
+		t.Fatalf("pane-idle alone must never wedge a live-busy desk, got %v", got)
+	}
+	if d.deskNoProgress["backend"] != 0 || d.deskStopped["backend"] {
+		t.Fatalf("live-busy desk must be cap-neutral: noProgress=%d stopped=%v", d.deskNoProgress["backend"], d.deskStopped["backend"])
+	}
+}
+
+func TestDeskHeartbeatJudgment_LiveIdleAndPositiveStillWedges(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
+	f.setWarrant("backend", DeskHeartbeatPositiveWarrant)
+	cfg.HeartbeatLiveState = func(string) surface.State { return surface.StateIdle }
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+
+	d.Tick()
+	for i := 0; i < 3; i++ {
+		f.advance(time.Minute)
+		d.Tick()
+	}
+	if got := f.beatLog(); len(got) != 3 {
+		t.Fatalf("genuinely idle positive obligation must receive capN beats, got %v", got)
+	}
+	if got := f.escLog(); len(got) != 1 || got[0] != "backend" {
+		t.Fatalf("genuinely idle positive obligation must wedge exactly once, got %v", got)
 	}
 }
 
@@ -263,6 +438,18 @@ func TestDeskHeartbeatJudgment_SeamNilIsByteIdentical(t *testing.T) {
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("seam nil must be #183-identical: tick 2 must beat backend once, got %v", got)
 	}
+	// Complete the #183 cap trace: an unwired seam retains the legacy positive default, so it wedges
+	// after exactly capN beats and stops. This locks more than the first cadence edge.
+	for i := 0; i < 2; i++ {
+		f.advance(2 * time.Minute)
+		d.Tick()
+	}
+	if got := f.beatLog(); len(got) != 3 {
+		t.Fatalf("seam nil must preserve #183's full cap trace: got %v", got)
+	}
+	if got := f.escLog(); len(got) != 1 || got[0] != "backend" || !d.deskStopped["backend"] {
+		t.Fatalf("seam nil must preserve #183 wedge+stop at cap: escalations=%v stopped=%v", got, d.deskStopped["backend"])
+	}
 	// And the warrant seam was never consulted (it's nil).
 	if len(f.warrantHits) != 0 {
 		t.Fatalf("an unwired warrant seam must never be consulted, got hits %v", f.warrantHits)
@@ -312,7 +499,7 @@ func TestDeskHeartbeatJudgment_WarrantSeamRunsOffLock(t *testing.T) {
 	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
 	var d *Detector
 	reentered := false
-	cfg.HeartbeatWarranted = func(a string) bool {
+	cfg.HeartbeatWarranted = func(a string) DeskHeartbeatWarrant {
 		f.mu.Lock()
 		f.warrantHits = append(f.warrantHits, a)
 		f.mu.Unlock()
@@ -324,7 +511,7 @@ func TestDeskHeartbeatJudgment_WarrantSeamRunsOffLock(t *testing.T) {
 			reentered = true
 			d.mu.Unlock()
 		}
-		return true
+		return DeskHeartbeatPositiveWarrant
 	}
 	f.set("xo", surface.StateIdle)
 	f.set("backend", surface.StateIdle)
@@ -371,11 +558,15 @@ func TestDeskHeartbeatJudgment_EndToEndAcrossTicks(t *testing.T) {
 
 	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 99 /* high cap so the test never escalates */, false)
 	// Wire the warrant seam through the REAL parser + REAL roster judgment (the production composition).
-	cfg.HeartbeatWarranted = func(agent string) bool {
+	cfg.HeartbeatWarranted = func(agent string) DeskHeartbeatWarrant {
 		mu.Lock()
 		md := backlogMD
 		mu.Unlock()
-		return rcfg.HeartbeatWarranted(agent, backlog.Parse(md))
+		warranted := rcfg.HeartbeatWarranted(agent, backlog.Parse(md))
+		if warranted {
+			return DeskHeartbeatPositiveWarrant
+		}
+		return DeskHeartbeatNotWarranted
 	}
 	f.set("xo", surface.StateIdle)
 	f.set("backend", surface.StateIdle)

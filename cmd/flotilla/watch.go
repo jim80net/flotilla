@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +25,7 @@ import (
 	"github.com/jim80net/flotilla/internal/decisionbrief"
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/frontier"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
@@ -95,6 +100,41 @@ const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idl
 // Chain warnings recur slowly: loud enough that an unprotected fleet cannot
 // look healthy indefinitely, without repeating on every heartbeat tick.
 const launchChainNoticeInterval = 6 * time.Hour
+
+func resolveAlertWebhook(secrets *roster.Secrets, xo string) string {
+	if secrets == nil {
+		return ""
+	}
+	if hook, err := secrets.Webhook("alerts"); err == nil && hook != "" {
+		return hook
+	}
+	if hook, err := secrets.Webhook(xo); err == nil {
+		return hook
+	}
+	return ""
+}
+
+type watchPoster interface {
+	Post(transport.Destination, string, string) error
+}
+
+func newWatchPosters(poster watchPoster, operatorDest, alertDest transport.Destination, stderr io.Writer) (post func(string, string), alert func(string)) {
+	post = func(username, msg string) {
+		if poster != nil && operatorDest != nil {
+			_ = poster.Post(operatorDest, username, msg)
+		} else {
+			fmt.Fprintln(stderr, "flotilla watch: "+msg)
+		}
+	}
+	alert = func(msg string) {
+		if poster != nil && alertDest != nil {
+			_ = poster.Post(alertDest, "flotilla-watch", "⚠️ "+msg)
+		} else {
+			fmt.Fprintln(stderr, "flotilla watch: ⚠️ "+msg)
+		}
+	}
+	return post, alert
+}
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
@@ -171,10 +211,6 @@ func cmdWatch(args []string) error {
 	if xo == "" {
 		xo = cfg.Agents[0].Name
 	}
-	// The XO's driver (for state assessment in the gate). Surfaces are validated
-	// above, so this lookup succeeds.
-	xoDrv, _ := surface.Get(agentSurface(cfg, xo))
-
 	interval := cfg.HeartbeatDur() // parsed + validated at load
 	intervalStr := strings.TrimSpace(*intervalFlag)
 	if intervalStr == "" {
@@ -219,7 +255,7 @@ func cmdWatch(args []string) error {
 	// mirror time (a webhook is channel-bound, so posting under a desk's webhook lands in its
 	// channel). A configured-but-broken secrets file is fatal — don't silently degrade to clock-only
 	// (the operator set --secrets expecting the relay).
-	var alertHook, botToken string
+	var alertHook, operatorHook, botToken string
 	var secrets *roster.Secrets
 	if *secretsPath != "" {
 		s, err := roster.LoadSecrets(*secretsPath)
@@ -228,9 +264,10 @@ func cmdWatch(args []string) error {
 		}
 		secrets = s
 		botToken = secrets.BotToken()
-		if h, err := secrets.Webhook(xo); err == nil {
-			alertHook = h
+		if hook, err := secrets.Webhook(xo); err == nil {
+			operatorHook = hook
 		}
+		alertHook = resolveAlertWebhook(secrets, xo)
 	}
 	if alertHook == "" {
 		fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — no alert webhook; down-alerts go to stderr (journald) only")
@@ -260,21 +297,21 @@ func cmdWatch(args []string) error {
 			defer func() { _ = tr.Close() }()
 		}
 	}
-	// alertDest is the fixed down-alert webhook target (the XO's webhook), wrapped as a
-	// transport Destination so the post path is medium-agnostic. nil when there is no
-	// alert webhook OR no transport — post then degrades to stderr.
+	// alertDest is the fixed down-alert webhook target (the dedicated alerts webhook when
+	// provisioned, otherwise the legacy XO webhook), wrapped as a transport Destination so the post
+	// path is medium-agnostic. nil when there is no alert webhook OR no transport — post then
+	// degrades to stderr. Relay mirrors and hotline replies resolve their own destinations below.
 	var alertDest transport.Destination
 	if tr != nil && alertHook != "" {
 		alertDest = transport.NewWebhookDestination(alertHook)
 	}
-	post := func(username, msg string) {
-		if tr != nil && alertDest != nil {
-			_ = tr.Post(alertDest, username, msg)
-		} else {
-			fmt.Fprintln(os.Stderr, "flotilla watch: "+msg)
-		}
+	// operatorDest remains the XO webhook. Operator-relay mirrors, hotline/catch-up notices, and
+	// intentional operator traffic must not follow the dedicated warning destination.
+	var operatorDest transport.Destination
+	if tr != nil && operatorHook != "" {
+		operatorDest = transport.NewWebhookDestination(operatorHook)
 	}
-	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
+	post, alert := newWatchPosters(tr, operatorDest, alertDest, os.Stderr)
 
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
@@ -284,6 +321,7 @@ func cmdWatch(args []string) error {
 	// kill-switch). When unwired, SubmitWithSelfHeal == Submit (inert), so relay and tick behave
 	// identically. Ctrl-C is destructive — see surface.selfHeal's safety gates.
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+	temporalClassifier := surface.NewTemporalClassifier(deliver.CapturePane)
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 		log.Printf("flotilla watch: self-heal ENABLED (FLOTILLA_SELF_HEAL) — relay input-blocks attempt bounded Ctrl-C recovery")
@@ -294,11 +332,8 @@ func cmdWatch(args []string) error {
 	// submit and its Enter-only retry / self-heal.
 	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
 		return func(agent, message string) error {
-			drv, ok := surface.Get(agentSurface(cfg, agent))
-			if !ok {
-				return fmt.Errorf("unknown surface for agent %q", agent)
-			}
-			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, agent))
 			if err != nil {
 				return err
 			}
@@ -307,10 +342,40 @@ func cmdWatch(args []string) error {
 				return err
 			}
 			defer txn.Release()
-			return submit(drv, pane, message)
+			liveCommand, err := deliver.PaneCommand(pane)
+			if err != nil {
+				return fmt.Errorf("resolve live surface for agent %q: read pane command: %w", agent, err)
+			}
+			drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
+			if err != nil {
+				return err
+			}
+			temporal := temporalClassifier.Temporal(drv, pane)
+			if err := submit(temporal, pane, message); !errors.Is(err, surface.ErrTransient) {
+				return err
+			}
+			deps := watchOfficerRouteDeps(rosterDir)
+			deps.submit = func(surface.Driver, string, string) error {
+				return confirm.SubmitOfficerProvenIdle(temporal, pane, message)
+			}
+			return deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", agent, pane, liveSurface, liveCommand, message, "", false, "ErrTransient", deps)
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
+	// The injector starts before the detector is constructed. Keep the detector-owned
+	// evidence callback behind a small lock so early startup refusals fail closed without
+	// racing the later binding.
+	var recipientProgressMu sync.RWMutex
+	var recipientProgress func(string, time.Time) (outbox.RecipientClass, bool)
+	injector.SetRecipientProgress(func(recipient string, since time.Time) (outbox.RecipientClass, bool) {
+		recipientProgressMu.RLock()
+		progress := recipientProgress
+		recipientProgressMu.RUnlock()
+		if progress == nil {
+			return outbox.RecipientUnknown, false
+		}
+		return progress(recipient, since)
+	})
 	injector.SetCoordinatorIngress(watch.NewCoordinatorIngressDynamic(currentRoster))
 	arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
 	injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
@@ -329,18 +394,30 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
+	coordinatorAlert := func(coordinator, msg, claimKey string) {
+		injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
+	}
 	injector.SetOutboxStaleEscalate(
 		func(sender string) string { return currentRoster().OwningXO(sender, xo) },
-		func(coordinator, msg, claimKey string) {
-			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
-		},
+		coordinatorAlert,
 	)
+	deskHeartbeatLifecycle := newDeskHeartbeatLifecycle(currentRoster, xo, func(coordinator, msg string) {
+		coordinatorAlert(coordinator, msg, "")
+	})
+	internalWedgeAlert := deskHeartbeatLifecycle.alert
+	injector.SetInternalWedgeAlert(internalWedgeAlert)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(currentRoster(), sender, recipient, message)
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
 	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, func(agent string) bool { return currentRoster().IsCoordinator(agent) }))
+	injector.SetTurnConfirmed(func(recipient string) {
+		reopenRecipientQuarantine(rosterDir, currentRoster(), recipient, time.Now().UTC())
+	})
+	injector.SetRecipientClosedOut(func(recipient string) bool {
+		return recipientRoutingHeld(rosterDir, currentRoster(), recipient)
+	})
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -616,16 +693,16 @@ func cmdWatch(args []string) error {
 		// (<dir>/flotilla-<agent>-settled). The cadence is the heartbeat interval — the detector's
 		// tick IS the interval, so DeskHeartbeatEveryTicks=1 (an idle desk is re-engaged within one
 		// interval). WakeDeskHeartbeat enqueues the non-authorizing desk-continuation beat (audit-
-		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
+		// suppressed); DeskEscalate raises an internal cap notice to the desk's owning XO.
 		deskSettled := watch.NewSettledMarkerSet(rosterDir)
 		deskHeartbeatEnabled := func(agent string) bool { return currentRoster().HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
-		deskEscalate := func(agent string) { newDeskEscalate(currentRoster(), xo, alert)(agent) }
+		deskEscalate := deskHeartbeatLifecycle.escalate
 		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
 		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
 		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
-		// fresh each call and returns cfg.HeartbeatWarranted(agent, st). A desk with NO per-recipient
-		// ledger self-defaults to WARRANTED (the missing-ledger fallback — NOT the shared backlog), so a
+		// fresh each call and classifies its warrant. A desk with NO per-recipient ledger self-defaults
+		// to a fail-safe BEAT warrant (the missing-ledger fallback — NOT the shared backlog), so a
 		// deployment that keeps no per-recipient backlogs is #183-equivalent. The shared --backlog-file
 		// is deliberately NOT consulted here (it is the XO's drive queue, not a desk's work).
 		deskBacklogPath := func(agent string) string {
@@ -636,14 +713,19 @@ func cmdWatch(args []string) error {
 				raw, err := os.ReadFile(deskBacklogPath(agent))
 				if err != nil {
 					if os.IsNotExist(err) {
-						return nil, false, nil // absent ⇒ missing-ledger fallback (warranted)
+						return nil, false, nil // absent ⇒ missing-ledger fallback (fail-safe beat)
 					}
-					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe (warranted)
+					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe beat
 				}
 				return raw, true, nil
 			},
 			deskBacklogPath, // named in the #479 headingless alert so the fix is one copy-paste away
-			alert)
+			internalWedgeAlert, time.Now, func(agent string, st backlog.Status) (backlog.Status, error) {
+				return dispatch.ExcludeQuarantinedInboundWork(rosterDir, agent, st)
+			})
+		deskRecipientClosedOut := func(agent string) bool {
+			return recipientRoutingHeld(rosterDir, currentRoster(), agent)
+		}
 
 		// #216 idle-hold antipattern: per-agent consecutive-strike tracker; the break
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
@@ -771,58 +853,65 @@ func cmdWatch(args []string) error {
 		if !xoRotate.AllowsIdleEdgeRotate() {
 			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
 		}
+		assessDesk := func(agent string) surface.State {
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, agent))
+			if err != nil {
+				return surface.StateShell
+			}
+			liveCommand, err := deliver.PaneCommand(pane)
+			if err != nil {
+				return surface.StateUnknown
+			}
+			drv, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, func(string) (string, error) { return liveCommand, nil })
+			if err != nil {
+				return surface.StateUnknown
+			}
+			state := surface.AssessForFleet(drv, pane)
+			if state == surface.StateUnknown && officerDetectorIdleOverride(drv, agent, pane, liveSurface, liveCommand, watchOfficerRouteDeps(rosterDir)) {
+				return surface.StateIdle
+			}
+			return state
+		}
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
 			Interval:          interval,
 			ReferenceInterval: referenceInterval,
-			Assess: func(agent string) surface.State {
-				drv, ok := surface.Get(agentSurface(cfg, agent))
-				if !ok {
-					return surface.StateUnknown
-				}
-				pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-				if err != nil {
-					// The pane titled for this agent is gone (the session died and
-					// the pane closed, or its title no longer matches) — that is a
-					// crash, equivalent to a pane that dropped back to a shell. Map
-					// it to Shell so the detector's two-consecutive debounce absorbs a
-					// transient resolve blip but a persistent vanish still crash-alerts
-					// the XO immediately (preserving — and bettering — the legacy gate,
-					// which alerted on the very first resolve failure).
-					return surface.StateShell
-				}
-				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
-				// list-nav / queued) elevates so status does not claim plain idle when
-				// recycle's idle∧cleared gate would refuse (#557).
-				return surface.AssessForFleet(drv, pane)
-			},
-			RateLimitMaterial: rateLimitMaterial(cfg),
-			Usage:             usageObservation(cfg, flatLaunch),
+			Assess:            assessDesk,
+			RateLimitMaterial: rateLimitMaterial(currentRoster),
+			Usage:             usageObservation(currentRoster, flatLaunch),
 			UsageDispatch:     func(run func()) { go run() },
-			RateLimitReset:    rateLimitReset(cfg),
+			RateLimitReset:    rateLimitReset(currentRoster),
 			RateLimitDispatch: func(run func()) { go run() },
 			RateLimitAutoSwitchEligible: func(agent string) bool {
-				if !cfg.AutoSwitchEligible(agent) {
+				current := currentRoster()
+				if !current.AutoSwitchEligible(agent) {
 					return false
 				}
 				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
-				return agentSurface(cfg, agent) == surface.DefaultSurface
+				pane, err := deliver.ResolvePane(agentTitle(current, agent))
+				if err != nil {
+					return false
+				}
+				_, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, deliver.PaneCommand)
+				return err == nil && liveSurface == surface.DefaultSurface
 			},
 			SignalHash:   signalHash,
 			AckAge:       ack.Age,
 			Wake:         wake,
 			RotatePolicy: xoRotate,
 			Rotate: func() error {
+				current := currentRoster()
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
-				// target (the same key every other transaction writer uses), so the /clear rotate
+				// target (the same key every other transaction writer uses), so the harness-specific rotate
 				// never interleaves between any confirmed delivery's submit and its Enter-only retry
 				// — across processes (a dash control action, a `flotilla send`), not just the
 				// in-process Injector. The detector invokes Rotate from runTail, OUTSIDE detector.mu,
 				// so this bounded acquire cannot stall the tick loop (see Detector.Tick). A txn-lock
 				// timeout surfaces as a rotate error (logged, non-fatal — the continuation still
 				// proceeds, just in un-rotated context this tick).
-				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+				pane, err := deliver.ResolvePane(agentTitle(current, xo))
 				if err != nil {
 					return err
 				}
@@ -831,7 +920,7 @@ func cmdWatch(args []string) error {
 					return err
 				}
 				defer txn.Release()
-				return surface.RotateContext(xoDrv, pane)
+				return rotateWatchXOResolved(current, xo, pane, deliver.PaneCommand, surface.RotateContext)
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir, flatLaunch),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir, flatLaunch),
@@ -881,8 +970,16 @@ func cmdWatch(args []string) error {
 			SynthEveryTicks:     synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
-			HeartbeatEnabled:        deskHeartbeatEnabled,
-			HeartbeatWarranted:      deskHeartbeatWarranted,
+			HeartbeatEnabled:   deskHeartbeatEnabled,
+			RecipientClosedOut: deskRecipientClosedOut,
+			HeartbeatWarranted: deskHeartbeatWarranted,
+			HeartbeatLiveState: func(agent string) surface.State {
+				// Fresh, non-debounced fail-closed live join. Live identity must be readable and
+				// recognized; uncertainty returns Unknown and cannot authorize a beat or wedge.
+				return deskHeartbeatLiveState(currentRoster(), agent, deliver.ResolvePane, deliver.PaneCommand, resolveWatchLiveDriver, func(drv surface.Driver, pane string) surface.State {
+					return drv.Assess(pane) // the same MID-TURN signal used by `flotilla result`
+				})
+			},
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
@@ -906,7 +1003,7 @@ func cmdWatch(args []string) error {
 			}
 		}
 		if autoSwitchOn {
-			probeMaterial := rateLimitMaterial(cfg)
+			probeMaterial := rateLimitMaterial(currentRoster)
 			endFlight := func(agent string) {
 				if endAutoSwitch != nil {
 					endAutoSwitch(agent)
@@ -915,15 +1012,16 @@ func cmdWatch(args []string) error {
 			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
 			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, endFlight, autoSwitchHooks{
 				afterSuccess: func(agent string) {
-					if !cfg.IsCoordinator(agent) {
+					current := currentRoster()
+					if !current.IsCoordinator(agent) {
 						return
 					}
-					toSurface := agentSurface(cfg, agent)
+					toSurface := agentSurface(current, agent)
 					body := coordinatorResuscitationNotifyBody(agent, toSurface)
-					for _, sub := range cfg.AgentsBelow(agent) {
+					for _, sub := range current.AgentsBelow(agent) {
 						injector.Enqueue(watch.Job{Agent: sub, Message: body, Kind: watch.KindDetector})
 					}
-					if adj := cfg.AdjutantFor(agent); adj != "" {
+					if adj := current.AdjutantFor(agent); adj != "" {
 						injector.Enqueue(watch.Job{
 							Agent:   adj,
 							Message: body + "\n(Adjutant: confirm leader is live on the new tier; re-brief if needed.)",
@@ -983,9 +1081,15 @@ func cmdWatch(args []string) error {
 				},
 				IsMerged:       mergedPR,
 				IsCommitOnMain: commitOnMain,
+				RecipientClosedOut: func(recipient string) bool {
+					return recipientClosedOut(rosterDir, currentRoster(), recipient)
+				},
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
+		recipientProgressMu.Lock()
+		recipientProgress = det.RecipientDeliveryEvidence
+		recipientProgressMu.Unlock()
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight
 		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, func() {
@@ -1035,7 +1139,8 @@ func cmdWatch(args []string) error {
 		// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
 		// failure is treated as "down", never fatal to the daemon.
 		gate := func() bool {
-			pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+			current := currentRoster()
+			pane, err := deliver.ResolvePane(agentTitle(current, xo))
 			if err != nil {
 				wd.Observe(ack.Acked(), true)
 				return true
@@ -1045,7 +1150,15 @@ func cmdWatch(args []string) error {
 			// ⇒ Unknown since #55, converging all drivers; here in the legacy gate Idle
 			// and Unknown are equivalent — both are not-Shell and not-Working, so the
 			// tick fires either way.)
-			st := xoDrv.Assess(pane)
+			st, err := assessWatchXOResolved(current, xo, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) surface.State {
+				return drv.Assess(pane)
+			})
+			if err != nil {
+				// The live harness could not be established. Do not classify with a
+				// stale driver and do not send a heartbeat into the unknown pane.
+				wd.Observe(ack.Acked(), false)
+				return true
+			}
 			wd.Observe(ack.Acked(), st == surface.StateShell)
 			if wd.Down() {
 				return true
@@ -1338,24 +1451,23 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 	}
 }
 
-// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted seam (a func(agent) bool) that
+// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted classification seam that
 // the detector invokes in its PHASE-1 warrant snapshot (deskWarrantSnapshot), OFF the detector lock,
 // BEFORE the under-lock decision runs. The backlog read is FILE I/O and lives HERE — off d.mu — so the
-// under-lock phase-2 decision consults only the resulting pure boolean (the detector's load-bearing
+// under-lock phase-2 decision consults only the resulting pure classification (the detector's load-bearing
 // off-mutex invariant, the same one synthesis + the mirror honor). For each agent it reads that agent's
 // OWN backlog (read is keyed by agent and resolves <rosterDir>/flotilla-<agent>-backlog.md), parses it
-// fresh each call (it is the desk's own output — NOT content-hashed), and returns
-// cfg.HeartbeatWarranted(agent, st).
+// fresh each call (it is the desk's own output — NOT content-hashed).
 //
-// The fail-safe direction is toward WARRANTED (keep the desk moving — never the silent-stall #183
-// fixed):
+// The fail-safe direction preserves the BEAT (keep the desk moving — never the silent-stall #183
+// fixed) while remaining cap-neutral because it is not positive evidence of owed work:
 //   - ABSENT per-recipient file ⇒ WARRANTED via the missing-ledger fallback (the desk has not opted
 //     into the judgment ⇒ driven exactly as #183). It does NOT fall back to the shared fleet backlog
 //     (that is the XO's drive queue, not THIS desk's; consulting it would warrant every ledger-less
 //     desk on a busy fleet — re-creating the indiscriminate poking this change exists to end).
 //   - UNREADABLE/torn present file ⇒ WARRANTED (fail-safe; a torn mid-write read self-heals next tick).
-//   - PRESENT-but-sectionless (Found=false) ⇒ WARRANTED via cfg.HeartbeatWarranted's !Found arm, AND a
-//     LOUD alert on a CONTENT-HASH latch (#479): the first headingless read alerts — naming the file,
+//   - PRESENT-but-sectionless (Found=false) ⇒ FAIL-SAFE warrant plus an INTERNAL notice on a
+//     CONTENT-HASH latch (#479): the first headingless read alerts — naming the file,
 //     the missing heading, and the one-line fix — and the alert REPEATS only when the file's content
 //     CHANGED and is STILL headingless. #479's discovering case showed why the old edge latch was not
 //     enough: a desk that keeps editing its ledger (reconciling markers, adding items) without ever
@@ -1369,28 +1481,39 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 // from the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch
 // map is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
 // AgentWake) never invoke this seam.
-func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
-	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert)
+func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string)) func(agent string) watch.DeskHeartbeatWarrant {
+	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert, time.Now)
 }
 
-func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
+func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string, string), now func() time.Time, filters ...func(string, backlog.Status) (backlog.Status, error)) func(agent string) watch.DeskHeartbeatWarrant {
 	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
-	return func(agent string) bool {
+	return func(agent string) watch.DeskHeartbeatWarrant {
 		raw, exists, err := read(agent)
 		if !exists {
 			// Absent (missing-ledger fallback): WARRANTED, latch cleared — a deleted ledger resets
 			// the state, so a re-created file is a genuinely new file and may alert afresh.
 			delete(alerted, agent)
-			return true
+			return watch.DeskHeartbeatFailSafeWarrant
 		}
 		if err != nil {
 			// Unreadable/torn (fail-safe): WARRANTED, latch KEPT — a transient read glitch must not
 			// make the SAME unchanged broken bytes re-alert once the read heals (cubic #480 P2);
 			// "repeat only when the file changes or after a clean read" survives the glitch.
-			return true
+			return watch.DeskHeartbeatFailSafeWarrant
 		}
 		content := string(raw)
 		st := backlog.Parse(content)
+		for _, filter := range filters {
+			if filter == nil {
+				continue
+			}
+			st, err = filter(agent, st)
+			if err != nil {
+				// Quarantine uncertainty is not positive work evidence. Suppress both beat and
+				// cap accrual until the durable disposition becomes readable again.
+				return watch.DeskHeartbeatNotWarranted
+			}
+		}
 		// A present, readable file with NO "## Backlog" section (and non-empty content) is the format
 		// slip the !Found warrant arm keeps WARRANTED — loud on first sight AND on every failed fix
 		// attempt (changed-but-still-headingless), silent while the broken file is untouched (#479).
@@ -1399,14 +1522,54 @@ func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent str
 			h := fmt.Sprintf("%x", sha256.Sum256(raw))
 			if alerted[agent] != h {
 				alerted[agent] = h
-				alert(fmt.Sprintf("desk-heartbeat: %s's backlog (%s) has NO '## Backlog' section — the settle judgment parses ONLY that section, so it cannot prove the desk settled and heartbeats stay warranted. Fix: add a '## Backlog' heading above the item list. This alert repeats only if the file changes and is still missing the heading (#479).",
+				alert(agent, fmt.Sprintf("desk-heartbeat: %s's backlog (%s) has NO '## Backlog' section — the settle judgment parses ONLY that section, so it cannot prove the desk settled and heartbeats stay warranted. Fix: add a '## Backlog' heading above the item list. This alert repeats only if the file changes and is still missing the heading (#479).",
 					agent, path(agent)))
 			}
 		} else {
 			delete(alerted, agent)
 		}
-		return current().HeartbeatWarranted(agent, st)
+		if !st.Found {
+			return watch.DeskHeartbeatFailSafeWarrant
+		}
+		positive := current().HeartbeatWarranted(agent, st) && heartbeatObligationDue(st, now())
+		if positive {
+			return watch.DeskHeartbeatPositiveWarrant
+		}
+		return watch.DeskHeartbeatNotWarranted
 	}
+}
+
+var heartbeatDueTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z`)
+
+func parseHeartbeatDueTimestamp(stamp string) (time.Time, error) {
+	if due, err := time.Parse(time.RFC3339, stamp); err == nil {
+		return due, nil
+	}
+	// Operational pre-wall markers commonly omit seconds (for example 2026-08-13T21:13Z).
+	return time.Parse("2006-01-02T15:04Z", stamp)
+}
+
+// heartbeatObligationDue distinguishes an actionable obligation from a future [next] clock. An
+// [in-flight] item (or an undated [next]) is due now. A [next] item carrying an explicit UTC instant
+// becomes positive only at that instant, so waiting for its wall clock is not a progress failure.
+func heartbeatObligationDue(st backlog.Status, now time.Time) bool {
+	for _, line := range st.Unblocked {
+		if backlog.ClassifyLine(line) != "next" {
+			return true
+		}
+		if !strings.Contains(strings.ToLower(line), "pre-wall") {
+			return true
+		}
+		stamp := heartbeatDueTimestamp.FindString(line)
+		if stamp == "" {
+			return true
+		}
+		due, err := parseHeartbeatDueTimestamp(stamp)
+		if err != nil || !now.Before(due) {
+			return true
+		}
+	}
+	return false
 }
 
 // leaderPingBody is the primary-coordinator liveness ping (no adjutant configured).
@@ -1775,15 +1938,47 @@ func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) st
 }
 
 // newDeskEscalate builds the detector's DeskEscalate seam (#183 §8e): when a desk is capped (idle +
-// un-progressing across N beats), it raises ONE LOUD operator-visible alert to the desk's OWNING XO —
-// the channel the desk is a member of / its parent (roster.OwningXO), falling back to the primary XO.
-// It uses the LOUD alert path (operator-visible), NOT a quiet WakeAgent to a possibly-idle parent: a
-// wedged desk must surface loudly, not be poked further. The detector fires this ONCE on the ==capN
-// edge then stops beating the desk; a re-arm (AgentWake) resumes the cadence.
-func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) func(string) {
+// un-progressing across N beats), it emits one internal lifecycle alert through the desk's owning-
+// coordinator resolver. The shared KindDetector enqueue then applies normal coordinator ingress,
+// including the existing adjutant alias. The detector fires this once on the ==capN edge and stops
+// beating the desk; AgentWake re-arms the cadence.
+func newDeskEscalate(cfg *roster.Config, primaryXO string, internalAlert func(string, string)) func(string) {
 	return func(agent string) {
 		owner := cfg.OwningXO(agent, primaryXO)
-		alert(fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+		internalAlert(agent, fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+	}
+}
+
+// newInternalWedgeAlert is the single swappable destination for both delivery-wedge and
+// desk-heartbeat wedge lifecycle notices. The primary implementation resolves the affected
+// seat's owning coordinator from the live roster and enqueues to that pane; it never reaches
+// the operator webhook used by alert().
+func newInternalWedgeAlert(currentRoster func() *roster.Config, primaryXO string, coordinatorAlert func(string, string)) func(string, string) {
+	return func(recipient, message string) {
+		cfg := currentRoster()
+		owner := cfg.OwningXO(recipient, primaryXO)
+		if owner == "" {
+			return
+		}
+		coordinatorAlert(owner, message)
+	}
+}
+
+type deskHeartbeatLifecycleRoutes struct {
+	alert    func(string, string)
+	escalate func(string)
+}
+
+// newDeskHeartbeatLifecycle is the production composition for every desk-heartbeat lifecycle
+// notice. Its only egress is the owning-coordinator enqueue; no operator webhook callback enters
+// this constructor, so both cap wedges and sectionless-ledger notices are structurally internal.
+func newDeskHeartbeatLifecycle(currentRoster func() *roster.Config, primaryXO string, coordinatorAlert func(string, string)) deskHeartbeatLifecycleRoutes {
+	internal := newInternalWedgeAlert(currentRoster, primaryXO, coordinatorAlert)
+	return deskHeartbeatLifecycleRoutes{
+		alert: internal,
+		escalate: func(agent string) {
+			newDeskEscalate(currentRoster(), primaryXO, internal)(agent)
+		},
 	}
 }
 
@@ -1850,40 +2045,48 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 // rateLimitMaterial returns a DetectorConfig callback that probes a desk for a
 // material provider throttle (#204). ok=false when the surface lacks RateLimitProbe.
 // Invoked OFF d.mu from runRateLimitProbes — never under tickLocked.
-func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
+func rateLimitMaterial(currentRoster func() *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
 	return func(agent string) (bool, surface.RateLimitScope, string, bool) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return false, 0, "", false
-		}
-		probe, ok := surface.RateLimitSupport(drv)
-		if !ok {
-			return false, 0, "", false
-		}
+		cfg := currentRoster()
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
 			return false, 0, "", false
 		}
-		limited, scope, detail := probe.RateLimited(pane)
-		return limited, scope, detail, true
+		return rateLimitMaterialResolved(cfg, agent, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) (bool, surface.RateLimitScope, string, bool) {
+			probe, ok := surface.RateLimitSupport(drv)
+			if !ok {
+				return false, 0, "", false
+			}
+			limited, scope, detail := probe.RateLimited(pane)
+			return limited, scope, detail, true
+		})
 	}
+}
+
+func rateLimitMaterialResolved(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), probe func(surface.Driver, string) (bool, surface.RateLimitScope, string, bool)) (bool, surface.RateLimitScope, string, bool) {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return false, 0, "", false
+	}
+	return probe(drv, pane)
 }
 
 // usageObservation wires the optional read-only UsageProbe. Provider identity
 // comes from the active launch slot, the same source auto-switch trusts; missing
 // chrome/capability/slot metadata remains honest absence where applicable.
-func usageObservation(cfg *roster.Config, launches *launch.Config) func(string) (surface.UsageReport, string, string, bool) {
+func usageObservation(currentRoster func() *roster.Config, launches *launch.Config) func(string) (surface.UsageReport, string, string, bool) {
 	return func(agent string) (surface.UsageReport, string, string, bool) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
+		cfg := currentRoster()
+		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+		if err != nil {
+			return surface.UsageReport{}, "", "", false
+		}
+		drv, err := resolveWatchLiveDriver(cfg, agent, pane, deliver.PaneCommand)
+		if err != nil {
 			return surface.UsageReport{}, "", "", false
 		}
 		probe, ok := surface.UsageSupport(drv)
 		if !ok {
-			return surface.UsageReport{}, "", "", false
-		}
-		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-		if err != nil {
 			return surface.UsageReport{}, "", "", false
 		}
 		report, ok := probe.Usage(pane)
@@ -1932,21 +2135,27 @@ func activeUsageSlotMeta(agent string, launches *launch.Config) (provider, subsc
 
 // rateLimitReset clears a desk's consecutive-read streak when it leaves the probe
 // candidate states (Idle/Errored).
-func rateLimitReset(cfg *roster.Config) func(agent string) {
+func rateLimitReset(currentRoster func() *roster.Config) func(agent string) {
 	return func(agent string) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return
-		}
-		if _, ok := surface.RateLimitSupport(drv); !ok {
-			return
-		}
+		cfg := currentRoster()
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
 			return
 		}
-		surface.ClearRateLimitStreak(pane)
+		rateLimitResetResolved(cfg, agent, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) {
+			if _, ok := surface.RateLimitSupport(drv); ok {
+				surface.ClearRateLimitStreak(pane)
+			}
+		})
 	}
+}
+
+func rateLimitResetResolved(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), reset func(surface.Driver, string)) {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return
+	}
+	reset(drv, pane)
 }
 
 // readDeskTurnFinal returns a desk's substantive turn-final via the shared
@@ -1956,12 +2165,13 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 	if err != nil {
 		return "", false, err
 	}
-	rr, _, liveSurface, drift, err := surface.ResolveResultReader(agentSurface(cfg, agent), pane, deliver.PaneCommand)
+	drv, liveSurface, drift, err := surface.ResolveLiveDriver(agentSurface(cfg, agent), pane, deliver.PaneCommand)
 	if err != nil {
-		if strings.Contains(err.Error(), "has no session-store result reader") {
-			return "", false, nil
-		}
 		return "", false, err
+	}
+	rr, ok := drv.(surface.ResultReader)
+	if !ok {
+		return "", false, nil
 	}
 	if drift {
 		log.Printf("flotilla watch: result read drift — %s roster surface differs from live pane harness %q", agent, liveSurface)
@@ -2384,6 +2594,79 @@ func agentSurface(cfg *roster.Config, name string) string {
 		return a.Surface
 	}
 	return ""
+}
+
+// resolveWatchLiveDriver is the single pane-first driver resolver for watch
+// delivery and detector assessment. A readable live command is authoritative;
+// an unknown command is an error, never permission to use a stale classifier.
+// A command-read error is also unknown: no classifier may run without proving
+// which harness owns the live pane.
+func resolveWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error)) (surface.Driver, error) {
+	drv, liveSurface, drift, err := surface.ResolveLiveDriver(agentSurface(cfg, agent), pane, paneCommand)
+	if err != nil {
+		return nil, fmt.Errorf("resolve live surface for agent %q: %w", agent, err)
+	}
+	if drift {
+		log.Printf("flotilla watch: delivery driver drift — %s configured surface differs from live pane harness %q; using live harness", agent, liveSurface)
+	}
+	return drv, nil
+}
+
+func submitWithWatchLiveDriver(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), submit func(surface.Driver) error) error {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return err
+	}
+	return submit(drv)
+}
+
+func assessWatchAgent(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error)) surface.State {
+	pane, err := resolvePane(agentTitle(cfg, agent))
+	if err != nil {
+		return surface.StateShell
+	}
+	return assessWatchResolvedPane(cfg, agent, pane, paneCommand, surface.AssessForFleet)
+}
+
+type heartbeatLiveDriverResolver func(*roster.Config, string, string, func(string) (string, error)) (surface.Driver, error)
+
+// deskHeartbeatLiveState observes a fresh fail-closed live identity. Unlike ResolveResultReader's
+// compatibility path, resolveWatchLiveDriver refuses an unreadable or unrecognized pane command;
+// those failures become Unknown before any stale roster driver can be assessed.
+func deskHeartbeatLiveState(cfg *roster.Config, agent string, resolvePane func(string) (string, error), paneCommand func(string) (string, error), resolveLive heartbeatLiveDriverResolver, assess func(surface.Driver, string) surface.State) surface.State {
+	pane, err := resolvePane(agentTitle(cfg, agent))
+	if err != nil {
+		return surface.StateUnknown
+	}
+	drv, err := resolveLive(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown
+	}
+	return assess(drv, pane)
+}
+
+func assessWatchResolvedPane(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) surface.State {
+	drv, err := resolveWatchLiveDriver(cfg, agent, pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown
+	}
+	return assess(drv, pane)
+}
+
+func assessWatchXOResolved(cfg *roster.Config, xo, pane string, paneCommand func(string) (string, error), assess func(surface.Driver, string) surface.State) (surface.State, error) {
+	drv, err := resolveWatchLiveDriver(cfg, xo, pane, paneCommand)
+	if err != nil {
+		return surface.StateUnknown, err
+	}
+	return assess(drv, pane), nil
+}
+
+func rotateWatchXOResolved(cfg *roster.Config, xo, pane string, paneCommand func(string) (string, error), rotate func(surface.Driver, string) error) error {
+	drv, err := resolveWatchLiveDriver(cfg, xo, pane, paneCommand)
+	if err != nil {
+		return err
+	}
+	return rotate(drv, pane)
 }
 
 // adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval

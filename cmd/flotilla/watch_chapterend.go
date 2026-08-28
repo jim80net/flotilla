@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/chapterend"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -73,11 +74,33 @@ func chapterEndOnFinish(
 				log.Printf("flotilla watch: coordinator tenure %q suppressed: %v", agent, tenureErr)
 				return
 			}
+			if tenureDue && !coordinatorTenureEligible(cfg, agent, backlogMD) {
+				log.Printf("flotilla watch: coordinator tenure %q suppressed: no active backlog claim", agent)
+				tenureDue = false
+			}
 			r = chapterend.CheckCoordinator(text, backlogMD, tenureDue)
 			if tenureDue {
 				log.Printf("flotilla watch: coordinator tenure %q due after %s", agent, age.Round(time.Minute))
 			}
 		}
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			log.Printf("flotilla watch: chapter-end %q suppressed: resolve home for recycle cooldown: %v", agent, homeErr)
+			return
+		}
+		admit, cooldownReason, cooldownErr := admitChapterEndAfterRecycle(
+			filepath.Join(home, ".flotilla", agent), r, backlogMD,
+		)
+		if cooldownErr != nil {
+			log.Printf("flotilla watch: chapter-end %q suppressed: recycle cooldown: %v", agent, cooldownErr)
+			return
+		}
+		if !admit {
+			log.Printf("flotilla watch: chapter-end suppressed for %q: %s", agent, cooldownReason)
+			_ = tracker.Record(agent, chapterend.Result{SuppressReason: cooldownReason})
+			return
+		}
+		rearmChapterEndTrackerForCooldownReason(tracker, agent, cooldownReason)
 		if r.SuppressReason != "" {
 			log.Printf("flotilla watch: chapter-end suppressed for %q: %s", agent, r.SuppressReason)
 			_ = tracker.Record(agent, r) // record suppress; no dispatch
@@ -126,6 +149,26 @@ func chapterEndOnFinish(
 		}
 		go dispatchChapterEndRecycle(agent, self, rosterPath, endFlight)
 	}
+}
+
+func rearmChapterEndTrackerForCooldownReason(tracker *chapterend.Tracker, agent, reason string) {
+	if tracker != nil && reason == "new-unblocked-backlog" {
+		tracker.Reset(agent)
+	}
+}
+
+// coordinatorTenureEligible keeps the continuously standing fleet roots on
+// their tenure clock, while a product coordinator must have an active backlog
+// claim. A claimless dormant product XO must not be rotated merely because a
+// wall-clock baseline aged after gather (#1037 fourth specimen).
+func coordinatorTenureEligible(cfg *roster.Config, agent, backlogMD string) bool {
+	if cfg == nil || agent == "" {
+		return false
+	}
+	if agent == cfg.XOAgent || agent == cfg.CosAgent {
+		return true
+	}
+	return len(backlog.Parse(backlogMD).Unblocked) > 0
 }
 
 func readDeskBacklogMarkdown(rosterDir, agent string) string {

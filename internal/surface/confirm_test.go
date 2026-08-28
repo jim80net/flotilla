@@ -191,6 +191,20 @@ func TestConfirmSubmitConfirmsOnComposerClear(t *testing.T) {
 	}
 }
 
+func TestSubmitOfficerProvenIdleSkipsOnlyUncertainPreGateAndStillConfirms(t *testing.T) {
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateWorking},
+		stateSeq:  []ComposerDisposition{ComposerUndetermined},
+	}
+	if err := newConfirm(&enter).SubmitOfficerProvenIdle(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("SubmitOfficerProvenIdle: %v", err)
+	}
+	if d.submitCalls != 1 || d.aIdx != 1 || enter != 0 {
+		t.Fatalf("submit=%d assess=%d enter=%d, want 1/1/0", d.submitCalls, d.aIdx, enter)
+	}
+}
+
 func TestSubmitInterruptWorkingMainComposerConfirmsQueued(t *testing.T) {
 	enter := 0
 	d := &stateStub{

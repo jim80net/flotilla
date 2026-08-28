@@ -21,7 +21,7 @@ type claudeCode struct {
 	paneCommand func(string) (string, error)
 	isShell     func(string) bool
 	capturePane func(string) (string, error)
-	parseBusy   func(string) bool
+	parseBusyAt func(string, int) bool
 	send        func(string, string) error
 	clear       func(string) error
 	// Close seam: inject a slash command (e.g. "/exit") as literal slash-keys. Command-
@@ -44,7 +44,7 @@ func newClaudeCode() claudeCode {
 		paneCommand:    deliver.PaneCommand,
 		isShell:        deliver.IsShell,
 		capturePane:    deliver.CapturePane,
-		parseBusy:      deliver.ParseBusy,
+		parseBusyAt:    deliver.ParseBusyAt,
 		send:           deliver.Send,
 		clear:          deliver.ClearContext,
 		slashKeys:      deliver.InjectSlash,
@@ -99,7 +99,16 @@ func (c claudeCode) Assess(pane string) State {
 		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as unknown, not a false finish)", pane, err)
 		return StateUnknown
 	}
-	if c.parseBusy(captured) {
+	// Working requires cursor-vouched composer provenance. On cursor failure or
+	// copy/view mode, do not trust prompt glyphs in text: they may be historical.
+	// Confirm's composer gate still guards any subsequent paste.
+	busy := false
+	if c.cursorState != nil && c.parseBusyAt != nil {
+		if cursorY, inMode, cursorErr := c.cursorState(pane); cursorErr == nil && !inMode {
+			busy = c.parseBusyAt(captured, cursorY)
+		}
+	}
+	if busy {
 		return StateWorking
 	}
 	// Interactive confirmation chrome (worktree-exit, numbered confirm, AskUserQuestion-

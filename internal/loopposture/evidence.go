@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -66,6 +67,15 @@ func LoadFleetEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snap
 	for _, a := range cfg.Agents {
 		backlogPath := filepath.Join(rosterDir, "flotilla-"+a.Name+"-backlog.md")
 		st, backlogKnown := ReadBacklogFile(backlogPath)
+		if backlogKnown {
+			var err error
+			st, err = dispatch.ExcludeQuarantinedInboundWork(rosterDir, a.Name, st)
+			if err != nil {
+				// Quarantine uncertainty cannot advertise actionable work or authorize a wake.
+				backlogKnown = false
+				st = backlog.Status{}
+			}
+		}
 		settled := agentSettled(xo, rosterDir, a.Name, snap, snapOK)
 		out[a.Name] = FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
 	}

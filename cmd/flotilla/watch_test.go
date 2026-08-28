@@ -7,6 +7,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -99,5 +100,228 @@ func TestAgentSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "data", Surface: "grok"}}}
 	if got := agentSurface(cfg, "data"); got != "grok" {
 		t.Errorf("agentSurface(torn overlay) = %q, want the roster surface grok (fail-safe)", got)
+	}
+}
+
+func TestResolveWatchLiveDriverAllConfiguredToLiveDirections(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	surfaces := []struct{ surface, command string }{
+		{"claude-code", "claude"}, {"grok", "grok"}, {"codex", "codex"},
+		{"opencode", "opencode"}, {"pi", "pi"}, {"aider", "aider"},
+	}
+	for _, configured := range surfaces {
+		for _, live := range surfaces {
+			t.Run(configured.surface+"_to_"+live.surface, func(t *testing.T) {
+				cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: configured.surface}}}
+				drv, err := resolveWatchLiveDriver(cfg, "coordinator", "%42", func(pane string) (string, error) {
+					if pane != "%42" {
+						t.Fatalf("pane = %q, want %%42", pane)
+					}
+					return live.command, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if drv.Name() != live.surface {
+					t.Fatalf("delivery driver = %q, want live %q driver", drv.Name(), live.surface)
+				}
+			})
+		}
+	}
+}
+
+func TestWatchLiveDriverCommandReadErrorFailsClosed(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	submitted := false
+	err := submitWithWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver) error {
+		submitted = true
+		return nil
+	})
+	if err == nil || submitted {
+		t.Fatalf("unreadable submit: err=%v submitted=%v, want error/false", err, submitted)
+	}
+	assessed := false
+	got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) surface.State {
+		assessed = true
+		return surface.StateIdle
+	})
+	if got != surface.StateUnknown || assessed {
+		t.Fatalf("unreadable assess: state=%v assessed=%v, want unknown/false", got, assessed)
+	}
+}
+
+func TestSubmitWithWatchLiveDriverUnknownCommandDoesNotSubmit(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	for _, command := range []string{"mystery-agent", "bash", "", "   "} {
+		t.Run("command="+command, func(t *testing.T) {
+			called := false
+			err := submitWithWatchLiveDriver(cfg, "coordinator", "%42", func(string) (string, error) {
+				return command, nil
+			}, func(surface.Driver) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("unknown/ambiguous live command must fail closed")
+			}
+			if called {
+				t.Fatal("submit was called through an unknown/ambiguous live command")
+			}
+		})
+	}
+}
+
+func TestAssessWatchResolvedPaneUsesLiveDriverForWorkingAndIdle(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	for _, want := range []surface.State{surface.StateWorking, surface.StateIdle} {
+		got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+			return "grok", nil
+		}, func(drv surface.Driver, pane string) surface.State {
+			if drv.Name() != "grok" {
+				t.Fatalf("detector assessed with %q, want live grok driver", drv.Name())
+			}
+			if pane != "%42" {
+				t.Fatalf("detector pane = %q, want %%42", pane)
+			}
+			return want
+		})
+		if got != want {
+			t.Fatalf("detector state = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestAssessWatchResolvedPaneUnknownCommandIsUnknown(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+	called := false
+	got := assessWatchResolvedPane(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "ambiguous", nil
+	}, func(surface.Driver, string) surface.State {
+		called = true
+		return surface.StateIdle
+	})
+	if got != surface.StateUnknown || called {
+		t.Fatalf("unknown command detector = %v assessCalled=%v, want unknown/false", got, called)
+	}
+}
+
+func TestRateLimitActuationUsesLiveGrokAndFailsClosedUnreadable(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "coordinator", Surface: "claude-code"}}}
+
+	called := false
+	limited, scope, detail, ok := rateLimitMaterialResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) (bool, surface.RateLimitScope, string, bool) {
+		called = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("rate-limit probe got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+		return true, surface.RateLimitAccountSide, "grok throttle", true
+	})
+	if !called || !limited || !ok || scope != surface.RateLimitAccountSide || detail != "grok throttle" {
+		t.Fatalf("live Grok rate limit = (%v,%v,%q,%v) called=%v", limited, scope, detail, ok, called)
+	}
+
+	called = false
+	_, _, _, ok = rateLimitMaterialResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) (bool, surface.RateLimitScope, string, bool) {
+		called = true
+		return true, surface.RateLimitServerSide, "wrong", true
+	})
+	if ok || called {
+		t.Fatalf("unreadable rate-limit material: ok=%v probed=%v, want false/false", ok, called)
+	}
+
+	reset := false
+	rateLimitResetResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) {
+		reset = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("rate-limit reset got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+	})
+	if !reset {
+		t.Fatal("live Grok rate-limit reset did not run")
+	}
+	reset = false
+	rateLimitResetResolved(cfg, "coordinator", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) { reset = true })
+	if reset {
+		t.Fatal("unreadable rate-limit reset must fail closed before reset")
+	}
+}
+
+func TestWatchXOLiveDriverAssessmentAndRotation(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	staleClaude := &roster.Config{Agents: []roster.Agent{{Name: "xo", Surface: "claude-code"}}}
+	assessed := false
+	state, err := assessWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "grok", nil
+	}, func(drv surface.Driver, pane string) surface.State {
+		assessed = true
+		if drv.Name() != "grok" || pane != "%42" {
+			t.Fatalf("legacy gate got driver=%q pane=%q, want grok/%%42", drv.Name(), pane)
+		}
+		return surface.StateWorking
+	})
+	if err != nil || !assessed || state != surface.StateWorking {
+		t.Fatalf("legacy live-Grok gate = (%v,%v) assessed=%v", state, err, assessed)
+	}
+
+	for _, tc := range []struct {
+		name, configured, command, want string
+	}{
+		{"stale Claude to Grok", "claude-code", "grok", "grok"},
+		{"stale Grok to Claude", "grok", "claude", "claude-code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &roster.Config{Agents: []roster.Agent{{Name: "xo", Surface: tc.configured}}}
+			rotated := false
+			err := rotateWatchXOResolved(cfg, "xo", "%42", func(string) (string, error) {
+				return tc.command, nil
+			}, func(drv surface.Driver, pane string) error {
+				rotated = true
+				if drv.Name() != tc.want || pane != "%42" {
+					t.Fatalf("rotation got driver=%q pane=%q, want %s/%%42", drv.Name(), pane, tc.want)
+				}
+				return nil
+			})
+			if err != nil || !rotated {
+				t.Fatalf("rotation err=%v rotated=%v", err, rotated)
+			}
+		})
+	}
+
+	assessed = false
+	state, err = assessWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) surface.State {
+		assessed = true
+		return surface.StateIdle
+	})
+	if err == nil || state != surface.StateUnknown || assessed {
+		t.Fatalf("unreadable legacy gate: state=%v err=%v assessed=%v", state, err, assessed)
+	}
+	rotated := false
+	err = rotateWatchXOResolved(staleClaude, "xo", "%42", func(string) (string, error) {
+		return "", os.ErrNotExist
+	}, func(surface.Driver, string) error {
+		rotated = true
+		return nil
+	})
+	if err == nil || rotated {
+		t.Fatalf("unreadable rotation: err=%v rotated=%v, want error/false", err, rotated)
 	}
 }

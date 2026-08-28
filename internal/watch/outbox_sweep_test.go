@@ -169,6 +169,38 @@ func TestSweepAdmitsOnlyRecipientHeadUntilCompleted(t *testing.T) {
 	}
 }
 
+func TestSweepAdmitsEachSenderLaneAndPreservesLaneFIFO(t *testing.T) {
+	dir := t.TempDir()
+	alphaFirst, _, err := outbox.Enqueue(dir, "alpha", "cos", "alpha first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaSecond, _, err := outbox.Enqueue(dir, "alpha", "cos", "alpha second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaFirst, _, err := outbox.Enqueue(dir, "beta", "cos", "beta first")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var ids []string
+	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
+	if got := s.SweepAll(); got != 2 {
+		t.Fatalf("sweep count = %d, want one head from each of two sender lanes", got)
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		seen[id] = true
+	}
+	if !seen[alphaFirst] || !seen[betaFirst] {
+		t.Fatalf("admitted IDs = %v, want lane heads %s and %s", ids, alphaFirst, betaFirst)
+	}
+	if seen[alphaSecond] {
+		t.Fatalf("same-lane successor %s queue-jumped head %s", alphaSecond, alphaFirst)
+	}
+}
+
 func TestInjectorDefersBusySend(t *testing.T) {
 	r := newRig(surface.ErrBusy)
 	r.in.rosterDir = t.TempDir()
