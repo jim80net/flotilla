@@ -24,6 +24,141 @@ func TestScheduleStateSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeadlineScheduleWakesOwningSeatBeforeExpiry(t *testing.T) {
+	dir := t.TempDir()
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "backend", Prompt: "refresh the OAuth credential",
+	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
+	now := due.Add(-20 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 0 {
+		t.Fatalf("before pre-wall window jobs = %d, want zero", len(jobs))
+	}
+	now = due.Add(-10 * time.Minute)
+	sc.Tick()
+	sc.Tick()
+	if len(jobs) != 1 {
+		t.Fatalf("pre-wall jobs = %d, want one durable wake", len(jobs))
+	}
+	if jobs[0].Agent != "backend" || !strings.HasPrefix(jobs[0].Message, "[deadline pre-wall: oauth-expiry due 2026-08-28T12:59:00Z]") {
+		t.Fatalf("pre-wall job = %+v", jobs[0])
+	}
+}
+
+func TestDeadlineScheduleEmitsOverdueWakeAfterPreWall(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	schedules := []roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "backend", Prompt: "refresh the OAuth credential",
+	}}
+	sc := NewScheduler(schedules, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	now := due.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	// Recreate the scheduler to prove the overdue stage is independent of the
+	// durably recorded pre-wall stage across a daemon restart.
+	sc = NewScheduler(schedules, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	now = due.Add(6 * time.Minute)
+	sc.Tick()
+	sc.Tick()
+	if len(jobs) != 2 {
+		t.Fatalf("deadline jobs = %d, want pre-wall plus one overdue wake", len(jobs))
+	}
+	if !strings.HasPrefix(jobs[1].Message, "[deadline overdue: oauth-expiry due 2026-08-28T12:59:00Z]") {
+		t.Fatalf("overdue body = %q", jobs[1].Message)
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.PreWallFiredAt == "" || state.OverdueFiredAt == "" {
+		t.Fatalf("deadline state = %+v, want both stages committed", state)
+	}
+}
+
+func TestDeadlineScheduleRestartAfterExpiryWakesOverdueOnly(t *testing.T) {
+	dir := t.TempDir()
+	due := time.Date(2026, 8, 28, 12, 59, 0, 0, time.UTC)
+	var jobs []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "oauth-expiry", Deadline: due.Format(time.RFC3339), PreWall: "15m",
+		To: "backend", Prompt: "refresh the OAuth credential",
+	}}, filepath.Join(dir, "state.json"), dir, func(j Job) { jobs = append(jobs, j) })
+	sc.now = func() time.Time { return due.Add(6 * time.Minute) }
+	sc.CatchUp()
+	if len(jobs) != 1 || !strings.HasPrefix(jobs[0].Message, "[deadline overdue:") {
+		t.Fatalf("restart catch-up jobs = %+v, want overdue only", jobs)
+	}
+}
+
+func TestDeadlineScheduleSameNameNewDeadlineRearmsPreWall(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	firstDue := time.Date(2026, 8, 28, 12, 59, 0, 123456789, time.UTC)
+	var jobs []Job
+	newScheduler := func(due time.Time) *Scheduler {
+		return NewScheduler([]roster.Schedule{{
+			Name: "oauth-expiry", Deadline: due.Format(time.RFC3339Nano), PreWall: "15m",
+			To: "backend", Prompt: "refresh the OAuth credential",
+		}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	}
+	sc := newScheduler(firstDue)
+	now := firstDue.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	now = firstDue.Add(time.Minute)
+	sc.Tick()
+
+	secondDue := firstDue.Add(24 * time.Hour)
+	sc = newScheduler(secondDue)
+	now = secondDue.Add(-10 * time.Minute)
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 3 {
+		t.Fatalf("jobs after renewed same-name deadline = %d, want old pre-wall+overdue and new pre-wall", len(jobs))
+	}
+	if !strings.HasPrefix(jobs[2].Message, "[deadline pre-wall: oauth-expiry due 2026-08-29T12:59:00Z]") {
+		t.Fatalf("renewed deadline body = %q", jobs[2].Message)
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.Deadline != secondDue.UTC().Format(time.RFC3339Nano) || state.PreWallFiredAt == "" || state.OverdueFiredAt != "" {
+		t.Fatalf("renewed deadline state = %+v", state)
+	}
+}
+
+func TestDeadlineScheduleEquivalentOffsetIdentityDoesNotRefire(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	dueUTC := time.Date(2026, 8, 28, 12, 59, 0, 123456789, time.UTC)
+	var jobs []Job
+	newScheduler := func(deadline string) *Scheduler {
+		return NewScheduler([]roster.Schedule{{
+			Name: "oauth-expiry", Deadline: deadline, PreWall: "15m",
+			To: "backend", Prompt: "refresh the OAuth credential",
+		}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	}
+	now := dueUTC.Add(-10 * time.Minute)
+	sc := newScheduler(dueUTC.Format(time.RFC3339Nano))
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+
+	offset := time.FixedZone("UTC-05", -5*60*60)
+	sc = newScheduler(dueUTC.In(offset).Format(time.RFC3339Nano))
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(jobs) != 1 {
+		t.Fatalf("equivalent offset deadline jobs=%d, want no extra pre-wall fire", len(jobs))
+	}
+	state := LoadScheduleState(statePath).Deadlines["oauth-expiry"]
+	if state.Deadline != "2026-08-28T12:59:00.123456789Z" {
+		t.Fatalf("canonical deadline identity=%q, want UTC RFC3339Nano", state.Deadline)
+	}
+}
+
 func TestSchedulerNoDoubleFire(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")

@@ -40,9 +40,10 @@
     { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] },
     { "channel_id": "YOUR_PI_CHANNEL_ID", "xo_agent": "pi-desk", "members": ["frontend"] }
   ],
-  "_comment_schedules": "Daemon-native daily wall-clock dispatch (flotilla#413). Each at MUST include an explicit timezone (e.g. 12:07Z). Prompt may be inline or a host-local file path (preferred for long prompts). Durable last-fired state: <roster-dir>/flotilla-schedule-state.json.",
+  "_comment_schedules": "Daemon-native wall-clock dispatches. Set exactly one of at (daily, explicit timezone such as 12:07Z) or deadline (one-shot RFC3339 instant plus a positive pre_wall duration). Prompt may be inline or a host-local file path. State: <roster-dir>/flotilla-schedule-state.json. Schedule edits require a watch restart; they do not hot-reload.",
   "schedules": [
     { "name": "morning-parade", "at": "12:07Z", "to": "xo", "prompt": "prompts/morning-parade.md" },
-    { "name": "evening-walk", "at": "03:07Z", "to": "xo", "prompt": "prompts/evening-walk.md" }
+    { "name": "evening-walk", "at": "03:07Z", "to": "xo", "prompt": "prompts/evening-walk.md" },
+    { "name": "oauth-refresh-deadline", "deadline": "2030-01-15T12:59:00Z", "pre_wall": "15m", "to": "backend", "prompt": "Review and refresh the expiring OAuth credential." }
   ]
 }

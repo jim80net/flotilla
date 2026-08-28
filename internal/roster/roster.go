@@ -139,14 +139,22 @@ type UrgentWindow struct {
 	Match string `json:"match"`
 }
 
-// Schedule is one daily wall-clock dispatch the watch daemon may fire (#413).
+// Schedule is one wall-clock dispatch the watch daemon may fire (#413). Daily
+// schedules use At. One-shot deadline clocks use Deadline plus PreWall.
 type Schedule struct {
 	// Name is a stable identifier (unique across schedules) used in logs and the
 	// durable last-fired sidecar.
 	Name string `json:"name"`
 	// At is the daily wall-clock time with an explicit timezone, e.g. "12:07Z" or
 	// "03:07+00:00". Parsed by ParseDailyAt at load.
-	At string `json:"at"`
+	At string `json:"at,omitempty"`
+	// Deadline is an absolute RFC3339 instant for a one-shot clock. The watch
+	// daemon wakes To once at Deadline-PreWall and, if the deadline passes, once
+	// more with an overdue marker. It is mutually exclusive with At.
+	Deadline string `json:"deadline,omitempty"`
+	// PreWall is a positive Go duration (for example "15m" or "24h") naming
+	// how far before Deadline the owning seat must first be woken.
+	PreWall string `json:"pre_wall,omitempty"`
 	// To names the roster agent that receives the prompt.
 	To string `json:"to"`
 	// Prompt is the delivery body inline, or a path to a host-local prompt file
@@ -261,11 +269,12 @@ type Config struct {
 	// messages first. A busy/unavailable parade seat falls back to CosAgent, which
 	// retains the response SLA. Empty preserves the CoS-only path.
 	ParadeAgent string `json:"parade_agent,omitempty"`
-	// Schedules are daemon-native daily wall-clock dispatches (#413): each entry
-	// names a slot (at, with explicit timezone), a target agent (to), and a prompt
-	// (inline or a host-local file path — file preferred for long prompts). Durable
-	// last-fired state lives in <roster-dir>/flotilla-schedule-state.json (not in
-	// the roster). Empty ⇒ the scheduler is inert.
+	// Schedules are daemon-native wall-clock dispatches (#413). Each entry sets
+	// exactly one of At (daily, explicit timezone) or Deadline (one-shot RFC3339
+	// instant requiring positive PreWall), plus a target and prompt. Durable stage
+	// state lives in <roster-dir>/flotilla-schedule-state.json. Watch constructs
+	// the scheduler at process start; roster schedule edits do not hot-reload and
+	// require a watch restart. Empty means the scheduler is inert.
 	Schedules []Schedule `json:"schedules,omitempty"`
 
 	// CosLedger is where the CoS context-mirror appends its deterministic
@@ -625,8 +634,27 @@ func (c *Config) validateSchedules(path string) error {
 			return fmt.Errorf("roster %q: duplicate schedule name %q", path, sch.Name)
 		}
 		seen[sch.Name] = true
-		if _, _, _, err := ParseDailyAt(sch.At); err != nil {
-			return fmt.Errorf("roster %q: schedule %q: %w", path, sch.Name, err)
+		hasDaily := strings.TrimSpace(sch.At) != ""
+		hasDeadline := strings.TrimSpace(sch.Deadline) != ""
+		if hasDaily == hasDeadline {
+			return fmt.Errorf("roster %q: schedule %q must set exactly one of at or deadline", path, sch.Name)
+		}
+		if hasDaily {
+			if _, _, _, err := ParseDailyAt(sch.At); err != nil {
+				return fmt.Errorf("roster %q: schedule %q: %w", path, sch.Name, err)
+			}
+			if strings.TrimSpace(sch.PreWall) != "" {
+				return fmt.Errorf("roster %q: daily schedule %q cannot set pre_wall", path, sch.Name)
+			}
+		} else {
+			deadline, err := time.Parse(time.RFC3339, sch.Deadline)
+			if err != nil || deadline.IsZero() {
+				return fmt.Errorf("roster %q: schedule %q has invalid RFC3339 deadline %q", path, sch.Name, sch.Deadline)
+			}
+			preWall, err := time.ParseDuration(sch.PreWall)
+			if err != nil || preWall <= 0 {
+				return fmt.Errorf("roster %q: deadline schedule %q requires a positive pre_wall duration", path, sch.Name)
+			}
 		}
 		if sch.To == "" {
 			return fmt.Errorf("roster %q: schedule %q has an empty to", path, sch.Name)
