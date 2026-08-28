@@ -121,6 +121,60 @@ func TestRecycleStatusAuditPreservesFirstSuccessfulTokenBeyondRollingWindow1037(
 	}
 }
 
+func TestRecycleStatusAuditMigratesEarliestLegacySuccess1037(t *testing.T) {
+	for _, currentOK := range []bool{true, false} {
+		name := "current-failed"
+		if currentOK {
+			name = "current-succeeded-later"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			plan := testPlan()
+			plan.agent = "product-xo"
+			plan.token = "third-success"
+			statusDir := filepath.Join(home, ".flotilla", plan.agent)
+			if err := os.MkdirAll(statusDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			legacy := struct {
+				At      string                      `json:"at"`
+				Token   string                      `json:"token"`
+				OK      bool                        `json:"ok"`
+				History []recycleStatusHistoryEntry `json:"history"`
+			}{
+				At: "2026-08-28T02:00:00Z", Token: "second-record", OK: currentOK,
+				History: []recycleStatusHistoryEntry{
+					{At: "2026-08-28T00:30:00Z", Token: "failed-before-first", OK: false},
+					{At: "2026-08-28T01:00:00Z", Token: "first-success", OK: true},
+				},
+			}
+			raw, err := json.Marshal(legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(statusDir, "last-recycle.json"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			writeLastRecycle(plan.agent, plan, "third success", nil, worktreeCloseNote{})
+			raw, err = os.ReadFile(filepath.Join(statusDir, "last-recycle.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				FirstSuccess recycleStatusHistoryEntry `json:"first_success"`
+			}
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.FirstSuccess.Token != "first-success" || !got.FirstSuccess.OK {
+				t.Fatalf("first_success=%+v, want earliest successful legacy history entry", got.FirstSuccess)
+			}
+		})
+	}
+}
+
 func TestChapterEndRecycleCooldownRearmsOnlyForNewWorkOrLaterExplicitSignal1037(t *testing.T) {
 	t.Run("new unblocked backlog", func(t *testing.T) {
 		dir := t.TempDir()

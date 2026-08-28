@@ -109,19 +109,26 @@ func priorRecycleStatusAudit(path string) recycleStatusAudit {
 	if json.Unmarshal(raw, &previous) != nil {
 		return recycleStatusAudit{}
 	}
-	history := append([]recycleStatusHistoryEntry(nil), previous.History...)
+	// Legacy history is stored in chronological record order. Search the full
+	// pre-truncation sequence before reducing it to the rolling display window;
+	// otherwise migration could permanently promote a later current token.
+	allRecords := append([]recycleStatusHistoryEntry(nil), previous.History...)
 	if previous.Token != "" {
-		history = append(history, recycleStatusHistoryEntry{At: previous.At, Token: previous.Token, OK: previous.OK})
-	}
-	if len(history) > maxRecycleStatusHistory {
-		history = history[len(history)-maxRecycleStatusHistory:]
+		allRecords = append(allRecords, recycleStatusHistoryEntry{At: previous.At, Token: previous.Token, OK: previous.OK})
 	}
 	firstSuccess := previous.FirstSuccess
-	// Backfill status files written before first_success existed. Once learned,
-	// this immutable record survives independently of the rolling history window.
-	if firstSuccess == nil && previous.OK && previous.Token != "" {
-		entry := recycleStatusHistoryEntry{At: previous.At, Token: previous.Token, OK: true}
-		firstSuccess = &entry
+	if firstSuccess == nil {
+		for _, entry := range allRecords {
+			if entry.OK && entry.Token != "" {
+				candidate := entry
+				firstSuccess = &candidate
+				break
+			}
+		}
+	}
+	history := allRecords
+	if len(history) > maxRecycleStatusHistory {
+		history = history[len(history)-maxRecycleStatusHistory:]
 	}
 	return recycleStatusAudit{History: history, FirstSuccess: firstSuccess}
 }
