@@ -446,13 +446,25 @@ a persistent write failure raises a loud alert and degrades to in-memory-only
 (never wake-every-tick). Liveness state is kept independent of the snapshot, so a
 snapshot outage can never blind the watchdog.
 
-The legacy always-wake heartbeat is unchanged when `change_detector` is unset.
+When `change_detector` is unset, the legacy clock uses the cheap early signal
+described below and only enqueues its full heartbeat prompt when mechanical
+pane or backlog evidence needs a brain.
 
 ## Down alerts
 
-**Legacy clock:** when the XO misses `--max-missed-acks` consecutive acks
-(default 3) or its pane falls back to a shell, `flotilla watch` posts a one-line
-`⚠️ XO … restart needed` to the channel (via the XO webhook), or to stderr if no
+**Legacy clock cheap early signal:** each interval, watch itself updates the ack
+file and mechanically assesses roster pane states plus any present backlog
+ledgers before considering an LLM turn. An all-idle/working fleet with no
+actionable or blocked ledger evidence suppresses `KindHeartbeat`; no coordinator
+prompt is enqueued. Awaiting-input/approval, errored, crashed, wedged, unknown,
+actionable, blocked, malformed, or awaiting-authorization evidence still opens
+the normal heartbeat prompt path. Failed cheap-ack writes retain the existing
+watchdog contract: alert after `--max-missed-acks` consecutive misses. This path
+is built into legacy watch and requires no per-seat roster rewrite.
+
+**Legacy clock:** when watch misses `--max-missed-acks` consecutive cheap ack
+writes (default 3), or the XO pane falls back to a shell, `flotilla watch` posts
+a one-line warning to the channel (via the alert webhook), or to stderr if no
 webhook is configured.
 
 **Change-detector:** liveness is re-grounded on **wall-clock ack age** (since v2

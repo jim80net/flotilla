@@ -208,7 +208,7 @@ type Config struct {
 	// interval with a generic prompt, the detector wakes it ONLY on a material
 	// change (a desk transition or a tracker change) and rotates its context
 	// after each settled handling. An idle fleet costs nothing. Opt-in (default
-	// false → the legacy always-wake heartbeat). Requires heartbeat_interval > 0.
+	// false uses the legacy cheap-gated heartbeat). Requires heartbeat_interval > 0.
 	ChangeDetector bool `json:"change_detector,omitempty"`
 	// LivenessPingMode tunes the v2 liveness safety ping WITHOUT a rebuild
 	// (the C1b tradeoff): "none" (default — true $0-idle, a wide safety ping at

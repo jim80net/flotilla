@@ -30,6 +30,17 @@ func NewWatchdog(maxMissed int, alert func(string)) *Watchdog {
 // It alerts at most once per down-transition and clears the down state on
 // recovery, so a persistently-down XO does not spam the channel.
 func (w *Watchdog) Observe(acked, crashed bool) {
+	w.observe(acked, crashed, "XO unresponsive — no liveness ack for the alert threshold; likely context-exhausted or wedged — restart needed")
+}
+
+// ObserveCheap records the legacy clock's binary-owned early signal. It keeps
+// the same K-miss and crash semantics as Observe while naming an ack-path/watch
+// failure accurately instead of blaming an LLM that was deliberately skipped.
+func (w *Watchdog) ObserveCheap(acked, crashed bool) {
+	w.observe(acked, crashed, "watch cheap liveness signal missed the alert threshold — inspect the ack path and watch health")
+}
+
+func (w *Watchdog) observe(acked, crashed bool, missedMessage string) {
 	if crashed {
 		w.trip("XO pane is not a live session (shell fallback) — restart needed")
 		return
@@ -41,7 +52,7 @@ func (w *Watchdog) Observe(acked, crashed bool) {
 	}
 	w.missed++
 	if w.missed >= w.maxMissed {
-		w.trip("XO unresponsive — no liveness ack for the alert threshold; likely context-exhausted or wedged — restart needed")
+		w.trip(missedMessage)
 	}
 }
 

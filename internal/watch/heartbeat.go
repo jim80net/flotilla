@@ -144,6 +144,13 @@ func (h *Heartbeat) Stop() {
 	<-h.done
 }
 
+func (h *Heartbeat) tick() {
+	gated := h.gate != nil && h.gate()
+	if !gated && !h.busy(h.xoAgent) {
+		h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: KindHeartbeat})
+	}
+}
+
 func (h *Heartbeat) loop() {
 	defer close(h.done)
 	if h.interval <= 0 {
@@ -192,10 +199,7 @@ func (h *Heartbeat) loop() {
 			// tick, then the buffered reset re-arms the timer next iteration.)
 			// gate runs here (the watchdog observes liveness); when the XO is
 			// down, skip the tick — don't wind a dead clock.
-			gated := h.gate != nil && h.gate()
-			if !gated && !h.busy(h.xoAgent) {
-				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: KindHeartbeat})
-			}
+			h.tick()
 			t.Reset(h.interval)
 		}
 	}

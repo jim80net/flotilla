@@ -289,9 +289,10 @@ flags for 'watch':
 watch runs the XO clock + liveness watchdog (needs neither Discord nor secrets),
 and adds the inbound relay when channel_id + operator_user_id + a bot token are
 configured. The clock target and interval come from the roster (xo_agent,
-heartbeat_interval). By default the clock is the legacy always-wake heartbeat;
-set change_detector: true (with liveness_ping_mode none|interval|consecutive) to
-wake the XO only on a material change — an idle fleet then costs nothing.
+heartbeat_interval). By default the legacy clock writes a cheap binary-owned
+ack and wakes the XO only when pane or backlog evidence needs judgment. Set
+change_detector: true (with liveness_ping_mode none|interval|consecutive) to
+also wake on material desk and tracker transitions.
 
 flags for 'status':
   --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
