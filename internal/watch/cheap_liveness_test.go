@@ -110,6 +110,33 @@ func TestCheapLivenessStillAlertsWhenAdmittedXOMissesKAcks(t *testing.T) {
 	}
 }
 
+func TestCheapLivenessCheapDownAfterAdmitStillAdvancesXOMisses(t *testing.T) {
+	ackDir := t.TempDir()
+	ackPath := filepath.Join(ackDir, "alive")
+	xoWatchdog := NewWatchdog(3, nil)
+	cheapWatchdog := NewWatchdog(3, nil)
+	guard := NewLegacyHeartbeatGuard(xoWatchdog, cheapWatchdog, NewAckWatcher(ackPath))
+
+	if gated := guard.Gate(surface.StateIdle, true, true); gated {
+		t.Fatal("first warranted heartbeat was gated")
+	}
+	if err := os.Remove(ackPath); err != nil {
+		t.Fatalf("remove cheap ack: %v", err)
+	}
+	if err := os.Remove(ackDir); err != nil {
+		t.Fatalf("remove cheap ack directory: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		guard.Gate(surface.StateIdle, true, false)
+	}
+	if !cheapWatchdog.Down() {
+		t.Fatal("cheap watchdog did not go down after K failed signals")
+	}
+	if !xoWatchdog.Down() {
+		t.Fatal("cheap-down suppressed the admitted prompt's K-miss XO watchdog")
+	}
+}
+
 func TestCheapLivenessAgentAckRemainsIndependentOfWatchSignal(t *testing.T) {
 	ackPath := filepath.Join(t.TempDir(), "alive")
 	ack := NewAckWatcher(ackPath)

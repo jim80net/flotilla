@@ -73,9 +73,6 @@ func (g *LegacyHeartbeatGuard) Gate(xoState surface.State, xoResolved, needsBrai
 	}
 	if g.cheapWatchdog != nil {
 		g.cheapWatchdog.ObserveCheap(cheapAcked, false)
-		if g.cheapWatchdog.Down() {
-			return true
-		}
 	}
 	crashed := !xoResolved || xoState == surface.StateShell
 	unhealthy := xoState != surface.StateIdle && xoState != surface.StateWorking
@@ -84,9 +81,13 @@ func (g *LegacyHeartbeatGuard) Gate(xoState surface.State, xoResolved, needsBrai
 		if xoAcked {
 			g.awaitingXOAck = false
 		}
-		if g.xoWatchdog.Down() {
-			return true
-		}
+	}
+	// Both independent contracts must observe this cycle before either down
+	// state suppresses enqueue. Otherwise a cheap-path outage can freeze the XO
+	// miss counter for a previously admitted prompt.
+	if (g.cheapWatchdog != nil && g.cheapWatchdog.Down()) ||
+		(g.xoWatchdog != nil && g.xoWatchdog.Down()) {
+		return true
 	}
 	if !xoResolved || xoState != surface.StateIdle || !needsBrain {
 		return true
