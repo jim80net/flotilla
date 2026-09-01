@@ -2978,6 +2978,7 @@ html, body { overflow-x: clip; }
 .research-shelf-heading h2 { margin: 0; font: 600 1.15rem/1.1 var(--display); color: var(--ink); }
 .research-count { color: var(--ink-3); font-size: .64rem; white-space: nowrap; }
 .research-card-list { display: grid; gap: .45rem; }
+.research-card-entry { display: grid; gap: .35rem; }
 .research-card {
   display: grid; gap: .25rem; min-height: 58px; padding: .65rem .7rem; box-sizing: border-box;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-1); color: var(--ink-2); text-decoration: none;
@@ -3000,6 +3001,16 @@ html, body { overflow-x: clip; }
   text-overflow: ellipsis; white-space: nowrap;
 }
 .research-card-diagnostics { color: var(--amber); font: 600 .6rem var(--display); letter-spacing: .03em; }
+.research-card-annotation-summary {
+  color: var(--amber); font: 600 .62rem/1.3 var(--display);
+}
+.research-card-annotation-links { display: flex; flex-wrap: wrap; gap: .35rem .6rem; }
+.research-card-annotation-links a {
+  min-height: 44px; display: inline-flex; align-items: center; color: var(--cyan);
+  font: 600 .62rem/1.25 var(--display); text-decoration: none;
+}
+.research-card-annotation-links a:hover { text-decoration: underline; }
+.research-card-annotation-links a:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .research-show-more {
   width: 100%; min-height: 44px; margin-top: .55rem; border: 1px solid var(--line); border-radius: var(--r-sm);
   background: transparent; color: var(--cyan); font: 600 .7rem var(--display); cursor: pointer;

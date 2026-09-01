@@ -44,6 +44,78 @@ func decodeAnnotationResponse(t *testing.T, rec *httptest.ResponseRecorder) rese
 	return response
 }
 
+func TestResearchEntryAnnotationSummaryKeepsTransportDistinctFromResponse(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "annotations")
+	documentID := "notes/alpha.md"
+	digest := "sha256:" + strings.Repeat("a", 64)
+	base := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	var generation uint64
+	create := func(label string, offset time.Duration) researchannotation.Annotation {
+		t.Helper()
+		document, annotation, err := researchannotation.Create(root, researchannotation.CreateInput{
+			DocumentID: documentID, DocumentDigest: digest, ExpectedGeneration: generation,
+			Author: researchAnnotationAuthor, Comment: label, Now: base.Add(offset),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation = document.Generation
+		return annotation
+	}
+	route := func(annotation researchannotation.Annotation, state string) {
+		t.Helper()
+		next := annotation.Routing
+		next.State = state
+		next.Target = "alpha"
+		next.UpdatedAt = base.Add(30 * time.Minute).Format(time.RFC3339Nano)
+		if state == researchannotation.RouteQueued {
+			next.QueuedID = "queue-" + annotation.ID
+		}
+		if _, _, err := researchannotation.UpdateRouting(root, documentID, annotation.ID, annotation.Routing.Generation, next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := create("saved", 0)
+	queued := create("queued", time.Hour)
+	route(queued, researchannotation.RouteQueued)
+	delivered := create("delivered", 2*time.Hour)
+	route(delivered, researchannotation.RouteDelivered)
+	answered := create("answered", 3*time.Hour)
+	document, _, _, _, err := researchannotation.Reply(root, researchannotation.ReplyInput{
+		DocumentID: documentID, AnnotationID: answered.ID, ExpectedGeneration: generation,
+		Author: "alpha", Comment: "Reviewed.", Now: base.Add(4 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation = document.Generation
+	addressed := create("addressed", 5*time.Hour)
+	if _, _, _, _, err := researchannotation.Reply(root, researchannotation.ReplyInput{
+		DocumentID: documentID, AnnotationID: addressed.ID, ExpectedGeneration: generation,
+		Author: "alpha", Comment: "Resolved.", Resolve: true, Now: base.Add(6 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ResearchEntry{{ID: documentID}}
+	if err := addResearchAnnotationSummaries(entries, root); err != nil {
+		t.Fatal(err)
+	}
+	summary := entries[0].AnnotationSummary
+	if summary.Unanswered != 3 || summary.OldestAt != saved.CreatedAt || len(summary.Threads) != 5 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	wantStates := []string{"saved", "queued", "delivered", "answered", "addressed"}
+	for i, want := range wantStates {
+		if summary.Threads[i].State != want {
+			t.Errorf("thread %d state = %q, want %q", i, summary.Threads[i].State, want)
+		}
+	}
+	if summary.Threads[3].Responder != "alpha" || summary.Threads[4].Responder != "alpha" {
+		t.Fatalf("response attribution = %+v", summary.Threads)
+	}
+}
+
 func createAnnotationBody(t *testing.T, generation uint64, digest, comment string, anchor *researchannotation.Anchor) string {
 	t.Helper()
 	raw, err := json.Marshal(researchAnnotationCreateRequest{
@@ -269,6 +341,46 @@ func TestResearchAnnotationRoutingSavedQueuedDeliveredAndIdempotent(t *testing.T
 	if deliveredState.Created == nil || deliveredState.Created.Routing.State != researchannotation.RouteDelivered ||
 		deliveredState.Created.Routing.Target != "xo" || deliveredState.Created.Routing.QueuedID != "" {
 		t.Fatalf("delivered routing = %+v", deliveredState.Created)
+	}
+}
+
+func TestResearchAnnotationRoutingPrefersConfiguredOwnerAndFallsBack(t *testing.T) {
+	tests := []struct {
+		name       string
+		owner      string
+		wantTarget string
+	}{
+		{name: "configured roster owner", owner: "alpha", wantTarget: "alpha"},
+		{name: "missing owner", wantTarget: "xo"},
+		{name: "unknown owner", owner: "ghost", wantTarget: "xo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, docPath, _ := annotationServer(t)
+			srv.roster.CosAgent = "xo"
+			directive := "<!-- flotilla-publication\nclassification: research\nreader-action: Review the result.\nsupport: material\n"
+			if tc.owner != "" {
+				directive += "owner: " + tc.owner + "\n"
+			}
+			directive += "-->\n"
+			if err := os.WriteFile(docPath, []byte(directive+annotationMarkdown+"\n[Evidence](evidence.csv)\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeController{routeRes: control.RouteResult{Target: tc.wantTarget, Outcome: control.OutcomeDelivered}}
+			srv.control = f
+			initial := decodeAnnotationResponse(t, doGet(t, srv, "/api/research-annotations/notes/field.md"))
+			rec := doWrite(t, srv, http.MethodPost, "/api/research-annotations/notes/field.md",
+				createAnnotationBody(t, initial.Generation, initial.DocumentDigest, "Route to the accountable reader.", nil))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			response := decodeAnnotationResponse(t, rec)
+			if f.lastRouteTarget != tc.wantTarget || response.Created == nil ||
+				response.Created.Routing.State != researchannotation.RouteDelivered ||
+				response.Created.Routing.Target != tc.wantTarget {
+				t.Fatalf("route target=%q response=%+v, want %q delivered", f.lastRouteTarget, response.Created, tc.wantTarget)
+			}
+		})
 	}
 }
 

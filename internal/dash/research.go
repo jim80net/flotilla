@@ -27,21 +27,36 @@ import (
 const maxResearchDocumentBytes = 4 << 20
 
 type ResearchEntry struct {
-	ID                string               `json:"id"`
-	Title             string               `json:"title"`
-	Summary           string               `json:"summary,omitempty"`
-	UpdatedAt         string               `json:"updated_at"`
-	Status            string               `json:"status"`
-	Tags              []string             `json:"tags"`
-	Decision          bool                 `json:"decision"`
-	Archival          bool                 `json:"archival"`
-	Publication       ResearchPublication  `json:"publication"`
-	PublicationValid  bool                 `json:"publication_valid"`
-	Diagnostics       []ResearchDiagnostic `json:"diagnostics"`
-	PublicationState  string               `json:"publication_state"`
-	PresentationReady bool                 `json:"presentation_ready"`
-	PresentationURL   string               `json:"presentation_url,omitempty"`
-	LearnReady        bool                 `json:"learn_ready"`
+	ID                string                    `json:"id"`
+	Title             string                    `json:"title"`
+	Summary           string                    `json:"summary,omitempty"`
+	UpdatedAt         string                    `json:"updated_at"`
+	Status            string                    `json:"status"`
+	Tags              []string                  `json:"tags"`
+	Decision          bool                      `json:"decision"`
+	Archival          bool                      `json:"archival"`
+	Publication       ResearchPublication       `json:"publication"`
+	PublicationValid  bool                      `json:"publication_valid"`
+	Diagnostics       []ResearchDiagnostic      `json:"diagnostics"`
+	PublicationState  string                    `json:"publication_state"`
+	PresentationReady bool                      `json:"presentation_ready"`
+	PresentationURL   string                    `json:"presentation_url,omitempty"`
+	LearnReady        bool                      `json:"learn_ready"`
+	AnnotationSummary ResearchAnnotationSummary `json:"annotation_summary"`
+}
+
+type ResearchAnnotationSummary struct {
+	Unanswered int                        `json:"unanswered"`
+	OldestAt   string                     `json:"oldest_unanswered_at,omitempty"`
+	Threads    []ResearchAnnotationThread `json:"threads"`
+}
+
+type ResearchAnnotationThread struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+	Responder string `json:"responder,omitempty"`
+	Target    string `json:"target,omitempty"`
 }
 
 // ResearchPublication is explicit author-owned publication metadata. It is read
@@ -61,6 +76,7 @@ type ResearchPublication struct {
 	ReaderAction     string `json:"reader_action,omitempty"`
 	Support          string `json:"support,omitempty"`
 	SupportRationale string `json:"support_rationale,omitempty"`
+	Owner            string `json:"owner,omitempty"`
 	Explicit         bool   `json:"explicit"`
 }
 
@@ -403,6 +419,8 @@ func parseResearchPublication(markdown string) (ResearchPublication, []ResearchD
 			publication.Support = strings.ToLower(value)
 		case "support-rationale":
 			publication.SupportRationale = value
+		case "owner":
+			publication.Owner = value
 		default:
 			diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.unknown", Message: "Unknown publication directive: " + key + "."})
 		}
@@ -414,7 +432,26 @@ func parseResearchPublication(markdown string) (ResearchPublication, []ResearchD
 	if publication.Support != "" && publication.Support != "material" && publication.Support != "text-only" {
 		diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.support", Message: "Support must be material or text-only."})
 	}
+	if publication.Owner != "" && !validResearchPublicationOwner(publication.Owner) {
+		diagnostics = append(diagnostics, ResearchDiagnostic{
+			Code: "metadata.owner", Message: "Owner must be a roster-safe agent name.",
+		})
+	}
 	return publication, diagnostics
+}
+
+func validResearchPublicationOwner(owner string) bool {
+	if owner == "" || len(owner) > 128 {
+		return false
+	}
+	for _, r := range owner {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func withoutResearchPublicationDirective(markdown string) string {
@@ -810,6 +847,10 @@ func (s *Server) handleResearchIndex(w http.ResponseWriter, _ *http.Request) {
 	entries, err := readResearchIndex(s.cfg.ResearchPath)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"research": []ResearchEntry{}, "error": "the research library could not be read"})
+		return
+	}
+	if err := addResearchAnnotationSummaries(entries, s.cfg.ResearchAnnotationsPath); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"research": []ResearchEntry{}, "error": "the research annotation index could not be read"})
 		return
 	}
 	writeJSON(w, map[string]any{"research": entries, "diagnostics": summarizeResearchDiagnostics(entries)})
