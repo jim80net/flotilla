@@ -1132,38 +1132,48 @@ func cmdWatch(args []string) error {
 		}
 	} else {
 		legacyClockMode = true
-		// ---- legacy always-wake heartbeat ----
-		wd := watch.NewWatchdog(*maxMissed, alert)
+		// ---- legacy cheap-gated heartbeat ----
+		xoWatchdog := watch.NewWatchdog(*maxMissed, alert)
+		cheapWatchdog := watch.NewWatchdog(*maxMissed, alert)
+		guard := watch.NewLegacyHeartbeatGuard(xoWatchdog, cheapWatchdog, ack)
 
-		// gate runs every interval: resolve the XO pane ONCE, observe liveness
-		// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
-		// failure is treated as "down", never fatal to the daemon.
+		// The legacy cycle now performs the roster sweep mechanically. It emits a
+		// binary-owned cheap ack every interval, then opens the expensive LLM path
+		// only when pane/backlog evidence needs coordinator judgment.
 		gate := func() bool {
 			current := currentRoster()
-			pane, err := deliver.ResolvePane(agentTitle(current, xo))
-			if err != nil {
-				wd.Observe(ack.Acked(), true)
-				return true
+			states := make(map[string]surface.State, len(current.Agents))
+			ledgers := make(map[string]backlog.Status, len(current.Agents)+1)
+			xoResolved := false
+			for _, agent := range current.Agents {
+				if agent.Name != xo && recipientRoutingHeld(rosterDir, current, agent.Name) {
+					continue
+				}
+				state := surface.StateUnknown
+				if pane, err := deliver.ResolvePane(agentTitle(current, agent.Name)); err == nil {
+					if agent.Name == xo {
+						xoResolved = true
+					}
+					state = assessWatchResolvedPane(current, agent.Name, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) surface.State {
+						return drv.Assess(pane)
+					})
+				}
+				states[agent.Name] = state
+				if st := backlog.Parse(readDeskBacklogMarkdown(rosterDir, agent.Name)); st.Found {
+					ledgers[agent.Name] = st
+				}
 			}
-			// The surface driver assesses rendered state (it performs its own pane
-			// captures). For claude-code: Shell ⇒ crashed, Working ⇒ busy. (capture-error
-			// ⇒ Unknown since #55, converging all drivers; here in the legacy gate Idle
-			// and Unknown are equivalent — both are not-Shell and not-Working, so the
-			// tick fires either way.)
-			st, err := assessWatchXOResolved(current, xo, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) surface.State {
-				return drv.Assess(pane)
-			})
-			if err != nil {
-				// The live harness could not be established. Do not classify with a
-				// stale driver and do not send a heartbeat into the unknown pane.
-				wd.Observe(ack.Acked(), false)
-				return true
+			if *backlogPath != "" {
+				if raw, err := os.ReadFile(*backlogPath); err == nil {
+					ledgers["fleet"] = backlog.Parse(string(raw))
+				}
 			}
-			wd.Observe(ack.Acked(), st == surface.StateShell)
-			if wd.Down() {
-				return true
+			needsBrain, reasons := watch.FleetNeedsBrain(states, ledgers)
+			xoState := states[xo]
+			if needsBrain {
+				log.Printf("flotilla watch: cheap liveness found attention evidence: %s", strings.Join(reasons, "; "))
 			}
-			return st == surface.StateWorking
+			return guard.Gate(xoState, xoResolved, needsBrain)
 		}
 
 		// Legacy heartbeat prompt resolution: a non-empty workspace HEARTBEAT.md →

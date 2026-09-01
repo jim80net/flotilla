@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
@@ -40,6 +41,28 @@ func (a *AckWatcher) Acked() bool {
 		return true
 	}
 	return false
+}
+
+// Signal writes the cheap, binary-owned liveness ack used by the legacy clock's
+// early mechanical pass. The timestamp body makes the signal inspectable while
+// the mtime remains compatible with Acked and Age. Callers that also expect an
+// agent-owned touch must call Acked before Signal. On success last advances to
+// the filesystem's observed mtime so watch's own write cannot be reused as the
+// agent acknowledgement on the next cycle.
+func (a *AckWatcher) Signal() error {
+	if a == nil || a.path == "" {
+		return fmt.Errorf("cheap liveness ack path is empty")
+	}
+	body := []byte(a.now().UTC().Format(time.RFC3339Nano) + "\n")
+	if err := os.WriteFile(a.path, body, 0o600); err != nil {
+		return fmt.Errorf("write cheap liveness ack: %w", err)
+	}
+	fi, err := os.Stat(a.path)
+	if err != nil {
+		return fmt.Errorf("stat cheap liveness ack: %w", err)
+	}
+	a.last = fi.ModTime()
+	return nil
 }
 
 // Age reports the wall-clock time since the XO most recently acked — the
