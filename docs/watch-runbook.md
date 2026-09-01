@@ -349,9 +349,10 @@ is configured.
 
 ## Change-detector (heartbeat v2 — opt-in)
 
-The legacy clock wakes the XO **every interval** with a generic "do your duties"
-prompt — so the XO burns context on every tick even when nothing changed. Set
-`change_detector: true` in the roster to switch to **heartbeat v2**: a
+The legacy clock first performs the cheap mechanical fleet assessment described
+under [Down alerts](#down-alerts), so an idle/working fleet does not enqueue its
+generic "do your duties" prompt. Set `change_detector: true` in the roster to
+switch to **heartbeat v2**: a
 deterministic, no-LLM detector that each tick snapshots the fleet (every desk's
 assessed surface state + the optional external signal-file's hash), diffs it against
 the prior snapshot, and **wakes the XO only on a material change** — with a prompt
@@ -459,8 +460,12 @@ actionable or blocked ledger evidence suppresses `KindHeartbeat`; no coordinator
 prompt is enqueued. Awaiting-input/approval, errored, crashed, wedged, unknown,
 actionable, blocked, malformed, or awaiting-authorization evidence still opens
 the normal heartbeat prompt path. Failed cheap-ack writes retain the existing
-watchdog contract: alert after `--max-missed-acks` consecutive misses. This path
-is built into legacy watch and requires no per-seat roster rewrite.
+watchdog contract: alert after `--max-missed-acks` consecutive misses. When a
+prompt is actually admitted, the coordinator's own subsequent `touch` remains
+an independent signal and still alerts after K misses; watch reads that touch
+before writing the next cheap signal, so the binary cannot acknowledge its own
+LLM prompt. This path is built into legacy watch and requires no per-seat roster
+rewrite.
 
 **Legacy clock:** when watch misses `--max-missed-acks` consecutive cheap ack
 writes (default 3), or the XO pane falls back to a shell, `flotilla watch` posts

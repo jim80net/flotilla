@@ -45,9 +45,10 @@ func (a *AckWatcher) Acked() bool {
 
 // Signal writes the cheap, binary-owned liveness ack used by the legacy clock's
 // early mechanical pass. The timestamp body makes the signal inspectable while
-// the mtime remains compatible with Acked and Age. On success last advances to
-// the filesystem's observed mtime so a later failed Signal cannot reuse this
-// cycle's write as a fresh acknowledgement.
+// the mtime remains compatible with Acked and Age. Callers that also expect an
+// agent-owned touch must call Acked before Signal. On success last advances to
+// the filesystem's observed mtime so watch's own write cannot be reused as the
+// agent acknowledgement on the next cycle.
 func (a *AckWatcher) Signal() error {
 	if a == nil || a.path == "" {
 		return fmt.Errorf("cheap liveness ack path is empty")

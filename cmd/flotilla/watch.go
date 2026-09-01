@@ -1133,7 +1133,9 @@ func cmdWatch(args []string) error {
 	} else {
 		legacyClockMode = true
 		// ---- legacy cheap-gated heartbeat ----
-		wd := watch.NewWatchdog(*maxMissed, alert)
+		xoWatchdog := watch.NewWatchdog(*maxMissed, alert)
+		cheapWatchdog := watch.NewWatchdog(*maxMissed, alert)
+		guard := watch.NewLegacyHeartbeatGuard(xoWatchdog, cheapWatchdog, ack)
 
 		// The legacy cycle now performs the roster sweep mechanically. It emits a
 		// binary-owned cheap ack every interval, then opens the expensive LLM path
@@ -1142,12 +1144,16 @@ func cmdWatch(args []string) error {
 			current := currentRoster()
 			states := make(map[string]surface.State, len(current.Agents))
 			ledgers := make(map[string]backlog.Status, len(current.Agents)+1)
+			xoResolved := false
 			for _, agent := range current.Agents {
 				if agent.Name != xo && recipientRoutingHeld(rosterDir, current, agent.Name) {
 					continue
 				}
 				state := surface.StateUnknown
 				if pane, err := deliver.ResolvePane(agentTitle(current, agent.Name)); err == nil {
+					if agent.Name == xo {
+						xoResolved = true
+					}
 					state = assessWatchResolvedPane(current, agent.Name, pane, deliver.PaneCommand, func(drv surface.Driver, pane string) surface.State {
 						return drv.Assess(pane)
 					})
@@ -1167,8 +1173,7 @@ func cmdWatch(args []string) error {
 			if needsBrain {
 				log.Printf("flotilla watch: cheap liveness found attention evidence: %s", strings.Join(reasons, "; "))
 			}
-			targetUnavailable := xoState != surface.StateIdle
-			return watch.LegacyHeartbeatGate(wd, ack, xoState == surface.StateShell, targetUnavailable, needsBrain)
+			return guard.Gate(xoState, xoResolved, needsBrain)
 		}
 
 		// Legacy heartbeat prompt resolution: a non-empty workspace HEARTBEAT.md →

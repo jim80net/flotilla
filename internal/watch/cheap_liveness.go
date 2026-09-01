@@ -45,23 +45,52 @@ func FleetNeedsBrain(states map[string]surface.State, ledgers map[string]backlog
 	return len(reasons) > 0, reasons
 }
 
-// LegacyHeartbeatGate records the binary-owned cheap liveness signal, advances
-// the existing K-miss watchdog, and returns whether the expensive coordinator
-// prompt must be suppressed. A manual/external ack can recover one failed cheap
-// signal. The target pane remains gated while unavailable or already busy.
-func LegacyHeartbeatGate(wd *Watchdog, ack *AckWatcher, crashed, targetUnavailable, needsBrain bool) bool {
-	acked := false
-	if ack != nil {
-		acked = ack.Signal() == nil
-		if !acked {
-			acked = ack.Acked()
-		}
+// LegacyHeartbeatGuard owns the legacy clock's two independent liveness
+// contracts. The cheap watchdog proves that watch can update the ack path every
+// cycle. The XO watchdog expects an agent-owned touch only after watch actually
+// admits a coordinator prompt. Reading Acked before Signal distinguishes that
+// touch from watch's own write without adding another configured path.
+type LegacyHeartbeatGuard struct {
+	xoWatchdog    *Watchdog
+	cheapWatchdog *Watchdog
+	ack           *AckWatcher
+	awaitingXOAck bool
+}
+
+func NewLegacyHeartbeatGuard(xoWatchdog, cheapWatchdog *Watchdog, ack *AckWatcher) *LegacyHeartbeatGuard {
+	return &LegacyHeartbeatGuard{xoWatchdog: xoWatchdog, cheapWatchdog: cheapWatchdog, ack: ack}
+}
+
+// Gate records the binary-owned cheap signal and returns whether the expensive
+// coordinator prompt must be suppressed. The target pane remains gated unless
+// it was resolved and positively assessed Idle. A prompt admitted by this call
+// arms the independent XO-touch watchdog for subsequent cycles.
+func (g *LegacyHeartbeatGuard) Gate(xoState surface.State, xoResolved, needsBrain bool) bool {
+	xoAcked, cheapAcked := false, false
+	if g.ack != nil {
+		xoAcked = g.ack.Acked() // must precede Signal: this is the agent-owned touch
+		cheapAcked = g.ack.Signal() == nil
 	}
-	if wd != nil {
-		wd.ObserveCheap(acked, crashed)
-		if wd.Down() {
+	if g.cheapWatchdog != nil {
+		g.cheapWatchdog.ObserveCheap(cheapAcked, false)
+		if g.cheapWatchdog.Down() {
 			return true
 		}
 	}
-	return targetUnavailable || !needsBrain
+	crashed := !xoResolved || xoState == surface.StateShell
+	unhealthy := xoState != surface.StateIdle && xoState != surface.StateWorking
+	if g.xoWatchdog != nil && (g.awaitingXOAck || unhealthy || crashed) {
+		g.xoWatchdog.Observe(xoAcked, crashed)
+		if xoAcked {
+			g.awaitingXOAck = false
+		}
+		if g.xoWatchdog.Down() {
+			return true
+		}
+	}
+	if !xoResolved || xoState != surface.StateIdle || !needsBrain {
+		return true
+	}
+	g.awaitingXOAck = true
+	return false
 }
