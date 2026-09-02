@@ -326,7 +326,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return "", fmt.Errorf("phase 3: reading the marker back for %q failed: %w", p.agent, err)
 	}
 	if got != p.key {
-		return "", fmt.Errorf("phase 3: relaunched %q at %s on the %s harness but its @flotilla_agent marker reads %q (expected %q) — the fresh session is LIVE but contextless; re-tag it (flotilla register %s --pane %s) then re-run switch, or hand it the chapter directly with: flotilla send %s 'read %s and take over per it, begin immediately; you are remote-driven — parlay via a flotilla message, never an in-pane prompt'", p.agent, target, p.toSurface, got, p.key, p.agent, target, p.agent, p.handoffPath)
+		return "", fmt.Errorf("phase 3: relaunched %q at %s on the %s harness but its @flotilla_agent marker reads %q (expected %q) — the fresh session is LIVE but contextless; re-tag it (flotilla register %s --pane %s) then re-run switch, or %s", p.agent, target, p.toSurface, got, p.key, p.agent, target, switchTakeoverRecovery(p))
 	}
 	if err := ops.stampGen(target, p.token); err != nil {
 		return "", fmt.Errorf("phase 3: stamping the switch generation for %q failed: %w", p.agent, err)
@@ -364,7 +364,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	// imperatively, via the TO driver's takeover turn naming the NEUTRAL path). Delivered
 	// ONCE, while @flotilla_switch_gen still matches (supersede-abort, mirror recycle.go:224-230).
 	if !pollIdleCleared(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.boot) {
-		return "", fmt.Errorf("phase 4: the relaunched %q (%s harness) did not reach idle at a cleared composer within %s — the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over'", p.agent, p.toSurface, p.timeouts.boot, p.agent, p.handoffPath)
+		return "", fmt.Errorf("phase 4: the relaunched %q (%s harness) did not reach idle at a cleared composer within %s — the desk is LIVE but un-taken-over; %s", p.agent, p.toSurface, p.timeouts.boot, switchTakeoverRecovery(p))
 	}
 	gen, err := ops.readGen(target)
 	if err != nil {
@@ -374,7 +374,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return "", fmt.Errorf("phase 4: another switch superseded %q (generation %q != %q) — abort this takeover", p.agent, gen, p.token)
 	}
 	if err := ops.deliver(target, p.takeoverText); err != nil {
-		return "", fmt.Errorf("phase 4: delivering the takeover turn to %q failed: %w (the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over')", p.agent, err, p.agent, p.handoffPath)
+		return "", fmt.Errorf("phase 4: delivering the takeover turn to %q failed: %w (the desk is LIVE but un-taken-over; %s)", p.agent, err, switchTakeoverRecovery(p))
 	}
 	// Best-effort resumption-confidence signal — success = the desk RESUMED, not just that the
 	// turn was typed. Its absence does NOT fail the switch (the takeover was delivered-confirmed).
@@ -385,6 +385,13 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return fmt.Sprintf("switched %s: %s → %s → pane %s (--force skipped the FROM handoff; in-flight context may be lost; relaunched on %s)\n", p.agent, p.fromSurface, p.toSurface, target, p.toSurface), nil
 	}
 	return fmt.Sprintf("switched %s: %s → %s → pane %s (handoff %s; closed gracefully, relaunched on %s, took over)\n", p.agent, p.fromSurface, p.toSurface, target, p.handoffPath, p.toSurface), nil
+}
+
+func switchTakeoverRecovery(p switchPlan) string {
+	if p.force {
+		return fmt.Sprintf("retry the force-specific fresh-start takeover with: flotilla send %s %q", p.agent, p.takeoverText)
+	}
+	return fmt.Sprintf("hand it the chapter directly with: flotilla send %s 'read %s and take over per it, begin immediately; you are remote-driven — parlay via a flotilla message, never an in-pane prompt'", p.agent, p.handoffPath)
 }
 
 // switchToRecycleOps adapts the subset of switchOps the SHARED recycle poll-gates consume
