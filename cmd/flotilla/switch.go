@@ -392,7 +392,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 
 func switchTakeoverRecovery(p switchPlan) string {
 	if p.force {
-		return fmt.Sprintf("retry the force-specific fresh-start takeover with: flotilla send %s %q", p.agent, p.takeoverText)
+		return fmt.Sprintf("retry the force-specific fresh-start takeover with: flotilla send %s %s", shellQuote(p.agent), shellQuote(p.takeoverText))
 	}
 	return fmt.Sprintf("hand it the chapter directly with: flotilla send %s 'read %s and take over per it, begin immediately; you are remote-driven — parlay via a flotilla message, never an in-pane prompt'", p.agent, p.handoffPath)
 }
