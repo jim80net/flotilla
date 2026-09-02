@@ -7,6 +7,16 @@ import "sync"
 // subscription bucket).
 type RateLimitScope int
 
+// RateLimitDetailWeeklyExhausted is the stable detail emitted when provider chrome
+// positively identifies an exhausted weekly account allowance. Watch uses this typed
+// discriminator to choose the context-losing first-fallback recovery path; ordinary
+// transient rate-limit sleeps retain their cooperative auto-switch path.
+const RateLimitDetailWeeklyExhausted = "Weekly limit exhausted"
+
+func IsWeeklyLimitExhaustion(detail string) bool {
+	return detail == RateLimitDetailWeeklyExhausted
+}
+
 const (
 	// RateLimitServerSide is a provider-wide infra throttle (e.g. Anthropic's
 	// "Server is temporarily limiting requests") — failover MUST cross providers.

@@ -263,6 +263,36 @@ func TestRateLimitActuationUsesLiveGrokAndFailsClosedUnreadable(t *testing.T) {
 	}
 }
 
+func TestRateLimitAutoSwitchEligibilityIncludesGrokLeadersOnly(t *testing.T) {
+	coordinator := true
+	cfg := &roster.Config{
+		XOAgent: "xo",
+		Agents: []roster.Agent{
+			{Name: "xo", Surface: "grok"},
+			{Name: "lead", Surface: "grok", Coordinator: &coordinator},
+			{Name: "worker", Surface: "grok"},
+			{Name: "claude-worker", Surface: surface.DefaultSurface},
+		},
+	}
+	for _, tc := range []struct {
+		name, agent, liveSurface, detail string
+		want                             bool
+	}{
+		{"primary XO exhausted on Grok", "xo", "grok", surface.RateLimitDetailWeeklyExhausted, true},
+		{"explicit coordinator exhausted on Grok", "lead", "grok", surface.RateLimitDetailWeeklyExhausted, true},
+		{"Grok spinner remains outside forced path", "xo", "grok", "Rate limit exceeded", false},
+		{"execution desk exhausted on Grok", "worker", "grok", surface.RateLimitDetailWeeklyExhausted, false},
+		{"existing Claude path", "claude-worker", surface.DefaultSurface, "Rate limit exceeded", true},
+		{"unknown surface", "xo", "other", surface.RateLimitDetailWeeklyExhausted, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rateLimitAutoSwitchEligible(cfg, tc.agent, tc.liveSurface, tc.detail); got != tc.want {
+				t.Fatalf("eligibility = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWatchXOLiveDriverAssessmentAndRotation(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	staleClaude := &roster.Config{Agents: []roster.Agent{{Name: "xo", Surface: "claude-code"}}}

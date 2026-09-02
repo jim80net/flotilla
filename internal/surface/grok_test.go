@@ -240,6 +240,59 @@ func TestClassifyGrokRateLimitProseNotMaterial(t *testing.T) {
 	}
 }
 
+func TestClassifyGrokWeeklyLimitExhaustion(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		captured string
+	}{
+		{
+			name:     "zero-percent composer footer",
+			captured: "  │ ❯  │\n  ╰──── Weekly limit left: 0% · Grok 4.6 (high) · always-approve ─╯",
+		},
+		{
+			name:     "weekly-limit hit banner",
+			captured: "  You hit your weekly limit.\n  │ ❯  │\n  ╰──── Grok 4.6 (high) · always-approve ─╯",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hit, detail := classifyGrokRateLimit(tc.captured)
+			if !hit || !IsWeeklyLimitExhaustion(detail) {
+				t.Fatalf("classifyGrokRateLimit = (%v, %q), want weekly exhaustion", hit, detail)
+			}
+		})
+	}
+}
+
+func TestClassifyGrokWeeklyLimitRemainingDoesNotTrigger(t *testing.T) {
+	captured := "  │ ❯  │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
+	if hit, detail := classifyGrokRateLimit(captured); hit {
+		t.Fatalf("positive weekly remainder triggered fallback: detail=%q", detail)
+	}
+}
+
+func TestClassifyGrokWeeklyLimitProseDoesNotTrigger(t *testing.T) {
+	captured := "The operator said You hit your weekly limit. in an earlier report.\n  │ ❯  │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
+	if hit, detail := classifyGrokRateLimit(captured); hit {
+		t.Fatalf("weekly-limit prose triggered fallback: detail=%q", detail)
+	}
+}
+
+func TestGrokWeeklyLimitExhaustionKeepsTwoReadMateriality(t *testing.T) {
+	const pane = "%gml-107-weekly-exhaustion"
+	ClearRateLimitStreak(pane)
+	t.Cleanup(func() { ClearRateLimitStreak(pane) })
+	g := grok{capturePane: func(string) (string, error) {
+		return "  │ ❯  │\n  ╰──── Weekly limit left: 0% · Grok 4.6 (high) · always-approve ─╯", nil
+	}}
+	if hit, _, _ := g.RateLimited(pane); hit {
+		t.Fatal("first weekly-exhaustion read must remain debounced")
+	}
+	hit, scope, detail := g.RateLimited(pane)
+	if !hit || scope != RateLimitAccountSide || !IsWeeklyLimitExhaustion(detail) {
+		t.Fatalf("second weekly-exhaustion read = (%v, %v, %q), want material account-side exhaustion", hit, scope, detail)
+	}
+}
+
 // TestClassifyGrokComposerLine: the cursor-indexed composer classifier over the §10 live captures.
 func TestClassifyGrokComposerLine(t *testing.T) {
 	// Realistic grok composer-box renders (LIVE-CAPTURED 2026-06-23, design.md §10.1/§10.2). The
