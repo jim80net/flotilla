@@ -1057,7 +1057,7 @@ func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
 		}
 		return true, surface.RateLimitServerSide, "limited", true
 	}
-	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "backend" }
+	cfg.RateLimitAutoSwitchEligible = func(agent, _ string) bool { return agent == "backend" }
 	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
 		autoCalls = append(autoCalls, candidates...)
 		for _, c := range candidates {
@@ -1076,13 +1076,48 @@ func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
 	d.Tick()
 	f.advance(d.cfg.ReferenceInterval)
 	d.Tick() // material episode + auto-switch candidate
-	if len(autoCalls) != 1 || autoCalls[0].Agent != "backend" {
+	if len(autoCalls) != 1 || autoCalls[0].Agent != "backend" || autoCalls[0].Detail != "limited" {
 		t.Fatalf("auto-switch calls = %+v, want one backend candidate", autoCalls)
 	}
 	autoCalls = nil
 	d.Tick() // same episode — no second auto-switch
 	if len(autoCalls) != 0 {
 		t.Fatalf("tick 4 auto-switch = %+v, want none (edge-triggered)", autoCalls)
+	}
+}
+
+func TestDetectorAutoSwitchEligibilityReceivesRateLimitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name, detail string
+		want         int
+	}{
+		{"exhausted leader admitted", surface.RateLimitDetailWeeklyExhausted, 1},
+		{"wrong detail refused", "Rate limit exceeded", 0},
+		{"empty detail refused", "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			cfg := f.config("xo", []string{"xo"}, 3, "none")
+			cfg.RateLimitMaterial = func(string) (bool, surface.RateLimitScope, string, bool) {
+				return true, surface.RateLimitAccountSide, tc.detail, true
+			}
+			cfg.RateLimitAutoSwitchEligible = func(agent, detail string) bool {
+				return agent == "xo" && detail == surface.RateLimitDetailWeeklyExhausted
+			}
+			cfg.RateLimitAutoSwitch = func([]RateLimitAutoSwitchCandidate) {}
+			d := newDet(t, f, cfg)
+			d.rateLimitProbeMu.Lock()
+			d.rateLimitPending = map[string]rateLimitProbeResult{
+				"xo": {limited: true, scope: surface.RateLimitAccountSide, detail: tc.detail, ok: true},
+			}
+			d.rateLimitProbeMu.Unlock()
+			d.mu.Lock()
+			out := d.rateLimitMaterialFromPendingLocked()
+			d.mu.Unlock()
+			if len(out.autoSwitch) != tc.want {
+				t.Fatalf("auto-switch candidates = %+v, want count %d", out.autoSwitch, tc.want)
+			}
+		})
 	}
 }
 
@@ -1094,7 +1129,7 @@ func TestDetectorAutoSwitchSkipsNonClaudeFromSurface(t *testing.T) {
 		return true, surface.RateLimitServerSide, "limited", true
 	}
 	fromSurface := "grok" // mirrors watch.go agentSurface != claude-code
-	cfg.RateLimitAutoSwitchEligible = func(agent string) bool {
+	cfg.RateLimitAutoSwitchEligible = func(agent, _ string) bool {
 		return agent == "backend" && fromSurface == surface.DefaultSurface
 	}
 	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
@@ -1118,7 +1153,7 @@ func TestDetectorAutoSwitchRefusesIneligibleDesk(t *testing.T) {
 	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
 		return true, surface.RateLimitServerSide, "limited", true
 	}
-	cfg.RateLimitAutoSwitchEligible = func(string) bool { return false }
+	cfg.RateLimitAutoSwitchEligible = func(string, string) bool { return false }
 	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
 		autoCalls = append(autoCalls, candidates...)
 	}
@@ -1144,7 +1179,7 @@ func TestDetectorAutoSwitchConcurrentUnderRace(t *testing.T) {
 		}
 		return true, surface.RateLimitServerSide, "limited", true
 	}
-	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "backend" }
+	cfg.RateLimitAutoSwitchEligible = func(agent, _ string) bool { return agent == "backend" }
 	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
 		for _, c := range candidates {
 			go func(agent string) {
@@ -1214,7 +1249,7 @@ func TestDetectorLeaderExhaustionAndCoordinatorAutoSwitch(t *testing.T) {
 		return true, surface.RateLimitAccountSide, "usage limit", true
 	}
 	cfg.IsCoordinator = func(name string) bool { return name == "xo" }
-	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "xo" }
+	cfg.RateLimitAutoSwitchEligible = func(agent, _ string) bool { return agent == "xo" }
 	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
 		autoCalls = append(autoCalls, candidates...)
 		for _, c := range candidates {
@@ -1239,7 +1274,7 @@ func TestDetectorLeaderExhaustionAndCoordinatorAutoSwitch(t *testing.T) {
 			break
 		}
 	}
-	if len(autoCalls) != 1 || autoCalls[0].Agent != "xo" {
+	if len(autoCalls) != 1 || autoCalls[0].Agent != "xo" || autoCalls[0].Detail != "usage limit" {
 		t.Fatalf("auto-switch = %+v, want xo", autoCalls)
 	}
 	if len(exhausted) != 1 || exhausted[0] != "xo:account-side" {

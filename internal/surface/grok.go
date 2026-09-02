@@ -195,6 +195,13 @@ var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
 // Working (live-captured 2026-06-16, #58 — structural parity with "⠙ Waiting… 0.4s").
 var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate limit exceeded\b`)
 
+// grokWeeklyLimitFooter binds the remaining percentage to the complete Grok composer
+// footer. Only zero is exhaustion; a positive remainder is ordinary idle chrome and must
+// not consume a fallback. The banner is a separate anchored TUI row used by releases that
+// replace the numeric footer after the wall is hit.
+var grokWeeklyLimitFooter = regexp.MustCompile(`^[ \t]*╰─+[ \t]+Weekly limit left: ([0-9]{1,3})% · Grok [^·\r\n]+ · [^·\r\n]+ ─╯[ \t]*$`)
+var grokWeeklyLimitBanner = regexp.MustCompile(`(?i)^[ \t│┃]*You hit your weekly limit[.!]?[ \t│┃]*$`)
+
 // grokComposerFooter is the bottom border of the Grok 4.x composer. The live
 // renderer places the model and approval mode on this row, immediately below
 // the prompt row. Current releases may prefix that chrome with a weekly-limit
@@ -341,9 +348,22 @@ func classifyGrokComposerLineAt(line string) ComposerDisposition {
 // classifyGrokRateLimit reports whether grok's bottom STATUS chrome shows a rate-limit
 // throttle (braille-spinner line only — not prose in streamed output).
 func classifyGrokRateLimit(captured string) (bool, string) {
+	// A banner string alone is transcript content, not provider state. Require the same
+	// prompt/footer pair used by ComposerState before treating the anchored banner row as
+	// current Grok chrome.
+	bannerVouched := classifyGrokComposerLine(captured, -1) != ComposerUndetermined
 	for _, line := range lastNNonEmptyLines(captured, grokTail) {
 		if grokRateLimitStatus.MatchString(line) {
 			return true, "Rate limit exceeded"
+		}
+		if bannerVouched && grokWeeklyLimitBanner.MatchString(line) {
+			return true, RateLimitDetailWeeklyExhausted
+		}
+		if matches := grokWeeklyLimitFooter.FindStringSubmatch(line); len(matches) == 2 {
+			remaining, err := strconv.Atoi(matches[1])
+			if err == nil && remaining == 0 {
+				return true, RateLimitDetailWeeklyExhausted
+			}
 		}
 	}
 	return false, ""

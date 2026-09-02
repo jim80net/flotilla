@@ -9,8 +9,9 @@ import (
 // RateLimitAutoSwitchCandidate is one desk eligible for a detector-enqueued auto-switch
 // this tick (material throttle, first episode edge).
 type RateLimitAutoSwitchCandidate struct {
-	Agent string
-	Scope surface.RateLimitScope
+	Agent  string
+	Scope  surface.RateLimitScope
+	Detail string
 }
 
 // AutoSwitchFlight dedupes in-flight auto-switch attempts per desk (P1-C). The probe and

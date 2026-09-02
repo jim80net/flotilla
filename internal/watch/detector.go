@@ -90,13 +90,14 @@ type DetectorConfig struct {
 	// UsageDispatch decouples blocking acquisition from the tick loop. Nil keeps
 	// tests synchronous; production wires go run().
 	UsageDispatch func(run func())
-	// RateLimitAutoSwitchEligible gates detector-enqueued auto-switch (GATE-4). Nil ⇒ no
+	// RateLimitAutoSwitchEligible gates detector-enqueued auto-switch (GATE-4). detail is
+	// the probe's stable reason discriminator (for example weekly exhaustion). Nil ⇒ no
 	// auto-switch candidates are collected. Coordinators are eligible when the production
 	// roster gate admits them (#510).
-	RateLimitAutoSwitchEligible func(agent string) bool
-	// RateLimitAutoSwitch is invoked OFF d.mu with material throttle candidates. It MUST
-	// exec `flotilla switch <agent> --auto` over a side-channel argv array; status goes to
-	// logs only. Nil ⇒ byte-inert.
+	RateLimitAutoSwitchEligible func(agent, detail string) bool
+	// RateLimitAutoSwitch is invoked OFF d.mu with material throttle candidates. It normally
+	// execs `flotilla switch <agent> --auto`; a hard account-exhaustion detail may instead
+	// choose a named forced fallback. Status goes to logs only. Nil ⇒ byte-inert.
 	RateLimitAutoSwitch func(candidates []RateLimitAutoSwitchCandidate)
 	// RateLimitAutoSwitchDispatch runs the auto-switch callback. Production wires it to
 	// `go run()` so cap/storm/recipe file I/O cannot stall the tick loop. Default nil ⇒ sync.
@@ -942,6 +943,7 @@ type synthEligible struct {
 type rateLimitProbeResult struct {
 	limited bool
 	scope   surface.RateLimitScope
+	detail  string
 	ok      bool
 }
 
@@ -2203,12 +2205,12 @@ func (d *Detector) rateLimitMaterialFromPendingLocked() rateLimitEpisodeOutcomes
 		}
 		d.rateLimitActive[name] = true
 		out.reasons = append(out.reasons, name+": rate-limited ("+res.scope.String()+" — switch eligible)")
-		cand := RateLimitAutoSwitchCandidate{Agent: name, Scope: res.scope}
+		cand := RateLimitAutoSwitchCandidate{Agent: name, Scope: res.scope, Detail: res.detail}
 		if d.cfg.IsCoordinator != nil && d.cfg.IsCoordinator(name) {
 			out.leaderExhausted = append(out.leaderExhausted, cand)
 		}
 		if d.cfg.RateLimitAutoSwitch != nil {
-			if d.cfg.RateLimitAutoSwitchEligible == nil || d.cfg.RateLimitAutoSwitchEligible(name) {
+			if d.cfg.RateLimitAutoSwitchEligible == nil || d.cfg.RateLimitAutoSwitchEligible(name, res.detail) {
 				out.autoSwitch = append(out.autoSwitch, cand)
 			}
 		}
@@ -2332,8 +2334,8 @@ func (d *Detector) runRateLimitProbes(work rateLimitWork) {
 		}
 		results := make(map[string]rateLimitProbeResult, len(work.probe))
 		for _, agent := range work.probe {
-			limited, scope, _, ok := d.cfg.RateLimitMaterial(agent)
-			results[agent] = rateLimitProbeResult{limited: limited, scope: scope, ok: ok}
+			limited, scope, detail, ok := d.cfg.RateLimitMaterial(agent)
+			results[agent] = rateLimitProbeResult{limited: limited, scope: scope, detail: detail, ok: ok}
 		}
 		d.rateLimitProbeMu.Lock()
 		d.rateLimitPending = results

@@ -54,8 +54,14 @@ func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath s
 
 			// In-process final guard: materiality streak lives here; the switch subprocess must
 			// not re-derive it from an empty globalRateLimitStreak.
-			if limited, _, _, ok := probeMaterial(agent); !ok || !limited {
+			limited, _, detail, ok := probeMaterial(agent)
+			if !ok || !limited {
 				log.Printf("flotilla watch: auto-switch %q: throttle cleared before dispatch — skip", agent)
+				endFlight(agent)
+				continue
+			}
+			if surface.IsWeeklyLimitExhaustion(c.Detail) && !surface.IsWeeklyLimitExhaustion(detail) {
+				log.Printf("flotilla watch: auto-switch %q: weekly exhaustion no longer present before dispatch — skip", agent)
 				endFlight(agent)
 				continue
 			}
@@ -93,10 +99,7 @@ func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath s
 			if scope == RateLimitAccountSide {
 				scopeFlag = "account-side"
 			}
-			args := []string{"switch", agent, "--auto", "--rate-limit-scope", scopeFlag, "--roster", rosterPath}
-			if launchPath != "" {
-				args = append(args, "--launch", launchPath)
-			}
+			args := rateLimitSwitchArgs(agent, scopeFlag, detail, rosterPath, launchPath)
 			cmd := exec.Command(bin, args...)
 			go func(agent string, cmd *exec.Cmd) {
 				defer endFlight(agent)
@@ -115,6 +118,23 @@ func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath s
 			}(agent, cmd)
 		}
 	}
+}
+
+// rateLimitSwitchArgs preserves the existing cooperative --auto path for transient
+// spinner throttles. A structurally proven weekly exhaustion cannot produce a handoff, so
+// the detector selects the chain's first fallback explicitly and invokes the operator-force
+// primitive introduced by GML-108. The caller has just re-probed the live pane.
+func rateLimitSwitchArgs(agent, scopeFlag, detail, rosterPath, launchPath string) []string {
+	var args []string
+	if surface.IsWeeklyLimitExhaustion(detail) {
+		args = []string{"switch", agent, "--to", "fallback-0", "--force", "--roster", rosterPath}
+	} else {
+		args = []string{"switch", agent, "--auto", "--rate-limit-scope", scopeFlag, "--roster", rosterPath}
+	}
+	if launchPath != "" {
+		args = append(args, "--launch", launchPath)
+	}
+	return args
 }
 
 // leaderExhaustionAlertBody is the loud operator-facing notice when a coordinator hits

@@ -884,18 +884,14 @@ func cmdWatch(args []string) error {
 			UsageDispatch:     func(run func()) { go run() },
 			RateLimitReset:    rateLimitReset(currentRoster),
 			RateLimitDispatch: func(run func()) { go run() },
-			RateLimitAutoSwitchEligible: func(agent string) bool {
+			RateLimitAutoSwitchEligible: func(agent, detail string) bool {
 				current := currentRoster()
-				if !current.AutoSwitchEligible(agent) {
-					return false
-				}
-				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
 				pane, err := deliver.ResolvePane(agentTitle(current, agent))
 				if err != nil {
 					return false
 				}
 				_, liveSurface, _, err := surface.ResolveLiveDriver(agentSurface(current, agent), pane, deliver.PaneCommand)
-				return err == nil && liveSurface == surface.DefaultSurface
+				return err == nil && rateLimitAutoSwitchEligible(current, agent, liveSurface, detail)
 			},
 			SignalHash:   signalHash,
 			AckAge:       ack.Age,
@@ -2071,6 +2067,19 @@ func rateLimitMaterial(currentRoster func() *roster.Config) func(agent string) (
 			return limited, scope, detail, true
 		})
 	}
+}
+
+// rateLimitAutoSwitchEligible keeps the established Claude auto-switch population and adds
+// only leaders on Grok. Weekly exhaustion is a coordinator-resuscitation policy; it must not
+// start context-losing forced switches for ordinary execution desks.
+func rateLimitAutoSwitchEligible(cfg *roster.Config, agent, liveSurface, detail string) bool {
+	if cfg == nil || !cfg.AutoSwitchEligible(agent) {
+		return false
+	}
+	if liveSurface == surface.DefaultSurface {
+		return true
+	}
+	return liveSurface == "grok" && cfg.IsCoordinator(agent) && surface.IsWeeklyLimitExhaustion(detail)
 }
 
 func rateLimitMaterialResolved(cfg *roster.Config, agent, pane string, paneCommand func(string) (string, error), probe func(surface.Driver, string) (bool, surface.RateLimitScope, string, bool)) (bool, surface.RateLimitScope, string, bool) {
