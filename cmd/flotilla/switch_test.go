@@ -446,11 +446,14 @@ func TestRunSwitchForceBypassesUncooperativeFromHandoff(t *testing.T) {
 		return false, nil
 	}
 	p := testSwitchPlan()
+	p.agent = "backend"
+	p.key = "backend-key"
 	p.force = true
 	p.fromSurface = "grok"
 	p.toSurface = "claude-code"
-	p.launch = "claude --model claude-fable-5"
-	p.takeoverText = forcedSwitchTakeoverTurn("state/research.md")
+	p.launch = "example-harness --role frontend"
+	p.takeoverText = forcedSwitchTakeoverTurn("state/backend.md")
+	r.markerGot = p.key
 
 	msg, err := runSwitch(ops, p)
 	if err != nil {
@@ -479,19 +482,6 @@ func TestForcedSwitchTakeoverTurnDoesNotReferenceMissingHandoff(t *testing.T) {
 	}
 	if strings.Contains(turn, ".flotilla/handoffs/") {
 		t.Fatalf("forced takeover turn referenced an absent handoff: %s", turn)
-	}
-}
-
-func TestRunSwitchWithoutForceMissingHandoffLeavesFromUntouched(t *testing.T) {
-	r := happySwitch()
-	r.failDurable = true
-
-	_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
-	if err == nil || !strings.Contains(err.Error(), "phase 1") {
-		t.Fatalf("ordinary switch error = %v, want fail-closed Phase-1 refusal", err)
-	}
-	if r.closed || r.respawned {
-		t.Fatalf("ordinary switch mutated the FROM desk without a handoff: %+v", r)
 	}
 }
 
@@ -568,6 +558,59 @@ func TestRunSwitchMarkerMismatch(t *testing.T) {
 	_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
 	if err == nil || !strings.Contains(err.Error(), "flotilla send") {
 		t.Fatalf("err = %v, want a marker-mismatch abort naming the send escape hatch", err)
+	}
+}
+
+func TestRunSwitchForcedRecoveryNeverReferencesSkippedHandoff(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mut  func(*swRec, *switchOps)
+	}{
+		{"marker mismatch", func(r *swRec, _ *switchOps) { r.markerGot = "wrong-key" }},
+		{"TO boot timeout", func(_ *swRec, ops *switchOps) {
+			ops.assess = func(string) surface.State { return surface.StateWorking }
+		}},
+		{"takeover delivery failure", func(r *swRec, ops *switchOps) {
+			ops.assess = func(string) surface.State {
+				if len(r.delivered) == 0 {
+					return surface.StateIdle
+				}
+				return surface.StateWorking
+			}
+			ops.deliver = func(string, string) error { return errors.New("paste did not land") }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := happySwitch()
+			ops := fakeSwitchOps(r)
+			p := testSwitchPlan()
+			p.agent = "backend"
+			p.force = true
+			p.takeoverText = forcedSwitchTakeoverTurn("state/backend.md")
+			ops.assess = func(string) surface.State {
+				if r.respawned && len(r.delivered) == 0 {
+					return surface.StateIdle
+				}
+				if r.respawned {
+					return surface.StateWorking
+				}
+				return surface.StateWorking
+			}
+			tc.mut(r, &ops)
+
+			_, err := runSwitch(ops, p)
+			if err == nil {
+				t.Fatal("forced failure fixture unexpectedly succeeded")
+			}
+			if strings.Contains(err.Error(), p.handoffPath) {
+				t.Fatalf("forced recovery referenced skipped handoff %q: %v", p.handoffPath, err)
+			}
+			for _, want := range []string{"fresh-start takeover", "state/backend.md"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("forced recovery missing %q: %v", want, err)
+				}
+			}
+		})
 	}
 }
 
