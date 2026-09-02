@@ -413,7 +413,7 @@ code {
   border-color: var(--line-soft);
 }
 .conv-item.selected {
-  background: var(--hull);
+  background: var(--card);
   border-color: var(--cyan-dim);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cyan) 22%, transparent);
 }
@@ -842,7 +842,7 @@ code {
 }
 .desk:hover {
   border-color: var(--line);
-  background: var(--hull);
+  background: var(--card);
   transform: translateY(-1px);
 }
 .desk-stale { opacity: .68; }
@@ -3149,6 +3149,10 @@ html, body { overflow-x: clip; }
   width: min(25rem, calc(100vw - 2rem)); box-sizing: border-box; overflow: hidden;
   border: 1px solid var(--cyan-dim); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow);
 }
+.research-annotation-backdrop {
+  position: fixed; z-index: 70; inset: 0; background: var(--scrim);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+}
 .research-annotation-panel > header {
   display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex: 0 0 auto;
   padding: .75rem; border-bottom: 1px solid var(--line); background: var(--abyss-2);
@@ -3244,7 +3248,7 @@ html, body { overflow-x: clip; }
 .research-table-wrap th { color: var(--ink); background: var(--abyss-3); font-family: var(--display); }
 .research-table-wrap tr:nth-child(even) { background: color-mix(in srgb, var(--ink) 3%, transparent); }
 .research-status[hidden], .research-retry[hidden], .research-reader-empty[hidden], .research-decision-strip[hidden], #research-document[hidden], .research-toc[hidden], .research-shelf[hidden],
-.research-selection-action[hidden], .research-annotation-panel[hidden], .research-annotation-thread[hidden], .research-annotation-form[hidden],
+.research-selection-action[hidden], .research-annotation-backdrop[hidden], .research-annotation-panel[hidden], .research-annotation-thread[hidden], .research-annotation-form[hidden],
 .research-annotation-empty[hidden], .research-annotation-thread blockquote[hidden], .research-annotation-form blockquote[hidden], .research-annotation-bar button[hidden],
 .research-decision-strip button[hidden], .research-decision-response[hidden], .research-presentation-stage[hidden], .research-full-screen-link[hidden] { display: none; }
 
