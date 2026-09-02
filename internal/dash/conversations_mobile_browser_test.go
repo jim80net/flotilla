@@ -139,19 +139,39 @@ with sync_playwright() as p:
         chooser = page.evaluate("""() => {
           const panel = document.querySelector('.conv-nav');
           const rail = document.querySelector('#conv-rail');
+          const view = document.querySelector('#view-conversations');
           const rect = panel.getBoundingClientRect();
           return {position:getComputedStyle(panel).position, top:rect.top, bottom:rect.bottom, height:rect.height,
                   viewport:innerHeight, railScroll:rail.scrollHeight, railClient:rail.clientHeight,
-                  documentHeight:document.documentElement.scrollHeight};
+                  documentHeight:document.documentElement.scrollHeight,
+                  rootLocked:document.documentElement.classList.contains('conv-chooser-open'),
+                  bodyLocked:document.body.classList.contains('conv-chooser-open'),
+                  barDisplay:getComputedStyle(document.querySelector('.bar')).display,
+                  viewPosition:getComputedStyle(view).position, viewZ:getComputedStyle(view).zIndex};
         }""")
         assert chooser["position"] == "fixed", chooser
         assert chooser["height"] <= chooser["viewport"] * .8 and chooser["bottom"] <= chooser["viewport"], chooser
         assert chooser["railScroll"] > chooser["railClient"], chooser
         assert chooser["documentHeight"] <= document_before + 2, chooser
+        assert chooser["rootLocked"] and chooser["bodyLocked"], chooser
+        assert chooser["barDisplay"] == "none" and chooser["viewPosition"] == "fixed" and int(chooser["viewZ"]) >= 100, chooser
         page.keyboard.press("Escape")
         expect(chooser_button).to_have_attribute("aria-expanded", "false")
-        assert not page.locator("body").evaluate("node => node.classList.contains('conv-chooser-open')")
+        assert not page.evaluate("document.documentElement.classList.contains('conv-chooser-open') || document.body.classList.contains('conv-chooser-open')")
         expect(chooser_button).to_be_focused()
+
+        chooser_button.click()
+        page.locator('.conv-item[data-desk]').first.click()
+        expect(chooser_button).to_have_attribute("aria-expanded", "false")
+        expect(chooser_button).to_be_focused()
+        assert not page.evaluate("document.documentElement.classList.contains('conv-chooser-open') || document.body.classList.contains('conv-chooser-open')")
+
+        chooser_button.click()
+        page.evaluate("() => window.flotillaDash.showView('goals')")
+        assert not page.evaluate("document.documentElement.classList.contains('conv-chooser-open') || document.body.classList.contains('conv-chooser-open')")
+        root_overflow = page.evaluate("getComputedStyle(document.documentElement).overflowY")
+        assert root_overflow != "hidden", root_overflow
+        page.evaluate("() => window.flotillaDash.showView('conversations')")
         more = page.locator("[data-thread-window-more]")
         expect(more).to_be_visible()
         expect(page.locator("#thread-load-earlier")).to_be_hidden()
