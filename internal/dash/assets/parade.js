@@ -794,6 +794,9 @@
     el("pd-slide").addEventListener("click", function (e) {
       if (e.target && e.target.closest("[data-pd-empty-back]")) showList();
     });
+    el("pd-list").addEventListener("click", function (e) {
+      if (e.target && e.target.closest("[data-parade-retry]")) window.location.reload();
+    });
   }
 
   wire();
@@ -803,7 +806,7 @@
       if (d && d.error) { // an archive read error is an ERROR state, not a false "no parades"
         showList();
         var b = el("pd-list");
-        if (b) b.innerHTML = '<div class="error">' + esc(d.error) + "</div>";
+        if (b) b.innerHTML = window.flotillaUI.failurePanel("Parades are unavailable right now.", "Retry", d.error, "data-parade-retry");
         return;
       }
       PARADES = (d && d.parades) || [];
@@ -815,6 +818,6 @@
     .catch(function (e) {
       showList();
       var box = el("pd-list");
-      if (box) box.innerHTML = '<div class="error">Could not load parades: ' + esc(e.message) + "</div>";
+      if (box) box.innerHTML = window.flotillaUI.failurePanel("Parades are unavailable right now.", "Retry", e.message, "data-parade-retry");
     });
 })();
