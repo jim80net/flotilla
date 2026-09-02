@@ -277,7 +277,7 @@ func TestClassifyGrokWeeklyLimitProseDoesNotTrigger(t *testing.T) {
 		"quoted chrome\nYou hit your weekly limit.\nordinary prose\n╰──── Grok 4.6 (high) · always-approve ─╯",
 	} {
 		if hit, detail := classifyGrokRateLimit(captured); hit {
-			t.Fatalf("weekly-limit transcript triggered fallback: detail=%q\n%s", detail, captured)
+			t.Errorf("weekly-limit transcript triggered fallback: detail=%q\n%s", detail, captured)
 		}
 	}
 }
