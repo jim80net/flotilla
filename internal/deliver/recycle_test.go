@@ -2,9 +2,18 @@ package deliver
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func gitRun(t *testing.T, cwd string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", cwd}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 // writeHandoff writes a handoff file under <root>/.claude/handoffs/ and returns its path.
 func writeHandoff(t *testing.T, root, name, body string) string {
@@ -70,5 +79,70 @@ func TestHandoffPathMustBeUnderCwd(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "escape.md")
 	if _, err := HandoffDurable(root, outside, minBytes); err == nil {
 		t.Fatal("HandoffDurable outside cwd = nil error, want refuse")
+	}
+}
+
+func TestHandoffUntrackedRejectsTrackedButIgnoredPath(t *testing.T) {
+	root := t.TempDir()
+	gitRun(t, root, "init", "-q")
+	gitRun(t, root, "config", "user.email", "example@example.invalid")
+	gitRun(t, root, "config", "user.name", "Example")
+	dir := filepath.Join(root, ".flotilla", "handoffs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(dir, "recycle-tracked.md")
+	if err := os.WriteFile(tracked, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, root, "add", "-f", ".flotilla/handoffs/recycle-tracked.md")
+	gitRun(t, root, "commit", "-qm", "track fixture")
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".flotilla/handoffs/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(tracked); err != nil { // absent on disk, still tracked in the index
+		t.Fatal(err)
+	}
+	if untracked, err := HandoffUntracked(root, tracked); err != nil || untracked {
+		t.Fatalf("tracked-but-ignored path = (%t, %v), want (false, nil)", untracked, err)
+	}
+	untrackedPath := filepath.Join(dir, "recycle-new.md")
+	if untracked, err := HandoffUntracked(root, untrackedPath); err != nil || !untracked {
+		t.Fatalf("new path = (%t, %v), want (true, nil)", untracked, err)
+	}
+}
+
+func TestHandoffUntrackedFailsClosedWhenGitProbeIsIndeterminate(t *testing.T) {
+	root := t.TempDir()
+	handoff := filepath.Join(root, ".flotilla", "handoffs", "recycle-new.md")
+	if err := os.MkdirAll(filepath.Dir(handoff), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("git exits two", func(t *testing.T) {
+		bin := t.TempDir()
+		shim := filepath.Join(bin, "git")
+		if err := os.WriteFile(shim, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin)
+		if untracked, err := HandoffUntracked(root, handoff); err == nil || untracked {
+			t.Fatalf("indeterminate git probe = (%t, %v), want (false, error)", untracked, err)
+		}
+	})
+
+	t.Run("git absent", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if untracked, err := HandoffUntracked(root, handoff); err == nil || untracked {
+			t.Fatalf("missing git probe = (%t, %v), want (false, error)", untracked, err)
+		}
+	})
+}
+
+func TestHandoffUntrackedRefusesNonGitLocation(t *testing.T) {
+	root := t.TempDir()
+	handoff := filepath.Join(root, ".flotilla", "handoffs", "recycle-new.md")
+	if untracked, err := HandoffUntracked(root, handoff); err == nil || untracked {
+		t.Fatalf("non-git location = (%t, %v), want fail-closed refusal", untracked, err)
 	}
 }

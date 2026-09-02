@@ -53,6 +53,7 @@ type recycleOps struct {
 	assess       func(target string) surface.State                  // driver.Assess
 	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
 	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
+	untracked    func(cwd, path string) (bool, error)               // deliver.HandoffUntracked (index-reachability guard)
 	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
 	deliver      func(target, text string) error                    // confirmed delivery bound to the driver
 	closeFn      func(target string) error                          // driver.Close
@@ -164,7 +165,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	// External --self and all full recycles keep the idle precondition.
 	if !(ownPaneSelf && p.selfPath) {
 		if !pollIdleCleared(ops, target, p.timeouts.boot) {
-			return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched", p.agent, p.timeouts.boot)
+			return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched; if its composer appears idle while status remains Working/Composing, recycle cannot clear that stuck task state — recover with: flotilla resume %s --force", p.agent, p.timeouts.boot, p.agent)
 		}
 	}
 
@@ -176,6 +177,13 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 	if !absent {
 		return "", worktreeCloseNote{}, fmt.Errorf("a blob already exists at the designated handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.designatedPath)
+	}
+	untracked, err := ops.untracked(p.cwd, p.designatedPath)
+	if err != nil {
+		return "", worktreeCloseNote{}, fmt.Errorf("handoff tracked-status check for %q: %w — ABORT before writing handoff content", p.designatedPath, err)
+	}
+	if !untracked {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing recycle: designated handoff %s is tracked by git even if ignored — ABORT before writing deployment-specific handoff content; remove it from the index through the repository-owner workflow, then retry", p.designatedPath)
 	}
 
 	// PHASE 1 — handoff (lockless): deliver the non-interactive handoff turn, then gate on the
@@ -601,6 +609,7 @@ func cmdRecycle(args []string) error {
 		assess:       drv.Assess,
 		composer:     probe.ComposerState,
 		absent:       deliver.HandoffAbsentAtHead,
+		untracked:    deliver.HandoffUntracked,
 		durable:      deliver.HandoffDurable,
 		deliver:      func(target, text string) error { return confirm.Submit(drv, target, text) },
 		closeFn:      drv.Close,
@@ -654,9 +663,17 @@ func cmdRecycle(args []string) error {
 			timeouts:        defaultTimeouts(),
 			selfPath:        selfPath,
 		}
+		if attempt == 0 {
+			if _, sweepErr := sweepRecycleHandoffOrphans(plan.designatedPath, time.Now()); sweepErr != nil {
+				log.Printf("flotilla: recycle: handoff orphan sweep failed (continuing conservatively): %v", sweepErr)
+			}
+		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
 			break
+		}
+		if cleanupErr := removeAbortedRecycleHandoff(plan.designatedPath); cleanupErr != nil {
+			log.Printf("flotilla: recycle: WARNING — aborted handoff cleanup failed: %v", cleanupErr)
 		}
 		if attempt+1 < attempts && isRetryableBusy(runErr) {
 			log.Printf("flotilla: recycle: busy-desk abort for %q (attempt %d/%d) — retrying after settle wait (#436)", agentName, attempt+1, attempts)
@@ -668,7 +685,7 @@ func cmdRecycle(args []string) error {
 	writeLastRecycle(agentName, plan, msg, runErr, wtNote)
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
-		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
+		escalateRecycleAbort(cfg, rosterPath, agentName, runErr, plan.designatedPath)
 		return runErr
 	}
 	fmt.Print(msg)

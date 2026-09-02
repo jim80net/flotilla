@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -87,9 +88,11 @@ func recycleAbortNotice(agent, phase string, class recycleAbortClass, err error,
 	b.WriteString("Prescribed recovery:\n")
 	switch class {
 	case abortBusyDesk:
-		b.WriteString("  - Wait for the desk to settle Idle, then: flotilla recycle ")
+		b.WriteString("  - If the desk is genuinely running a turn, let that turn finish, then retry recycle once\n")
+		b.WriteString("  - If the composer appears idle but status remains Working/Composing, do NOT retry recycle: its idle gate cannot repair the stuck task state\n")
+		b.WriteString("  - Recover the stuck state with: flotilla resume ")
 		b.WriteString(agent)
-		b.WriteString("\n")
+		b.WriteString(" --force (this replaces the live session; use a verified durable handoff when context must survive)\n")
 	case abortPhase2Close:
 		b.WriteString("  - Investigate the pane; if confirmed dead: flotilla resume ")
 		b.WriteString(agent)
@@ -122,10 +125,78 @@ func recycleAbortNotice(agent, phase string, class recycleAbortClass, err error,
 	return b.String()
 }
 
-// escalateRecycleAbort surfaces a failed recycle to the owning coordinator's pane
-// and a durable sidecar under ~/.flotilla/<agent>/ (#436). Best-effort: never
-// masks the original recycle error.
-func escalateRecycleAbort(cfg *roster.Config, agent string, runErr error, handoffPath string) {
+type recycleAbortEscalationOps struct {
+	submit  func(owner, notice string) error
+	enqueue func(rosterDir, sender, owner, notice string) (string, bool, error)
+}
+
+type recycleAbortDelivery struct {
+	queued   bool
+	outboxID string
+}
+
+// recycleAbortRoute resolves both sides of the recovery hop. Coordinator self-recycles
+// deliberately route through the configured adjutant: the coordinator is the busy/wedged
+// recipient in exactly the incident this path must survive, so it cannot also be the sender.
+func recycleAbortRoute(cfg *roster.Config, agent string) (sender, owner string, ok bool) {
+	if cfg == nil || agent == "" {
+		return "", "", false
+	}
+	owner = cfg.OwningXO(agent, cfg.XOAgent)
+	if owner == "" {
+		owner = cfg.XOAgent
+	}
+	if owner == "" {
+		owner = cfg.CosAgent
+	}
+	if owner == "" {
+		return "", "", false
+	}
+	if adj := cfg.AdjutantFor(owner); adj != "" && adj != owner {
+		return adj, owner, true
+	}
+	if owner == agent {
+		if cfg.CosAgent != "" && cfg.CosAgent != agent {
+			return agent, cfg.CosAgent, true
+		}
+		return "", "", false
+	}
+	return agent, owner, true
+}
+
+// deliverRecycleAbort first attempts immediate confirmed delivery. Any failure becomes one
+// deduplicated durable outbox entry; busy, pane-uncertain, and missing-surface outcomes are
+// therefore delayed delivery states rather than dropped escalation attempts (#914).
+func deliverRecycleAbort(ops recycleAbortEscalationOps, rosterDir, sender, owner, notice string) (recycleAbortDelivery, error) {
+	if err := ops.submit(owner, notice); err == nil {
+		return recycleAbortDelivery{}, nil
+	} else {
+		id, deduped, qerr := ops.enqueue(rosterDir, sender, owner, notice)
+		if qerr != nil {
+			return recycleAbortDelivery{}, fmt.Errorf("direct delivery failed: %v; durable outbox enqueue also failed: %w", err, qerr)
+		}
+		log.Printf("flotilla: recycle: abort delivery to %q deferred in %q outbox (id=%s deduped=%t): %v", owner, sender, id, deduped, err)
+		return recycleAbortDelivery{queued: true, outboxID: id}, nil
+	}
+}
+
+func writeRecycleAbortSidecar(home, agent, notice string, delivery recycleAbortDelivery) error {
+	dir := filepath.Join(home, ".flotilla", agent)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	status := "delivery=direct"
+	if delivery.queued {
+		status = "delivery=durable-outbox\noutbox_id=" + delivery.outboxID
+	}
+	body := fmt.Sprintf("%s\n%s\n---\n%s\n", time.Now().UTC().Format(time.RFC3339), status, notice)
+	return os.WriteFile(filepath.Join(dir, "last-recycle-abort.txt"), []byte(body), 0o600)
+}
+
+// escalateRecycleAbort surfaces a failed recycle to the owning coordinator's pane,
+// falls back to a durable sender outbox, and writes a sidecar under ~/.flotilla/<agent>/
+// (#914, successor to #436). Best-effort: never masks the original recycle error.
+func escalateRecycleAbort(cfg *roster.Config, rosterPath, agent string, runErr error, handoffPath string) {
 	if runErr == nil || agent == "" {
 		return
 	}
@@ -143,47 +214,38 @@ func escalateRecycleAbort(cfg *roster.Config, agent string, runErr error, handof
 	notice := recycleAbortNotice(agent, phase, class, runErr, handoffPath)
 	log.Printf("flotilla: recycle: ESCALATE %s", notice)
 
-	// Durable sidecar next to last-recycle.json so a successor finds it without the log.
-	if home, err := os.UserHomeDir(); err == nil {
-		dir := filepath.Join(home, ".flotilla", agent)
-		_ = os.MkdirAll(dir, 0o700)
-		path := filepath.Join(dir, "last-recycle-abort.txt")
-		body := fmt.Sprintf("%s\n---\n%s\n", time.Now().UTC().Format(time.RFC3339), notice)
-		if werr := os.WriteFile(path, []byte(body), 0o600); werr != nil {
+	sender, owner, ok := recycleAbortRoute(cfg, agent)
+	if !ok {
+		log.Printf("flotilla: recycle: abort escalate: no distinct sender/coordinator route for %q", agent)
+		return
+	}
+	ops := recycleAbortEscalationOps{
+		submit: func(owner, notice string) error {
+			drv, found := surface.Get(agentSurface(cfg, owner))
+			if !found {
+				return fmt.Errorf("no surface for owner %q", owner)
+			}
+			pane, err := deliver.ResolvePane(agentTitle(cfg, owner))
+			if err != nil {
+				return fmt.Errorf("resolve owner %q pane: %w", owner, err)
+			}
+			confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+			return confirm.Submit(drv, pane, notice)
+		},
+		enqueue: outbox.Enqueue,
+	}
+	delivery, err := deliverRecycleAbort(ops, filepath.Dir(rosterPath), sender, owner, notice)
+	if err != nil {
+		log.Printf("flotilla: recycle: abort escalation for %q failed: %v", agent, err)
+		return
+	}
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
+		if werr := writeRecycleAbortSidecar(home, agent, notice, delivery); werr != nil {
 			log.Printf("flotilla: recycle: abort sidecar write failed: %v", werr)
 		}
 	}
-
-	if cfg == nil {
+	if delivery.queued {
 		return
 	}
-	owner := cfg.OwningXO(agent, cfg.XOAgent)
-	if owner == "" {
-		owner = cfg.XOAgent
-	}
-	if owner == "" || owner == agent {
-		// No separate coordinator — still try CosAgent.
-		if cfg.CosAgent != "" && cfg.CosAgent != agent {
-			owner = cfg.CosAgent
-		} else {
-			return
-		}
-	}
-	// Inject into the coordinator pane (side channel — not the aborted desk).
-	drv, ok := surface.Get(agentSurface(cfg, owner))
-	if !ok {
-		log.Printf("flotilla: recycle: abort escalate: no surface for owner %q", owner)
-		return
-	}
-	pane, err := deliver.ResolvePane(agentTitle(cfg, owner))
-	if err != nil {
-		log.Printf("flotilla: recycle: abort escalate: resolve owner %q pane: %v", owner, err)
-		return
-	}
-	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	if err := confirm.Submit(drv, pane, notice); err != nil {
-		log.Printf("flotilla: recycle: abort escalate deliver to %q failed: %v", owner, err)
-		return
-	}
-	log.Printf("flotilla: recycle: abort escalated to coordinator %q for desk %q", owner, agent)
+	log.Printf("flotilla: recycle: abort escalated directly to coordinator %q for desk %q", owner, agent)
 }

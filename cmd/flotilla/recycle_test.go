@@ -85,6 +85,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 		assess:       r.assess,
 		composer:     r.composer,
 		absent:       func(string, string) (bool, error) { return r.absentResult, r.absentErr },
+		untracked:    func(string, string) (bool, error) { return true, nil },
 		durable:      func(string, string, int) (bool, error) { return !r.failDurable, nil },
 		deliver:      func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
 		closeFn:      func(string) error { r.closed = true; return r.closeErr },
@@ -169,6 +170,32 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	}
 }
 
+func TestRunRecycleTrackedHandoffRefusesBeforeWriter(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.untracked = func(string, string) (bool, error) { return false, nil }
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "tracked by git") || !strings.Contains(err.Error(), "ABORT before writing") {
+		t.Fatalf("err=%v, want loud tracked-path refusal", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Fatalf("writer was invoked for tracked target: %v", r.delivered)
+	}
+}
+
+func TestRunRecycleIndeterminateTrackingRefusesBeforeWriter(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.untracked = func(string, string) (bool, error) { return false, errors.New("git probe unavailable") }
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "tracked-status check") || !strings.Contains(err.Error(), "ABORT before writing") {
+		t.Fatalf("err=%v, want loud indeterminate-path refusal", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Fatalf("writer was invoked without positive untracked proof: %v", r.delivered)
+	}
+}
+
 // TestRunRecycleAbortRestoresRemainOnExit: a Phase-2 close that never confirms must STILL restore
 // remain-on-exit off (the defer), so an aborted recycle doesn't change the desk's crash behaviour.
 func TestRunRecycleAbortRestoresRemainOnExit(t *testing.T) {
@@ -237,6 +264,11 @@ func TestRunRecyclePhase0Abort(t *testing.T) {
 	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "phase 0") {
 		t.Fatalf("err = %v, want a phase-0 abort", err)
+	}
+	for _, want := range []string{"recycle cannot clear", "flotilla resume backend --force"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("phase-0 recovery missing %q: %v", want, err)
+		}
 	}
 	if len(r.delivered) != 0 {
 		t.Errorf("phase-0 abort must not deliver the handoff turn (got %v)", r.delivered)

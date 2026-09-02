@@ -29,6 +29,29 @@ func validateHandoffPath(cwd, designatedPath string) error {
 	return nil
 }
 
+// HandoffUntracked verifies that writing designatedPath cannot update content already
+// reachable from the repository index. Ignore coverage is insufficient: git continues to
+// track an ignored path that was committed previously. The proof is fail-closed: inability
+// to inspect the repository is not evidence that the path is untracked. Non-Git locations
+// are therefore refused because rev-parse cannot positively establish an index boundary.
+func HandoffUntracked(cwd, designatedPath string) (bool, error) {
+	if err := validateHandoffPath(cwd, designatedPath); err != nil {
+		return false, err
+	}
+	if err := exec.Command("git", "-C", cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+		return false, fmt.Errorf("establish git worktree for handoff %q: %w", designatedPath, err)
+	}
+	rel, err := filepath.Rel(filepath.Clean(cwd), filepath.Clean(designatedPath))
+	if err != nil {
+		return false, err
+	}
+	out, err := exec.Command("git", "-C", cwd, "ls-files", "--", rel).Output()
+	if err != nil {
+		return false, fmt.Errorf("inspect git tracking for handoff %q: %w", designatedPath, err)
+	}
+	return strings.TrimSpace(string(out)) == "", nil
+}
+
 // HandoffDurable reports whether the recycle-designated handoff at designatedPath is durable:
 // the file EXISTS on disk as a regular file AND is at least minBytes (the minimum-viability
 // check — a floor that rejects an empty/error stub; NOT a truncation detector). It is the
