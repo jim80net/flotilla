@@ -121,13 +121,13 @@
           ' shipped</span><span class="when-open">hide ' + shippedRest.length + " older shipped</span></summary>" +
           shippedRest.map(function (it) { return workRow(it, "shipped", flotilla, desk.name); }).join("") + "</details>"
       : "";
-    return '<section class="issue-desk">' +
-      '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
-        moving.length + " moving · " + shipped.length + " shipped</span></div>" +
+    return '<details class="issue-desk issue-desk-fold">' +
+      '<summary class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
+        moving.length + " moving · " + shipped.length + " shipped</span></summary>" +
       moving.map(function (it) { return workRow(it, "in-flight", flotilla, desk.name); }).join("") +
       shippedPreview.map(function (it) { return workRow(it, "shipped", flotilla, desk.name); }).join("") +
       shippedMore +
-      "</section>";
+      "</details>";
   }
 
   function groupKey(flotilla, desk) {
@@ -274,14 +274,19 @@
       var desks = Array.isArray(flotilla.desks) ? flotilla.desks : [];
       if (mobilePlan) desks = desks.filter(function (desk) { return mobilePlan.desks[groupKey(flotilla.name, desk.name)]; });
       if (!desks.length) return "";
-      return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
+      var sectionOpen = mobileLedger ? '<section class="issue-ledger-section"><div class="issue-ledger-head">' :
+        '<details class="issue-ledger-section"><summary class="issue-ledger-head">';
+      var headClose = mobileLedger ? "</div>" : "</summary>";
+      var sectionClose = mobileLedger ? "</section>" : "</div></details>";
+      return sectionOpen + '<div><span class="issue-ledger-kicker">Flotilla</span>' +
         '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
-        desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span></div>" +
+        desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span>" + headClose +
+        (mobileLedger ? "" : '<div class="issue-ledger-body">') +
         desks.map(function (desk) {
           return mobileLedger
             ? renderMobileDesk(desk, flotilla.name || "Unassigned", mobilePlan.desks[groupKey(flotilla.name, desk.name)])
             : renderDesk(desk, flotilla.name || "Unassigned");
-        }).join("") + "</section>";
+        }).join("") + sectionClose;
     }).join("");
     var mobileWindow = mobilePlan && mobilePlan.focused
       ? '<div class="issue-mobile-window issue-mobile-focused" role="status"><strong>Focused · ' + escapeHtml(mobilePlan.focused.label) +

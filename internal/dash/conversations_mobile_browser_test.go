@@ -27,10 +27,15 @@ func TestMobileConversationsWindowContract689(t *testing.T) {
 			t.Errorf("mobile Conversations renderer missing %q", marker)
 		}
 	}
+	for _, marker := range []string{"conv-chooser-open", `event.key !== "Escape"`} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("bounded mobile desk chooser missing %q", marker)
+		}
+	}
 	if strings.Contains(js, "threadItemText(it).length > 240") {
 		t.Error("mobile Conversations must not use a character-count proxy for rendered overflow")
 	}
-	for _, marker := range []string{".thread-window-item:not(.is-expanded) .thread-gist", ".conv-nav:not(.mobile-expanded) .conv-rail-list"} {
+	for _, marker := range []string{".thread-window-item:not(.is-expanded) .thread-gist", ".conv-nav:not(.mobile-expanded) .conv-rail-list", ".conv-nav.mobile-expanded", "grid-template-columns: minmax(0, 3.25fr)"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("mobile Conversations CSS missing %q", marker)
 		}
@@ -108,6 +113,45 @@ with sync_playwright() as p:
         page.route("**/api/history?*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(history)))
         page.route("**/api/session-mirror?*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(mirror)))
         page.goto(url, wait_until="domcontentloaded")
+        page.evaluate("""() => {
+          const badge = document.querySelector('#hdr-decisions-count');
+          badge.hidden = false; badge.textContent = '88';
+          const rail = document.querySelector('#conv-rail');
+          for (let i = 0; i < 64; i++) {
+            const row = document.createElement('button');
+            row.type = 'button'; row.className = 'conv-item';
+            row.textContent = 'generic-desk-' + String(i).padStart(2, '0');
+            rail.appendChild(row);
+          }
+        }""")
+        chrome = page.evaluate("""() => {
+          const tabs = [...document.querySelectorAll('.tabs .tab')].map(node => node.getBoundingClientRect());
+          const strip = document.querySelector('.tabs');
+          return {tops: tabs.map(r => r.top), bottoms: tabs.map(r => r.bottom), scroll: strip.scrollWidth, client: strip.clientWidth};
+        }""")
+        assert max(chrome["tops"]) - min(chrome["tops"]) < 2, chrome
+        assert max(chrome["bottoms"]) - min(chrome["bottoms"]) < 2, chrome
+        assert chrome["scroll"] <= chrome["client"], chrome
+
+        chooser_button = page.locator('[data-conv-disclosure="nav"]')
+        document_before = page.evaluate("document.documentElement.scrollHeight")
+        chooser_button.click()
+        chooser = page.evaluate("""() => {
+          const panel = document.querySelector('.conv-nav');
+          const rail = document.querySelector('#conv-rail');
+          const rect = panel.getBoundingClientRect();
+          return {position:getComputedStyle(panel).position, top:rect.top, bottom:rect.bottom, height:rect.height,
+                  viewport:innerHeight, railScroll:rail.scrollHeight, railClient:rail.clientHeight,
+                  documentHeight:document.documentElement.scrollHeight};
+        }""")
+        assert chooser["position"] == "fixed", chooser
+        assert chooser["height"] <= chooser["viewport"] * .8 and chooser["bottom"] <= chooser["viewport"], chooser
+        assert chooser["railScroll"] > chooser["railClient"], chooser
+        assert chooser["documentHeight"] <= document_before + 2, chooser
+        page.keyboard.press("Escape")
+        expect(chooser_button).to_have_attribute("aria-expanded", "false")
+        assert not page.locator("body").evaluate("node => node.classList.contains('conv-chooser-open')")
+        expect(chooser_button).to_be_focused()
         more = page.locator("[data-thread-window-more]")
         expect(more).to_be_visible()
         expect(page.locator("#thread-load-earlier")).to_be_hidden()

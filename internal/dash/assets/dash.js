@@ -1977,6 +1977,9 @@
         var expanded = button.getAttribute("aria-expanded") !== "true";
         button.setAttribute("aria-expanded", String(expanded));
         if (panel) panel.classList.toggle("mobile-expanded", expanded);
+        if (button.getAttribute("data-conv-disclosure") === "nav") {
+          document.body.classList.toggle("conv-chooser-open", expanded);
+        }
         button.textContent = button.getAttribute("data-conv-disclosure") === "nav"
           ? (expanded ? "Hide desks" : "Choose desk")
           : (expanded ? "Hide context" : "Show context");
@@ -1988,11 +1991,31 @@
       var nav = desk.closest(".conv-nav");
       var button = nav ? nav.querySelector('[data-conv-disclosure="nav"]') : null;
       if (nav) nav.classList.remove("mobile-expanded");
+      document.body.classList.remove("conv-chooser-open");
       if (button) { button.setAttribute("aria-expanded", "false"); button.textContent = "Choose desk"; }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" || !document.body.classList.contains("conv-chooser-open")) return;
+      var nav = document.querySelector(".conv-nav.mobile-expanded");
+      var button = nav ? nav.querySelector('[data-conv-disclosure="nav"]') : null;
+      if (nav) nav.classList.remove("mobile-expanded");
+      document.body.classList.remove("conv-chooser-open");
+      if (button) {
+        button.setAttribute("aria-expanded", "false");
+        button.textContent = "Choose desk";
+        button.focus();
+      }
     });
     var media = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
     if (media && media.addEventListener) {
       media.addEventListener("change", function () {
+        if (!media.matches) {
+          var nav = document.querySelector(".conv-nav.mobile-expanded");
+          var button = nav ? nav.querySelector('[data-conv-disclosure="nav"]') : null;
+          if (nav) nav.classList.remove("mobile-expanded");
+          document.body.classList.remove("conv-chooser-open");
+          if (button) { button.setAttribute("aria-expanded", "false"); button.textContent = "Choose desk"; }
+        }
         mobileThreadVisible = MOBILE_THREAD_INITIAL;
         mobileThreadHidden = 0;
         lastThreadKey = "";

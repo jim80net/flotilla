@@ -1249,6 +1249,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   min-width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-family: var(--display);
 }
+details.issue-ledger-section > summary { list-style: none; cursor: pointer; }
+details.issue-ledger-section > summary::-webkit-details-marker,
+details.issue-desk-fold > summary::-webkit-details-marker { display: none; }
+details.issue-ledger-section > summary::before,
+details.issue-desk-fold > summary::before { content: "▸"; color: var(--cyan); flex: 0 0 auto; }
+details.issue-ledger-section[open] > summary::before,
+details.issue-desk-fold[open] > summary::before { content: "▾"; }
+details.issue-ledger-section:not([open]) > .issue-ledger-head { border-bottom: 0; }
+.issue-ledger-body { background: var(--abyss-2); }
 .issue-ledger-empty { padding: 1rem; color: var(--ink-3); background: var(--abyss-2); font-size: .82rem; }
 .issue-desk + .issue-desk { border-top: 1px solid var(--line); }
 .issue-desk-head {
@@ -1257,6 +1266,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .issue-desk-head h4 { margin: 0; font-family: var(--display); font-size: .82rem; color: var(--ink); }
 .issue-desk-head span { font-size: .68rem; color: var(--ink-3); }
+details.issue-desk-fold > summary { list-style: none; cursor: pointer; }
+details.issue-desk-fold > summary h4 { flex: 1 1 auto; }
+details.issue-desk-fold[open] > summary { border-bottom: 1px solid var(--line-soft); }
 .issue-shipped-more { background: var(--abyss-2); border-top: 1px solid var(--line); }
 .issue-shipped-more summary {
   min-height: 44px; display: flex; align-items: center; justify-content: center;
@@ -2350,15 +2362,23 @@ html, body { overflow-x: clip; }
   .research-page .bar > .brand { flex: 1 1 100%; width: 100%; }
   .parade-body .bar > .parade-topnav,
   .research-page .bar > .parade-topnav { flex: 1 1 100%; justify-content: flex-end; }
-  /* #429: five tabs no longer fit one 390px row — WRAP the strip and the tablist
-     group itself, keeping .tab-group a real box (cubic #446 P2: display:contents can
-     drop the role="tablist" container from some engines' accessibility trees). Every
-     tab stays visible and tappable; nowrap keeps each label whole so rows break
-     BETWEEN tabs, never mid-label. */
-  .tabs { flex-wrap: wrap; }
-  .tab-group { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; }
-  .tab-parade, .tab-nav { flex: 1 1 auto; }
-  .tab { flex: 1 1 0; padding: .5rem .5rem; white-space: nowrap; }
+  /* Walk 33 W10: keep all five destinations on one 390px row, including the
+     live R&D badge. The nested tablist remains a real accessibility box; its
+     three columns align with the two sibling navigation links. */
+  .tabs {
+    display: grid; grid-template-columns: minmax(0, 3.25fr) minmax(0, .8fr) minmax(0, .8fr);
+    gap: .05rem; flex-wrap: nowrap;
+  }
+  .tab-group {
+    display: grid; grid-template-columns: minmax(0, 1.65fr) repeat(2, minmax(0, .8fr));
+    gap: .05rem; min-width: 0;
+  }
+  .tab-parade, .tab-nav { min-width: 0; }
+  .tab {
+    width: 100%; min-width: 0; min-height: 44px; padding: .5rem .2rem;
+    justify-content: center; white-space: nowrap; font-size: .68rem; letter-spacing: .07em;
+  }
+  .hdr-decisions-count { margin-left: .18rem; padding-inline: .35em; }
 
   /* #689: the phone document is the one Conversations scroll. Peripheral rail
      and context panels default to compact disclosures, while the latest five
@@ -2373,6 +2393,17 @@ html, body { overflow-x: clip; }
   }
   .conv-nav:not(.mobile-expanded) .conv-rail-list,
   .conv-context:not(.mobile-expanded) .conv-context-body { display: none; }
+  body.conv-chooser-open { overflow: hidden; }
+  .conv-nav.mobile-expanded {
+    position: fixed; z-index: 90;
+    top: max(.75rem, env(safe-area-inset-top)); right: .55rem; left: .55rem;
+    height: min(78dvh, 620px); max-height: calc(100dvh - 1.5rem);
+    box-shadow: var(--shadow); background: var(--surface);
+  }
+  .conv-nav.mobile-expanded .conv-rail-list {
+    display: grid; flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .conv-rail-head { grid-template-columns: minmax(0, 1fr) auto; }
   .conv-rail-head #rail-meta { display: flex; grid-column: 1 / -1; }
   .conv-rail-head .conv-mobile-disclosure { grid-column: 2; grid-row: 1; }
