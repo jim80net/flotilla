@@ -96,6 +96,10 @@ type switchPlan struct {
 	ownPane                   string // $TMUX_PANE — the command's own pane (canonical self-switch compare)
 	minHandoffBytes           int
 	timeouts                  recycleTimeouts // SHARED with recycle (the phase timeouts are identical in shape)
+	// force is the operator-authorized, context-losing path. It skips every gate that needs
+	// cooperation from the FROM session, but retains target resolution, self-switch refusal,
+	// the pane transaction lock, durable recovery records, and all TO boot/takeover gates.
+	force bool
 	// autoPath is true for detector-enqueued `flotilla switch --auto` (#205): acquire the pane-txn
 	// lock BEFORE Phase-1 handoff and live-re-probe the rate-limit under the lock (P1-C).
 	autoPath bool
@@ -172,26 +176,30 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 
 	// Copy-mode refuse (composer state unreadable → every Idle∧ComposerCleared gate would
 	// degrade to a confusing timeout; a named refusal is clearer).
-	if inMode, err := ops.inMode(target); err != nil {
+	if inMode, err := ops.inMode(target); err != nil && !p.force {
 		return "", fmt.Errorf("read pane mode for %q: %w", target, err)
-	} else if inMode {
+	} else if inMode && !p.force {
 		return "", fmt.Errorf("refusing to switch %q: pane %s is in tmux copy/view mode (composer state unreadable) — exit copy-mode, then retry", p.agent, target)
 	}
 
-	// PHASE 0 — FROM idle precondition (lockless). The FROM driver gates idle∧cleared.
-	if !pollIdleCleared(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.boot) {
-		return "", fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched (still on the %s harness)", p.agent, p.timeouts.boot, p.fromSurface)
-	}
+	if p.force {
+		log.Printf("flotilla: switch: WARNING — forcing %q from %s to %s without a cooperative FROM handoff; in-flight context may be lost", p.agent, p.fromSurface, p.toSurface)
+	} else {
+		// PHASE 0 — FROM idle precondition (lockless). The FROM driver gates idle∧cleared.
+		if !pollIdleCleared(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.boot) {
+			return "", fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched (still on the %s harness)", p.agent, p.timeouts.boot, p.fromSurface)
+		}
 
-	// Baseline: the NEUTRAL switch handoff path is ABSENT on disk. The Phase-1 gate then
-	// requires an ABSENT→PRESENT transition on this neutral path (GATE-2), so a pre-existing
-	// file cannot false-pass.
-	absent, err := ops.absent(p.cwd, p.handoffPath)
-	if err != nil {
-		return "", fmt.Errorf("handoff baseline check for %q: %w", p.handoffPath, err)
-	}
-	if !absent {
-		return "", fmt.Errorf("a blob already exists at the neutral switch handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.handoffPath)
+		// Baseline: the NEUTRAL switch handoff path is ABSENT on disk. The Phase-1 gate then
+		// requires an ABSENT→PRESENT transition on this neutral path (GATE-2), so a pre-existing
+		// file cannot false-pass.
+		absent, err := ops.absent(p.cwd, p.handoffPath)
+		if err != nil {
+			return "", fmt.Errorf("handoff baseline check for %q: %w", p.handoffPath, err)
+		}
+		if !absent {
+			return "", fmt.Errorf("a blob already exists at the neutral switch handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.handoffPath)
+		}
 	}
 
 	var release func()
@@ -214,11 +222,15 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	}
 
 	// PHASE 1 — FROM handoff: lockless on the MANUAL path; under lock on the AUTO path.
-	if err := ops.deliver(target, p.handoffText); err != nil {
-		return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
-	}
-	if !pollHandoffGate(switchToRecycleOps(ops, p.cwd, false), target, switchToRecyclePlan(p), p.timeouts.handoff) {
-		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
+	// An explicit operator --force skips this entire cooperative phase; merely delivering the
+	// turn and skipping the poll would leave a race with the imminent hard relaunch.
+	if !p.force {
+		if err := ops.deliver(target, p.handoffText); err != nil {
+			return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
+		}
+		if !pollHandoffGate(switchToRecycleOps(ops, p.cwd, false), target, switchToRecyclePlan(p), p.timeouts.handoff) {
+			return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
+		}
 	}
 
 	if !p.autoPath {
@@ -232,12 +244,15 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	}
 
 	// RE-VERIFY the Phase-1 gate UNDER the lock (P1-C — closes the post-handoff TOCTOU on the
-	// manual path; on the auto path re-confirms after handoff delivery).
-	if !idleClearedWithHeal(switchToRecycleOps(ops, p.cwd, false), target) {
-		return "", fmt.Errorf("phase 2 re-verify: %q is no longer idle at a cleared composer (a turn started during handoff, or an overlay could not be healed) — ABORT, desk untouched", p.agent)
-	}
-	if dur, err := ops.durable(p.cwd, p.handoffPath, p.minHandoffBytes); err != nil || !dur {
-		return "", fmt.Errorf("phase 2 re-verify: the handoff blob is no longer durable for %q (%v) — ABORT, desk untouched", p.agent, err)
+	// manual path; on the auto path re-confirms after handoff delivery). A forced switch has
+	// no Phase-1 artifact to re-verify.
+	if !p.force {
+		if !idleClearedWithHeal(switchToRecycleOps(ops, p.cwd, false), target) {
+			return "", fmt.Errorf("phase 2 re-verify: %q is no longer idle at a cleared composer (a turn started during handoff, or an overlay could not be healed) — ABORT, desk untouched", p.agent)
+		}
+		if dur, err := ops.durable(p.cwd, p.handoffPath, p.minHandoffBytes); err != nil || !dur {
+			return "", fmt.Errorf("phase 2 re-verify: the handoff blob is no longer durable for %q (%v) — ABORT, desk untouched", p.agent, err)
+		}
 	}
 
 	// CONTINUITY BUNDLE (write-side, frozen at P0 — Layer 2 / P4 has no consumer). Written
@@ -272,16 +287,21 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 			// Auto path (#510 / #437): handoff is durable; Claude graceful-close hangs are
 			// known — fall through to RespawnPane -k (kill+relaunch) rather than aborting
 			// resuscitation of a rate-limited leader.
-			if p.autoPath {
-				log.Printf("flotilla: switch: auto-path %q (%s) graceful close did not confirm within %s — using handoff-gated kill fallback (respawn-kill) for resuscitation", p.agent, p.fromSurface, p.timeouts.close_)
+			if p.autoPath || p.force {
+				log.Printf("flotilla: switch: %q (%s) graceful close did not confirm within %s — using authorized respawn-kill fallback (auto=%t force=%t)", p.agent, p.fromSurface, p.timeouts.close_, p.autoPath, p.force)
 				break
 			}
 			return "", fmt.Errorf("phase 2: the graceful close of %q (%s harness) did not confirm the process exited within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.fromSurface, p.timeouts.close_, p.agent)
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
-		// No graceful close → the handoff-gated hard kill: RespawnPane -k IS the close+relaunch
-		// (safe — the handoff is durable). Skip the close-confirm; the respawn below kills it.
-		log.Printf("flotilla: switch: %q FROM surface %q has no graceful close — using the handoff-gated kill fallback (respawn-kill)", p.agent, p.fromSurface)
+		// No graceful close → RespawnPane -k IS the close+relaunch. Ordinarily this is safe
+		// because the handoff is durable; --force instead supplies explicit operator authority
+		// to accept context loss. Skip the close-confirm; the respawn below kills it.
+		if p.force {
+			log.Printf("flotilla: switch: %q FROM surface %q has no graceful close — using the operator-authorized --force respawn-kill; in-flight context may be lost", p.agent, p.fromSurface)
+		} else {
+			log.Printf("flotilla: switch: %q FROM surface %q has no graceful close — using the handoff-gated kill fallback (respawn-kill)", p.agent, p.fromSurface)
+		}
 	default:
 		return "", fmt.Errorf("phase 2: closing %q failed: %w — ABORT (desk untouched by the relaunch)", p.agent, closeErr)
 	}
@@ -361,6 +381,9 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	if !pollWorking(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.takeover) {
 		log.Printf("flotilla: switch: %q took over on the %s harness but no Working edge observed within %s (the takeover was delivered-confirmed; the desk may be slow to start)", p.agent, p.toSurface, p.timeouts.takeover)
 	}
+	if p.force {
+		return fmt.Sprintf("switched %s: %s → %s → pane %s (--force skipped the FROM handoff; in-flight context may be lost; relaunched on %s)\n", p.agent, p.fromSurface, p.toSurface, target, p.toSurface), nil
+	}
 	return fmt.Sprintf("switched %s: %s → %s → pane %s (handoff %s; closed gracefully, relaunched on %s, took over)\n", p.agent, p.fromSurface, p.toSurface, target, p.handoffPath, p.toSurface), nil
 }
 
@@ -409,6 +432,18 @@ func switchHandoffPath(projectRoot, token string) string {
 	return filepath.Join(projectRoot, ".flotilla", "handoffs", "switch-"+token+".md")
 }
 
+// forcedSwitchTakeoverTurn starts the TO harness without pretending that the
+// uncooperative FROM session wrote a handoff. A recipe-level state pointer is still useful
+// continuity when present; otherwise the fresh harness is explicitly told to reconstruct
+// from the workspace and ask for missing operator context.
+func forcedSwitchTakeoverTurn(statePath string) string {
+	base := "This desk was force-switched because the previous harness could not cooperate. No durable FROM handoff was captured; in-flight context may be lost."
+	if statePath != "" {
+		return fmt.Sprintf("%s Read the persistent workspace state at %q, inspect the current workspace, and begin work immediately. Surface any missing context via flotilla messaging; do not wait for an in-pane reply.", base, statePath)
+	}
+	return base + " Inspect the current workspace and begin work immediately. Surface any missing context via flotilla messaging; do not wait for an in-pane reply."
+}
+
 // switchBundlePath returns the frozen desk-scoped, harness-neutral continuity-bundle path
 // <project_root>/.flotilla/switch/<flotilla_agent>/continuity-<token>.json (GATE-2). The
 // bundle WRITE-side is frozen at P0 even though CONSUMPTION is P4 (Layer 2 / memex
@@ -429,7 +464,7 @@ type continuityBundle struct {
 	From               *bundleEndpoint `json:"from,omitempty"` // OPTIONAL — omitted on a fresh launch (GATE-1)
 	To                 bundleEndpoint  `json:"to"`
 	SwitchToken        string          `json:"switch_token"`
-	HandoffPath        string          `json:"handoff_path"`
+	HandoffPath        string          `json:"handoff_path,omitempty"`
 	WorkspaceStatePath string          `json:"workspace_state_path,omitempty"`
 	HintVersion        int             `json:"hint_version"`
 	// MemexInjectionHint is a BARE-STRING pointer/hint ONLY (GATE-3). It is NEVER corpus
@@ -468,7 +503,7 @@ type switchRecord struct {
 	Phase       string `json:"phase"`
 	From        string `json:"from"`
 	To          string `json:"to"`
-	HandoffPath string `json:"handoff_path"`
+	HandoffPath string `json:"handoff_path,omitempty"`
 	BundlePath  string `json:"bundle_path,omitempty"`
 	OK          bool   `json:"ok"`
 	Error       string `json:"error,omitempty"`
@@ -596,6 +631,9 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimi
 	if *toF != "" && *au {
 		return fail(fmt.Errorf("--to and --auto are mutually exclusive: --auto self-selects the target, --to names it"))
 	}
+	if *fc && (*au || *rep) {
+		return fail(fmt.Errorf("--force is only valid with an operator-named --to target; it cannot be combined with --auto or --repair"))
+	}
 	if *toF == "" && !*au && !*rep {
 		return fail(fmt.Errorf("switch needs a target: pass --to <slot|surface>, --auto, or --repair"))
 	}
@@ -701,7 +739,6 @@ func cmdSwitch(args []string) error {
 	if err != nil {
 		return err
 	}
-	_ = force // --force is accepted for parity with resume/recycle; the relaunch primitive (-k) is unconditional.
 
 	cfg, err := roster.Load(rosterPath)
 	if err != nil {
@@ -807,6 +844,10 @@ func cmdSwitch(args []string) error {
 	projectRoot := chain.Cwd
 	neutralPath := switchHandoffPath(projectRoot, token)
 	bundlePath := switchBundlePath(projectRoot, agentName, token)
+	recordedHandoffPath := neutralPath
+	if force {
+		recordedHandoffPath = ""
+	}
 
 	// A switch TO codex respawns into the same cwd — pre-seed directory trust so
 	// the fresh codex never boots into the first-run trust menu (idempotent;
@@ -828,15 +869,20 @@ func cmdSwitch(args []string) error {
 		}
 	}
 
+	takeoverText := toBridge.TakeoverTurn(neutralPath)
+	if force {
+		takeoverText = forcedSwitchTakeoverTurn(chain.State)
+	}
 	plan := switchPlan{
 		agent: agentName, key: agent.Title(), cwd: projectRoot, launch: toSlot.Launch,
 		token: token, handoffPath: neutralPath,
 		fromSurface: fromSurface, toSurface: toSurface,
 		handoffText:     fromBridge.HandoffTurn(neutralPath),
-		takeoverText:    toBridge.TakeoverTurn(neutralPath),
+		takeoverText:    takeoverText,
 		ownPane:         os.Getenv("TMUX_PANE"),
 		minHandoffBytes: defaultMinHandoff,
 		timeouts:        defaultTimeouts(),
+		force:           force,
 		autoPath:        auto,
 	}
 	if auto {
@@ -864,7 +910,7 @@ func cmdSwitch(args []string) error {
 	recordPhase := func(phase string) error {
 		return writeSwitchRecord(agentName, switchRecord{
 			Token: token, Phase: phase, From: fromSurface, To: toSurface,
-			HandoffPath: neutralPath, BundlePath: bundlePath, OK: false,
+			HandoffPath: recordedHandoffPath, BundlePath: bundlePath, OK: false,
 		})
 	}
 
@@ -929,7 +975,7 @@ func cmdSwitch(args []string) error {
 				From:           fromEndpoint(fromSurface, fromProvider, fromSub),
 				To:             bundleEndpoint{Surface: toSurface, Provider: toSlot.Provider, SubscriptionID: toSlot.SubscriptionID},
 				SwitchToken:    token,
-				HandoffPath:    neutralPath,
+				HandoffPath:    recordedHandoffPath,
 				// WorkspaceStatePath points a P4 consumer (memex) at the desk's persistent
 				// state/handoff doc — the recipe-level State pointer (launch.Recipe.State), the
 				// SAME pointer resume surfaces for /takeover. Empty (omitempty) when the recipe
@@ -958,7 +1004,7 @@ func cmdSwitch(args []string) error {
 	}
 	if werr := writeSwitchRecord(agentName, switchRecord{
 		Token: token, Phase: finalPhase, From: fromSurface, To: toSurface,
-		HandoffPath: neutralPath, BundlePath: bundlePath, OK: runErr == nil,
+		HandoffPath: recordedHandoffPath, BundlePath: bundlePath, OK: runErr == nil,
 		Error: errString(runErr),
 	}); werr != nil {
 		log.Printf("flotilla: switch: could not record the terminal switch outcome for %q: %v", agentName, werr)

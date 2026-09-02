@@ -25,6 +25,7 @@ import (
 type swRec struct {
 	delivered         []string
 	closed, respawned bool
+	launchGot         string
 	stamped           bool
 	gen               string
 	// ordered event log: "relaunching"/"overlay-pending"/"complete" (phase records),
@@ -100,11 +101,12 @@ func fakeSwitchOps(r *swRec) switchOps {
 		closeFn:      func(string) error { r.closed = true; return r.closeErr },
 		remainOnExit: func(_ string, on bool) error { r.remainCalls = append(r.remainCalls, on); return nil },
 		paneDead:     func(string) (bool, error) { return r.closed && !r.respawned && !r.closeNeverShell, nil },
-		respawn: func(string, string, string) error {
+		respawn: func(_ string, _ string, launch string) error {
 			if r.respawnErr != nil {
 				return r.respawnErr // the relaunch failed; the pane is closed but not running the TO harness
 			}
 			r.respawned = true
+			r.launchGot = launch
 			r.events = append(r.events, "respawn")
 			return nil
 		},
@@ -420,6 +422,76 @@ func TestRunSwitchPhase1Abort(t *testing.T) {
 	}
 	if len(r.delivered) != 1 {
 		t.Errorf("the handoff turn is delivered once; takeover never (got %v)", r.delivered)
+	}
+}
+
+func TestRunSwitchForceBypassesUncooperativeFromHandoff(t *testing.T) {
+	r := happySwitch()
+	r.failPhase0 = true
+	r.failDurable = true
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeSwitchOps(r)
+	ops.assess = func(string) surface.State {
+		if r.respawned && len(r.delivered) == 0 {
+			return surface.StateIdle
+		}
+		if r.respawned {
+			return surface.StateWorking
+		}
+		return surface.StateWorking
+	}
+	ops.inMode = func(string) (bool, error) { return true, nil }
+	ops.absent = func(string, string) (bool, error) {
+		t.Fatal("forced switch must not inspect the cooperative handoff path")
+		return false, nil
+	}
+	p := testSwitchPlan()
+	p.force = true
+	p.fromSurface = "grok"
+	p.toSurface = "claude-code"
+	p.launch = "claude --model claude-fable-5"
+	p.takeoverText = forcedSwitchTakeoverTurn("state/research.md")
+
+	msg, err := runSwitch(ops, p)
+	if err != nil {
+		t.Fatalf("forced switch from uncooperative pane: %v", err)
+	}
+	if !r.respawned {
+		t.Fatal("forced switch did not relaunch onto the named TO harness")
+	}
+	if r.launchGot != p.launch {
+		t.Fatalf("forced switch launch = %q, want exact named TO launch %q", r.launchGot, p.launch)
+	}
+	if len(r.delivered) != 1 || r.delivered[0] != p.takeoverText {
+		t.Fatalf("delivered = %v, want only the post-relaunch TO instruction", r.delivered)
+	}
+	if !strings.Contains(msg, "--force skipped the FROM handoff") || !strings.Contains(msg, "context may be lost") {
+		t.Fatalf("forced success message did not disclose context loss: %q", msg)
+	}
+}
+
+func TestForcedSwitchTakeoverTurnDoesNotReferenceMissingHandoff(t *testing.T) {
+	turn := forcedSwitchTakeoverTurn("state/desk.md")
+	for _, want := range []string{"No durable FROM handoff", "state/desk.md", "begin work immediately"} {
+		if !strings.Contains(turn, want) {
+			t.Errorf("forced takeover turn missing %q: %s", want, turn)
+		}
+	}
+	if strings.Contains(turn, ".flotilla/handoffs/") {
+		t.Fatalf("forced takeover turn referenced an absent handoff: %s", turn)
+	}
+}
+
+func TestRunSwitchWithoutForceMissingHandoffLeavesFromUntouched(t *testing.T) {
+	r := happySwitch()
+	r.failDurable = true
+
+	_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
+	if err == nil || !strings.Contains(err.Error(), "phase 1") {
+		t.Fatalf("ordinary switch error = %v, want fail-closed Phase-1 refusal", err)
+	}
+	if r.closed || r.respawned {
+		t.Fatalf("ordinary switch mutated the FROM desk without a handoff: %+v", r)
 	}
 }
 
@@ -850,6 +922,8 @@ func TestParseSwitchArgs(t *testing.T) {
 		{"no agent", []string{"--to", "primary"}, "", "", false, false, false, false, true},
 		{"manual switch needs --to/--auto/--repair", []string{"research"}, "", "", false, false, false, false, true},
 		{"--to and --auto are mutually exclusive", []string{"research", "--to", "primary", "--auto"}, "", "", false, false, false, false, true},
+		{"--force and --auto are mutually exclusive", []string{"research", "--auto", "--force"}, "", "", false, false, false, false, true},
+		{"--force and --repair are mutually exclusive", []string{"research", "--repair", "--force"}, "", "", false, false, false, false, true},
 		{"trailing junk", []string{"research", "--to", "primary", "extra"}, "", "", false, false, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
