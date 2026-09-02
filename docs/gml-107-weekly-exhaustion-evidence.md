@@ -18,5 +18,5 @@ The fixtures prove:
   resolves `fallback-0` to the exact `claude --model claude-fable-5` launch.
 - a transient braille-spinner `rate limit exceeded` event retains the existing
   `switch xo --auto --rate-limit-scope account-side` command path.
-- the stacked GML-108 fixture completes the forced uncooperative FROM relaunch without a
-  durable handoff, while its unforced control leaves FROM untouched.
+- the forced uncooperative-FROM recovery is covered by
+  [the GML-108 fixture](gml-108-force-switch-evidence.md).

@@ -550,6 +550,46 @@ func TestRunSwitchNoGracefulCloseFallsBackToKill(t *testing.T) {
 	}
 }
 
+func TestRunSwitchCloseErrorForceFallsThroughButUnforcedAborts(t *testing.T) {
+	closeErr := errors.New("surface close command failed")
+
+	t.Run("forced", func(t *testing.T) {
+		r := happySwitch()
+		r.closeErr = closeErr
+		ops := fakeSwitchOps(r)
+		ops.assess = func(string) surface.State {
+			if r.respawned && len(r.delivered) == 0 {
+				return surface.StateIdle
+			}
+			if r.respawned {
+				return surface.StateWorking
+			}
+			return surface.StateWorking
+		}
+		p := testSwitchPlan()
+		p.force = true
+		p.takeoverText = forcedSwitchTakeoverTurn("state/backend.md")
+		if _, err := runSwitch(ops, p); err != nil {
+			t.Fatalf("forced close error must proceed to hard relaunch: %v", err)
+		}
+		if !r.respawned {
+			t.Fatal("forced close error did not reach RespawnPane -k")
+		}
+	})
+
+	t.Run("unforced", func(t *testing.T) {
+		r := happySwitch()
+		r.closeErr = closeErr
+		_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
+		if err == nil || !strings.Contains(err.Error(), "ABORT") {
+			t.Fatalf("unforced close error = %v, want fail-closed abort", err)
+		}
+		if r.respawned {
+			t.Fatal("unforced close error must not relaunch")
+		}
+	})
+}
+
 // --- P1-A invariant evidence: the takeover comes from the TO bridge, marker mismatch aborts ---
 
 func TestRunSwitchMarkerMismatch(t *testing.T) {

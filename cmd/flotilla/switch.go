@@ -303,7 +303,10 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 			log.Printf("flotilla: switch: %q FROM surface %q has no graceful close — using the handoff-gated kill fallback (respawn-kill)", p.agent, p.fromSurface)
 		}
 	default:
-		return "", fmt.Errorf("phase 2: closing %q failed: %w — ABORT (desk untouched by the relaunch)", p.agent, closeErr)
+		if !p.force {
+			return "", fmt.Errorf("phase 2: closing %q failed: %w — ABORT (desk untouched by the relaunch)", p.agent, closeErr)
+		}
+		log.Printf("flotilla: switch: WARNING — forced close of %q on %s returned %v; proceeding with the operator-authorized respawn-kill; in-flight context may be lost", p.agent, p.fromSurface, closeErr)
 	}
 
 	// PHASE 3a (eager + DURABLE, P1-B) — record the intent BEFORE the relaunch: phase

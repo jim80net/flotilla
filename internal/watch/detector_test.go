@@ -1086,6 +1086,41 @@ func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
 	}
 }
 
+func TestDetectorAutoSwitchEligibilityReceivesRateLimitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name, detail string
+		want         int
+	}{
+		{"exhausted leader admitted", surface.RateLimitDetailWeeklyExhausted, 1},
+		{"wrong detail refused", "Rate limit exceeded", 0},
+		{"empty detail refused", "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			cfg := f.config("xo", []string{"xo"}, 3, "none")
+			cfg.RateLimitMaterial = func(string) (bool, surface.RateLimitScope, string, bool) {
+				return true, surface.RateLimitAccountSide, tc.detail, true
+			}
+			cfg.RateLimitAutoSwitchEligible = func(agent, detail string) bool {
+				return agent == "xo" && detail == surface.RateLimitDetailWeeklyExhausted
+			}
+			cfg.RateLimitAutoSwitch = func([]RateLimitAutoSwitchCandidate) {}
+			d := newDet(t, f, cfg)
+			d.rateLimitProbeMu.Lock()
+			d.rateLimitPending = map[string]rateLimitProbeResult{
+				"xo": {limited: true, scope: surface.RateLimitAccountSide, detail: tc.detail, ok: true},
+			}
+			d.rateLimitProbeMu.Unlock()
+			d.mu.Lock()
+			out := d.rateLimitMaterialFromPendingLocked()
+			d.mu.Unlock()
+			if len(out.autoSwitch) != tc.want {
+				t.Fatalf("auto-switch candidates = %+v, want count %d", out.autoSwitch, tc.want)
+			}
+		})
+	}
+}
+
 func TestDetectorAutoSwitchSkipsNonClaudeFromSurface(t *testing.T) {
 	f := newFixture()
 	var autoCalls []RateLimitAutoSwitchCandidate

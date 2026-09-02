@@ -348,11 +348,15 @@ func classifyGrokComposerLineAt(line string) ComposerDisposition {
 // classifyGrokRateLimit reports whether grok's bottom STATUS chrome shows a rate-limit
 // throttle (braille-spinner line only — not prose in streamed output).
 func classifyGrokRateLimit(captured string) (bool, string) {
+	// A banner string alone is transcript content, not provider state. Require the same
+	// prompt/footer pair used by ComposerState before treating the anchored banner row as
+	// current Grok chrome.
+	bannerVouched := classifyGrokComposerLine(captured, -1) != ComposerUndetermined
 	for _, line := range lastNNonEmptyLines(captured, grokTail) {
 		if grokRateLimitStatus.MatchString(line) {
 			return true, "Rate limit exceeded"
 		}
-		if grokWeeklyLimitBanner.MatchString(line) {
+		if bannerVouched && grokWeeklyLimitBanner.MatchString(line) {
 			return true, RateLimitDetailWeeklyExhausted
 		}
 		if matches := grokWeeklyLimitFooter.FindStringSubmatch(line); len(matches) == 2 {

@@ -271,9 +271,14 @@ func TestClassifyGrokWeeklyLimitRemainingDoesNotTrigger(t *testing.T) {
 }
 
 func TestClassifyGrokWeeklyLimitProseDoesNotTrigger(t *testing.T) {
-	captured := "The operator said You hit your weekly limit. in an earlier report.\n  │ ❯  │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯"
-	if hit, detail := classifyGrokRateLimit(captured); hit {
-		t.Fatalf("weekly-limit prose triggered fallback: detail=%q", detail)
+	for _, captured := range []string{
+		"The operator said You hit your weekly limit. in an earlier report.\n  │ ❯  │\n  ╰──── Weekly limit left: 7% · Grok 4.6 (high) · always-approve ─╯",
+		"completed transcript\nYou hit your weekly limit.\nTurn completed in 1.2s.",
+		"quoted chrome\nYou hit your weekly limit.\nordinary prose\n╰──── Grok 4.6 (high) · always-approve ─╯",
+	} {
+		if hit, detail := classifyGrokRateLimit(captured); hit {
+			t.Fatalf("weekly-limit transcript triggered fallback: detail=%q\n%s", detail, captured)
+		}
 	}
 }
 
