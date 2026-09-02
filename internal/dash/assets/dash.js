@@ -691,10 +691,13 @@
     var buttons = rail.querySelectorAll(".conv-item");
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].addEventListener("click", function () {
+        var chooserWasOpen = document.documentElement.classList.contains("conv-chooser-open");
+        if (chooserWasOpen) closeChooser(false); // renderConversations replaces the clicked rail
         selectedDesk = this.getAttribute("data-desk");
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
         resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
+        if (chooserWasOpen) closeChooser(true); // focus the replacement disclosure, not the detached clicked row
         fetchSelectedHistory(true);
         fetchMirror();            // load the newly-selected desk's session mirror
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
@@ -1637,7 +1640,20 @@
     var b = document.querySelector(".brand-dash");
     if (b) b.textContent = view;
   }
+  function closeChooser(restoreFocus) {
+    var nav = document.querySelector(".conv-nav.mobile-expanded");
+    var button = document.querySelector('[data-conv-disclosure="nav"]');
+    if (nav) nav.classList.remove("mobile-expanded");
+    document.documentElement.classList.remove("conv-chooser-open");
+    document.body.classList.remove("conv-chooser-open");
+    if (button) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "Choose desk";
+      if (restoreFocus) button.focus();
+    }
+  }
   function showView(view) {
+    if (view !== "conversations") closeChooser(false);
     if (window.flotillaPerf) window.flotillaPerf.selectView(view);
     VIEWS.forEach(function (v) {
       var on = v === view;
@@ -1975,6 +1991,14 @@
       button.addEventListener("click", function () {
         var panel = button.closest(".conv-nav, .conv-context");
         var expanded = button.getAttribute("aria-expanded") !== "true";
+        if (button.getAttribute("data-conv-disclosure") === "nav") {
+          if (!expanded) {
+            closeChooser(true);
+            return;
+          }
+          document.documentElement.classList.add("conv-chooser-open");
+          document.body.classList.add("conv-chooser-open");
+        }
         button.setAttribute("aria-expanded", String(expanded));
         if (panel) panel.classList.toggle("mobile-expanded", expanded);
         button.textContent = button.getAttribute("data-conv-disclosure") === "nav"
@@ -1985,14 +2009,20 @@
     document.addEventListener("click", function (e) {
       var desk = e.target.closest ? e.target.closest(".conv-item") : null;
       if (!desk || !mobileThreadWindowActive()) return;
-      var nav = desk.closest(".conv-nav");
-      var button = nav ? nav.querySelector('[data-conv-disclosure="nav"]') : null;
-      if (nav) nav.classList.remove("mobile-expanded");
-      if (button) { button.setAttribute("aria-expanded", "false"); button.textContent = "Choose desk"; }
+      // The row's direct handler may already have replaced the rail. Query the
+      // live document instead of walking upward from the detached event target.
+      closeChooser(true);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" || !document.documentElement.classList.contains("conv-chooser-open")) return;
+      closeChooser(true);
     });
     var media = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
     if (media && media.addEventListener) {
       media.addEventListener("change", function () {
+        if (!media.matches) {
+          closeChooser(false);
+        }
         mobileThreadVisible = MOBILE_THREAD_INITIAL;
         mobileThreadHidden = 0;
         lastThreadKey = "";

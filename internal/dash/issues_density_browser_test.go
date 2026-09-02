@@ -77,6 +77,28 @@ url, body = sys.argv[1], sys.argv[2]
 with sync_playwright() as p:
     browser = p.chromium.launch()
     try:
+        desktop = browser.new_page(viewport={"width": 1280, "height": 900})
+        desktop.set_default_timeout(8000)
+        desktop.add_init_script("window.EventSource = undefined")
+        desktop.route("**/api/work-ledger*", lambda route: route.fulfill(status=200, content_type="application/json", body=body))
+        desktop.goto(url, wait_until="domcontentloaded")
+        desktop.locator("#tab-issues").click()
+        ledgers = desktop.locator("details.issue-ledger-section")
+        expect(ledgers).to_have_count(24)
+        assert desktop.locator("details.issue-ledger-section[open]").count() == 0
+        assert desktop.locator(".issue-row:visible").count() == 0
+        desktop_height = desktop.evaluate("document.documentElement.scrollHeight")
+        assert desktop_height <= 1800, "folded desktop Issues exceeds two viewports: %d" % desktop_height
+        ledgers.first.locator(":scope > summary").click()
+        expect(ledgers.first).to_have_attribute("open", "")
+        first_desk = ledgers.first.locator("details.issue-desk-fold").first
+        expect(first_desk).to_be_visible()
+        assert desktop.locator(".issue-row:visible").count() == 0
+        first_desk.locator(":scope > summary").click()
+        expect(first_desk).to_have_attribute("open", "")
+        assert desktop.locator(".issue-row:visible").count() == 6
+        desktop.close()
+
         for width, height in [(390, 844), (360, 800)]:
             page = browser.new_page(viewport={"width": width, "height": height})
             page.set_default_timeout(8000)
