@@ -614,6 +614,19 @@ func TestRunSwitchForcedRecoveryNeverReferencesSkippedHandoff(t *testing.T) {
 	}
 }
 
+func TestSwitchTakeoverRecoveryShellQuotesForceCommand(t *testing.T) {
+	p := testSwitchPlan()
+	p.force = true
+	p.agent = "back'end$USER"
+	p.takeoverText = "read state/$HOME.md; `id`; then say 'ready'"
+
+	got := switchTakeoverRecovery(p)
+	want := fmt.Sprintf("retry the force-specific fresh-start takeover with: flotilla send %s %s", shellQuote(p.agent), shellQuote(p.takeoverText))
+	if got != want {
+		t.Fatalf("switchTakeoverRecovery() = %q, want shell-safe command %q", got, want)
+	}
+}
+
 // --- idempotency / supersede: a newer @flotilla_switch_gen aborts Phase-4 takeover (6.1) ---
 
 func TestRunSwitchGenSuperseded(t *testing.T) {
