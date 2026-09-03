@@ -233,7 +233,9 @@
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
-      var labeled = line.match(/^(?:[-*]\s*)?(?:\*\*)?([^:*—]+)(?:\*\*)?\s*[:—-]\s*(.+)$/);
+      var labeled = line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\s*[:—-]\s*\*\*\s*(.+)$/) ||
+        line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\*\*\s*[:—-]\s*(.+)$/) ||
+        line.match(/^(?:[-*](?!\*)\s*)?([^:*—]+)\s*[:—-]\s*(.+)$/);
       if (heading && wanted.indexOf(fieldName(heading[1])) !== -1) {
         var paragraph = [];
         for (var j = i + 1; j < lines.length; j++) {
@@ -280,6 +282,23 @@
       var lastSpace = cut.lastIndexOf(" ");
       if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
       markdown = cut.trim();
+      // Repair an unmatched strong span using only its own suffix. Remove the
+      // last unpaired single marker wherever the cut left it, then flatten any
+      // balanced nested emphasis before closing the deliberately shallow span.
+      [["**", "*"], ["__", "_"]].forEach(function (pair) {
+        var count = markdown.split(pair[0]).length - 1;
+        if (!(count % 2)) return;
+        var openAt = markdown.lastIndexOf(pair[0]);
+        var prefix = markdown.slice(0, openAt + pair[0].length);
+        var suffix = markdown.slice(openAt + pair[0].length);
+        var singles = suffix.split(pair[1]).length - 1;
+        if (singles % 2) {
+          var unmatchedAt = suffix.lastIndexOf(pair[1]);
+          suffix = suffix.slice(0, unmatchedAt) + suffix.slice(unmatchedAt + pair[1].length);
+        }
+        var nested = pair[1] === "*" ? /\*([^*]+)\*/g : /_([^_]+)_/g;
+        markdown = prefix + suffix.replace(nested, "$1") + pair[0];
+      });
       [["**", "**"], ["__", "__"], ["`", "`"], ["*", "*"], ["_", "_"]].forEach(function (pair) {
         var count = markdown.split(pair[0]).length - 1;
         if (count % 2) markdown += pair[1];
