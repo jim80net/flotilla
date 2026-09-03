@@ -59,6 +59,18 @@ func TestResearchCatalogSummaryDoesNotExposeStrongMarkers(t *testing.T) {
 			"# Catalog paper\n\n___\n\nThe paragraph after the underscore break is the summary.",
 			"The paragraph after the underscore break is the summary.",
 		},
+		"single-marker-line": {
+			"# Catalog paper\n\n*\n\nThe paragraph after the single marker is the summary.",
+			"The paragraph after the single marker is the summary.",
+		},
+		"double-marker-line": {
+			"# Catalog paper\n\n**\n\nThe paragraph after the double marker is the summary.",
+			"The paragraph after the double marker is the summary.",
+		},
+		"only-underscores-are-literal-intraword": {
+			"# Catalog paper\n\nValues foo**bar**, tick`value`, and wave~value~ keep snake_case_value intact.",
+			"Values foobar, tickvalue, and wavevalue keep snake_case_value intact.",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			summary := researchEntry("catalog.md", tc.markdown, time.Now()).Summary

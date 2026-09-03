@@ -493,6 +493,9 @@ func researchSummary(markdown string) string {
 		// Catalog cards render summaries as plain text. Normalize inline Markdown
 		// before the byte limit can separate an opener from its closer.
 		line = researchSummaryPlainText(line)
+		if line == "" {
+			continue
+		}
 		const max = 220
 		if len(line) > max {
 			line = strings.TrimSpace(line[:max-1]) + "…"
@@ -538,14 +541,8 @@ func researchSummaryPlainText(line string) string {
 		}
 		leftWord := i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsNumber(runes[i-1]))
 		rightWord := end < len(runes) && (unicode.IsLetter(runes[end]) || unicode.IsNumber(runes[end]))
-		if leftWord && rightWord {
+		if marker == '_' && leftWord && rightWord {
 			plain.WriteString(string(runes[i:end]))
-		} else {
-			leftSpace := i == 0 || unicode.IsSpace(runes[i-1])
-			rightSpace := end == len(runes) || unicode.IsSpace(runes[end])
-			if leftSpace && rightSpace {
-				plain.WriteString(string(runes[i:end]))
-			}
 		}
 		i = end
 	}
