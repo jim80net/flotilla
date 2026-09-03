@@ -16,7 +16,7 @@
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/__([^_]+)__/g, "<strong>$1</strong>")
       .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-      .replace(/_([^_]+)_/g, "<em>$1</em>")
+      .replace(/(^|[^\w])_([^_]+)_(?!\w)/g, "$1<em>$2</em>")
       .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/\[([^\]]+)\]\((#[a-zA-Z0-9_-]+)\)/g, '<a href="$2">$1</a>');
   }
@@ -346,7 +346,9 @@
   var currentFocus = focusFromURL(), searchQuery = "";
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
   var documentRequestEpoch = 0, annotationSession = 0;
-  var presentationLoadTimeoutMS = Math.max(100, Number(window.FLOTILLA_PRESENTATION_TIMEOUT_MS) || 5000);
+  function presentationLoadTimeoutMS() {
+    return Math.max(100, Number(window.FLOTILLA_PRESENTATION_TIMEOUT_MS) || 5000);
+  }
   var annotationState = null, pendingAnchor = null, pendingRoute = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
@@ -738,7 +740,9 @@
     setPresentationLinks(null);
     el("research-presentation-stage").hidden = true;
     el("research-presentation").hidden = true;
+    el("research-presentation").classList.remove("is-probing");
     el("research-presentation").removeAttribute("src");
+    el("research-presentation-status").classList.remove("is-probing");
     el("research-body").hidden = false;
     el("research-title").textContent = doc.title;
     el("research-path").textContent = doc.id;
@@ -802,21 +806,25 @@
     });
   }
   function showPresentationUnavailable(frame, status) {
+    frame.classList.remove("is-probing");
     frame.hidden = true;
+    status.classList.remove("is-probing");
     status.classList.add("error");
     status.textContent = "Presentation preview unavailable. The source document is shown below; the full-screen presentation remains available.";
     el("research-body").hidden = false;
+    if (currentRendered) renderTOC(currentRendered.toc);
   }
   function renderPresentation(doc, entry) {
     renderDocument(doc);
-    currentRendered = null;
     el("research-body").hidden = true;
     el("research-toc").hidden = true;
     var frame = el("research-presentation");
     var status = el("research-presentation-status");
     frame.title = doc.title + " presentation";
-    frame.hidden = true;
+    frame.hidden = false;
+    frame.classList.add("is-probing");
     status.hidden = false;
+    status.classList.add("is-probing");
     status.classList.remove("error");
     status.textContent = "Loading presentation preview…";
     var settled = false;
@@ -827,12 +835,14 @@
       clearTimeout(timer);
       if (probePort) { probePort.close(); probePort = null; }
       if (!ready) { showPresentationUnavailable(frame, status); return; }
+      currentRendered = null;
+      frame.classList.remove("is-probing");
+      status.classList.remove("is-probing");
       status.hidden = true;
-      frame.hidden = false;
     }
     var timer = setTimeout(function () {
       settlePresentation(false);
-    }, presentationLoadTimeoutMS);
+    }, presentationLoadTimeoutMS());
     frame.onload = function () {
       if (settled || currentDocument !== doc) return;
       if (typeof MessageChannel !== "function" || !frame.contentWindow) return;
@@ -856,9 +866,9 @@
     frame.onerror = function () {
       settlePresentation(false);
     };
+    el("research-presentation-stage").hidden = false;
     frame.src = entry.presentation_url;
     setPresentationLinks(entry);
-    el("research-presentation-stage").hidden = false;
     el("research-annotation-summary").textContent = "Document comments stay private to this host; passage highlights remain on the source.";
   }
   function showLibrary(push) {
@@ -867,6 +877,8 @@
     currentDocument = null; currentRendered = null; currentDecision = null; annotationState = null;
     el("research-presentation").removeAttribute("src");
     el("research-presentation").hidden = true;
+    el("research-presentation").classList.remove("is-probing");
+    el("research-presentation-status").classList.remove("is-probing");
     el("research-presentation-stage").hidden = true;
     setPresentationLinks(null);
     el("research-annotation-panel").hidden = true;

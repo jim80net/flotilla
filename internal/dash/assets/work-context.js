@@ -19,7 +19,9 @@
   var timelineNext = "";
   var timelineSources = [];
   var timelineEarlierError = "";
-  var timelineLoadTimeoutMS = Math.max(100, Number(window.FLOTILLA_TIMELINE_TIMEOUT_MS) || 5000);
+  function timelineLoadTimeoutMS() {
+    return Math.max(100, Number(window.FLOTILLA_TIMELINE_TIMEOUT_MS) || 5000);
+  }
   var pollTimer = null;
   var ageTimer = null;
   var returnFocus = null;
@@ -108,11 +110,13 @@
   function timelineJSON(path) {
     return new Promise(function (resolve, reject) {
       var settled = false;
+      var timeoutMS = timelineLoadTimeoutMS();
       var timer = setTimeout(function () {
         if (settled) return;
         settled = true;
-        reject(new Error("Timeline sources did not respond within " + timelineLoadTimeoutMS + "ms."));
-      }, timelineLoadTimeoutMS);
+        if (D.clearJSON) D.clearJSON(path);
+        reject(new Error("Timeline sources did not respond within " + timeoutMS + "ms."));
+      }, timeoutMS);
       D.getJSON(path).then(function (doc) {
         if (settled) return;
         settled = true;

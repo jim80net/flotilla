@@ -39,6 +39,9 @@
     request.then(clear, clear);
     return request;
   }
+  function clearJSON(path) {
+    delete inFlightJSON[path];
+  }
 
   function postJSON(path, body) {
     return fetch(path, {
@@ -88,7 +91,7 @@
     return { outcome: outcome, text: "NOT accepted: " + outcome + detail, ok: false };
   }
   window.flotillaDash = {
-    el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON,
+    el: el, escapeHtml: escapeHtml, getJSON: getJSON, clearJSON: clearJSON, postJSON: postJSON,
     onLiveUpdate: onLiveUpdate, routeMessage: routeMessage, routeOutcomeCopy: routeOutcomeCopy,
   };
 

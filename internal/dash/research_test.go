@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dop251/goja"
 )
 
 func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
@@ -22,6 +24,29 @@ func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
 	}
 	if err := os.Chtimes(file, mod, mod); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestResearchInlineMarkdownKeepsWordUnderscoresLiteral(t *testing.T) {
+	raw, err := os.ReadFile("assets/research.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(raw), "  function esc(value)")
+	end := strings.Index(string(raw), "  function slug(text, used)")
+	if start < 0 || end <= start {
+		t.Fatal("could not isolate Research inline renderer")
+	}
+	vm := goja.New()
+	if _, err := vm.RunString(string(raw[start:end])); err != nil {
+		t.Fatalf("load inline renderer: %v", err)
+	}
+	value, err := vm.RunString(`inline("snake_case_value and _visible emphasis_")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := value.String(), `snake_case_value and <em>visible emphasis</em>`; got != want {
+		t.Fatalf("inline markdown = %q, want %q", got, want)
 	}
 }
 
@@ -384,6 +409,32 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	}
 }
 
+func TestResearchPresentationProbeInsertionUsesOriginalBodyOffsets(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"lowercase", "<!doctype html><script>start()</script>", len("<!doctype html>")},
+		{"mixed-case-after-prefix", "\ufeff \n<!-- keep standards mode -->\n<!DOCTYPE html PUBLIC \"fixture\"><main>ready</main>", len("\ufeff \n<!-- keep standards mode -->\n<!DOCTYPE html PUBLIC \"fixture\">")},
+		{"doctype-in-author-script", `<script>const sample = "<!DOCTYPE html>"</script>`, 0},
+		{"unterminated-leading-comment", "<!-- <!DOCTYPE html><main>not reached</main>", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := researchPresentationProbeInsertion([]byte(tc.body)); got != tc.want {
+				t.Fatalf("researchPresentationProbeInsertion() = %d, want %d", got, tc.want)
+			}
+			probe := []byte(`inspect()`)
+			wrappedProbe := `<script data-flotilla-presentation-probe>inspect()</script>`
+			wantBody := tc.body[:tc.want] + wrappedProbe + tc.body[tc.want:]
+			if got := string(injectResearchPresentationProbe([]byte(tc.body), probe)); got != wantBody {
+				t.Fatalf("injected presentation = %q, want original bytes split at %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 	root := t.TempDir()
 	writeResearchFixture(t, root, "empty/SOURCE.md", "# Empty package\n\nThe source remains available.\n", time.Now())
@@ -402,6 +453,7 @@ func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 		"svg-definitions-only-body": `<!doctype html><main><svg><defs><text>invisible vector evidence</text></defs></svg></main>`,
 		"hidden-body":               `<!doctype html><main hidden>invisible hidden evidence</main>`,
 		"inline-style-hidden-body":  "<!doctype html><main style=\"display :\tnone\">invisible styled evidence</main>",
+		"zero-opacity-body":         `<!doctype html><main style="opacity: 0">invisible transparent evidence</main>`,
 		"closed-details-body":       `<!doctype html><main><details><p>invisible collapsed evidence</p></details></main>`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -419,6 +471,13 @@ func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 	}
 	if got, ready := researchPresentation(root, "empty/SOURCE.md"); !ready || got != "/research-presentations/empty/presentation/index.html" {
 		t.Fatalf("researchPresentation() = %q, %v; want substantive package admitted", got, ready)
+	}
+
+	if err := os.WriteFile(presentation, []byte(`<!doctype html><main style="opacity: 0.9">Visible translucent evidence</main>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, ready := researchPresentation(root, "empty/SOURCE.md"); !ready || got == "" {
+		t.Fatalf("researchPresentation() = %q, %v; non-zero opacity must remain admitted", got, ready)
 	}
 }
 
@@ -577,6 +636,17 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "MessageChannel", "flotilla-presentation-probe", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
+		}
+	}
+	stageVisibleAt := strings.Index(js, `el("research-presentation-stage").hidden = false`)
+	frameSourceAt := strings.Index(js, "frame.src = entry.presentation_url")
+	if stageVisibleAt < 0 || frameSourceAt < 0 || stageVisibleAt >= frameSourceAt {
+		t.Errorf("presentation stage must enter layout before iframe navigation: stage=%d src=%d", stageVisibleAt, frameSourceAt)
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".research-presentation-status.is-probing", ".research-presentation.is-probing", "opacity: 0", ".research-presentation[hidden]"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("research presentation probe styling missing %q", marker)
 		}
 	}
 }

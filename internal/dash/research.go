@@ -20,9 +20,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/sys/unix"
@@ -340,15 +340,39 @@ func researchPresentationNodeHidden(node *html.Node) bool {
 			return true
 		}
 		if attr.Key == "style" {
-			style := strings.ToLower(strings.Map(func(r rune) rune {
-				if unicode.IsSpace(r) {
-					return -1
-				}
-				return r
-			}, attr.Val))
-			if strings.Contains(style, "display:none") || strings.Contains(style, "visibility:hidden") ||
-				strings.Contains(style, "visibility:collapse") || strings.Contains(style, "content-visibility:hidden") ||
-				strings.Contains(style, "opacity:0") {
+			if researchPresentationInlineStyleHidden(attr.Val) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func researchPresentationInlineStyleHidden(style string) bool {
+	for _, declaration := range strings.Split(style, ";") {
+		property, value, ok := strings.Cut(declaration, ":")
+		if !ok {
+			continue
+		}
+		property = strings.ToLower(strings.TrimSpace(property))
+		value = strings.ToLower(strings.TrimSpace(value))
+		value = strings.TrimSpace(strings.TrimSuffix(value, "!important"))
+		switch property {
+		case "display":
+			if value == "none" {
+				return true
+			}
+		case "visibility":
+			if value == "hidden" || value == "collapse" {
+				return true
+			}
+		case "content-visibility":
+			if value == "hidden" {
+				return true
+			}
+		case "opacity":
+			opacity, err := strconv.ParseFloat(value, 64)
+			if err == nil && opacity <= 0 {
 				return true
 			}
 		}
@@ -1011,28 +1035,32 @@ func injectResearchPresentationProbe(body, script []byte) []byte {
 // preserved. Otherwise the inspector is byte zero. In both cases the bridge is
 // ready before package startup and before the outer viewer sends its probe.
 func researchPresentationProbeInsertion(body []byte) int {
-	tokens := html.NewTokenizer(bytes.NewReader(body))
 	offset := 0
-	for {
-		kind := tokens.Next()
-		raw := tokens.Raw()
-		switch kind {
-		case html.TextToken:
-			text := strings.TrimPrefix(string(raw), "\ufeff")
-			if strings.TrimSpace(text) != "" {
-				return 0
-			}
-			offset += len(raw)
-		case html.CommentToken:
-			offset += len(raw)
-		case html.DoctypeToken:
-			return offset + len(raw)
-		case html.ErrorToken:
-			return 0
-		default:
+	if bytes.HasPrefix(body, []byte{0xef, 0xbb, 0xbf}) {
+		offset = 3
+	}
+	for offset < len(body) {
+		for offset < len(body) && strings.ContainsRune(" \t\r\n\f", rune(body[offset])) {
+			offset++
+		}
+		if !bytes.HasPrefix(body[offset:], []byte("<!--")) {
+			break
+		}
+		end := bytes.Index(body[offset+4:], []byte("-->"))
+		if end < 0 {
 			return 0
 		}
+		offset += 4 + end + 3
 	}
+	const doctype = "<!doctype"
+	if len(body)-offset < len(doctype) || !bytes.EqualFold(body[offset:offset+len(doctype)], []byte(doctype)) {
+		return 0
+	}
+	end := bytes.IndexByte(body[offset+len(doctype):], '>')
+	if end < 0 {
+		return 0
+	}
+	return offset + len(doctype) + end + 1
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {
