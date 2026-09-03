@@ -82,6 +82,7 @@ def assert_ready(page, document_id, expected_path):
     expect(page.locator("#research-document")).to_be_visible()
     frame = page.locator("#research-presentation")
     expect(frame).to_be_visible()
+    expect(page.locator("#research-presentation-status")).to_be_hidden()
     assert frame.get_attribute("inert") is None
     assert frame.get_attribute("aria-hidden") is None
     assert frame.get_attribute("tabindex") is None
