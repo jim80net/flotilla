@@ -337,7 +337,8 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	}
 
 	html := doGet(t, srv, "/research-presentations/buzz/presentation/index.html")
-	if html.Code != http.StatusOK || !strings.Contains(html.Body.String(), "assets/app.js") {
+	if html.Code != http.StatusOK || !strings.Contains(html.Body.String(), "assets/app.js") ||
+		!strings.Contains(html.Body.String(), researchPresentationProbeMarker) || !strings.Contains(html.Body.String(), "flotilla-presentation-ready") {
 		t.Fatalf("presentation HTML = %d %q", html.Code, html.Body.String())
 	}
 	if got := html.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'none'") || !strings.Contains(got, "frame-ancestors 'self'") {
@@ -351,6 +352,9 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	}
 	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
 		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
+	}
+	if probe := doGet(t, srv, "/static/research-presentation-ready.js"); probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), "flotilla-presentation-ready") || !strings.Contains(probe.Body.String(), "getComputedStyle") {
+		t.Fatalf("presentation readiness probe = %d %q", probe.Code, probe.Body.String())
 	}
 	if source := doGet(t, srv, "/research-presentations/buzz/SOURCE.md"); source.Code != http.StatusOK || !strings.Contains(source.Body.String(), "Source evidence") {
 		t.Fatalf("presentation-relative source = %d %q", source.Code, source.Body.String())
@@ -567,7 +571,7 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "MessageChannel", "flotilla-presentation-probe", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

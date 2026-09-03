@@ -47,6 +47,14 @@ The source remains available inside the reading room.
 			t.Fatal(err)
 		}
 	}
+	writeResearchFixture(t, root, "stylesheet-hidden/SOURCE.md", "# Stylesheet hidden paper\n\nThe source remains available when the presentation is not visible.\n", time.Now())
+	hiddenPresentation := filepath.Join(root, "stylesheet-hidden", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(hiddenPresentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hiddenPresentation, []byte("<!doctype html><style>main { display:none }</style><main>Invisible styled evidence</main>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeResearchFixture(t, root, "source-only.md", "# Source-only paper\n\nNo presentation package exists.\n", time.Now())
 
 	httpServer := httptest.NewServer(srv.mux)
@@ -99,6 +107,13 @@ with sync_playwright() as p:
 
             page.route("**/research-presentations/decision-ready/presentation/index.html", lambda route: route.abort())
             page.goto(url + "/research/decision-ready/SOURCE.md", wait_until="domcontentloaded")
+            expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
+            expect(page.locator("#research-presentation")).to_be_hidden()
+            expect(page.locator("#research-presentation-stage")).to_be_visible()
+            expect(page.locator("#research-body")).to_be_visible()
+            expect(page.locator("#research-body")).to_contain_text("The source remains available")
+
+            page.goto(url + "/research/stylesheet-hidden/SOURCE.md", wait_until="domcontentloaded")
             expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
             expect(page.locator("#research-presentation")).to_be_hidden()
             expect(page.locator("#research-presentation-stage")).to_be_visible()

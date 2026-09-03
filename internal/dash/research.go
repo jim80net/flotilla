@@ -7,6 +7,7 @@ package dash
 // request-derived paths never become readable host files.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -28,6 +29,8 @@ import (
 )
 
 const maxResearchDocumentBytes = 4 << 20
+
+const researchPresentationProbeMarker = `data-flotilla-presentation-probe`
 
 type ResearchEntry struct {
 	ID                string               `json:"id"`
@@ -952,7 +955,8 @@ func (s *Server) handleResearchVideo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Request) {
-	file, info, found, err := openResearchPresentation(s.cfg.ResearchPath, r.PathValue("id"))
+	id := r.PathValue("id")
+	file, info, found, err := openResearchPresentation(s.cfg.ResearchPath, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
 		return
@@ -971,7 +975,38 @@ func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Reque
 	if strings.EqualFold(filepath.Ext(info.Name()), ".html") {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
 	}
+	if path.Base(id) == "index.html" && info.Size() <= maxResearchDocumentBytes {
+		body, readErr := io.ReadAll(io.LimitReader(file, maxResearchDocumentBytes+1))
+		if readErr != nil || len(body) > maxResearchDocumentBytes {
+			writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
+			return
+		}
+		probe, probeErr := assetsFS.ReadFile("assets/research-presentation-ready.js")
+		if probeErr != nil {
+			writeError(w, http.StatusInternalServerError, "the research presentation readiness probe is unavailable")
+			return
+		}
+		body = injectResearchPresentationProbe(body, probe)
+		http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(body))
+		return
+	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func injectResearchPresentationProbe(body, script []byte) []byte {
+	probe := make([]byte, 0, len(script)+64)
+	probe = append(probe, `<script data-flotilla-presentation-probe>`...)
+	probe = append(probe, script...)
+	probe = append(probe, `</script>`...)
+	lower := bytes.ToLower(body)
+	if at := bytes.LastIndex(lower, []byte("</body>")); at >= 0 {
+		result := make([]byte, 0, len(body)+len(probe))
+		result = append(result, body[:at]...)
+		result = append(result, probe...)
+		result = append(result, body[at:]...)
+		return result
+	}
+	return append(append(append([]byte{}, body...), '\n'), probe...)
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {

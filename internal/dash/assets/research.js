@@ -820,23 +820,38 @@
     status.classList.remove("error");
     status.textContent = "Loading presentation preview…";
     var settled = false;
-    var timer = setTimeout(function () {
+    var probePort = null;
+    function settlePresentation(ready) {
       if (settled || currentDocument !== doc) return;
       settled = true;
-      showPresentationUnavailable(frame, status);
+      clearTimeout(timer);
+      if (probePort) { probePort.close(); probePort = null; }
+      if (!ready) { showPresentationUnavailable(frame, status); return; }
+      status.hidden = true;
+      frame.hidden = false;
+    }
+    var timer = setTimeout(function () {
+      settlePresentation(false);
     }, presentationLoadTimeoutMS);
     frame.onload = function () {
       if (settled || currentDocument !== doc) return;
-      settled = true;
-      clearTimeout(timer);
-      status.hidden = true;
-      frame.hidden = false;
+      if (typeof MessageChannel !== "function" || !frame.contentWindow) return;
+      var channel = new MessageChannel();
+      probePort = channel.port1;
+      probePort.onmessage = function (event) {
+        var message = event.data || {};
+        if (message.type !== "flotilla-presentation-ready") return;
+        settlePresentation(message.ready === true);
+      };
+      probePort.start();
+      try {
+        frame.contentWindow.postMessage({ type: "flotilla-presentation-probe" }, "*", [channel.port2]);
+      } catch (_) {
+        settlePresentation(false);
+      }
     };
     frame.onerror = function () {
-      if (settled || currentDocument !== doc) return;
-      settled = true;
-      clearTimeout(timer);
-      showPresentationUnavailable(frame, status);
+      settlePresentation(false);
     };
     frame.src = entry.presentation_url;
     setPresentationLinks(entry);
