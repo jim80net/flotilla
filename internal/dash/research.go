@@ -11,12 +11,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +28,12 @@ import (
 )
 
 const maxResearchDocumentBytes = 4 << 20
+
+var (
+	researchPresentationStructure = regexp.MustCompile(`(?i)<(?:main|section|article)\b`)
+	researchPresentationNonBody   = regexp.MustCompile(`(?is)<!--.*?-->|<head\b[^>]*>.*?</head\s*>|<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>`)
+	researchPresentationTag       = regexp.MustCompile(`(?s)<[^>]*>`)
+)
 
 type ResearchEntry struct {
 	ID                string               `json:"id"`
@@ -255,14 +264,33 @@ func researchPresentation(root, sourceID string) (string, bool) {
 		return "", false
 	}
 	presentationID := path.Join(path.Dir(sourceID), "presentation", "index.html")
-	file, _, found, err := openResearchPresentation(root, presentationID)
+	file, info, found, err := openResearchPresentation(root, presentationID)
 	if file != nil {
-		_ = file.Close()
+		defer file.Close()
 	}
-	if err != nil || !found {
+	if err != nil || !found || !usableResearchPresentation(file, info) {
 		return "", false
 	}
 	return "/research-presentations/" + presentationID, true
+}
+
+// usableResearchPresentation is the package admission boundary for an embedded
+// preview. A successful iframe load is only transport evidence: empty HTML and
+// head/script-only shells also load, but render the blank slab this gate exists
+// to prevent. Require a bounded document with a presentation-shaped body and
+// substantive visible copy before advertising it as ready.
+func usableResearchPresentation(file *os.File, info os.FileInfo) bool {
+	if file == nil || info == nil || info.Size() <= 0 || info.Size() > maxResearchDocumentBytes {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxResearchDocumentBytes+1))
+	if err != nil || len(body) == 0 || len(body) > maxResearchDocumentBytes || !researchPresentationStructure.Match(body) {
+		return false
+	}
+	visible := researchPresentationNonBody.ReplaceAllString(string(body), " ")
+	visible = researchPresentationTag.ReplaceAllString(visible, " ")
+	visible = html.UnescapeString(visible)
+	return len([]rune(strings.Join(strings.Fields(visible), " "))) >= 8
 }
 
 func openResearchVideo(root, id string) (*os.File, os.FileInfo, bool, error) {

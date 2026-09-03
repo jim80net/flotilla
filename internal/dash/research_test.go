@@ -164,7 +164,7 @@ The trial stays frozen until the operator makes an explicit decision.
 	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Valid evidence showpiece</title>"), 0o600); err != nil {
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Valid evidence showpiece</title><main>Measured evidence and operator guidance.</main>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeResearchFixture(t, root, "archival.md", archival, now.Add(-time.Minute))
@@ -295,7 +295,7 @@ func TestResearchIndexPrefersCanonicalHTML5Showpiece(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Buzz showpiece</title>"), 0o600); err != nil {
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Buzz showpiece</title><main>Complete presentation evidence.</main>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,6 +374,37 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "HOST_SECRET_SENTINEL") {
 			t.Errorf("unsafe presentation path %q served status=%d body=%q", bad, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
+	root := t.TempDir()
+	writeResearchFixture(t, root, "empty/SOURCE.md", "# Empty package\n\nThe source remains available.\n", time.Now())
+	presentation := filepath.Join(root, "empty", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, body := range map[string]string{
+		"zero-byte":        "",
+		"empty-body":       `<!doctype html><html><head><title>Empty shell</title></head><body><main></main></body></html>`,
+		"script-only-body": `<!doctype html><main><script>document.body.dataset.loaded = "true"</script></main>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(presentation, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, ready := researchPresentation(root, "empty/SOURCE.md"); ready || got != "" {
+				t.Fatalf("researchPresentation() = %q, %v; loaded empty package must remain source-only", got, ready)
+			}
+		})
+	}
+
+	if err := os.WriteFile(presentation, []byte(`<!doctype html><main><h1>Usable evidence</h1></main>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, ready := researchPresentation(root, "empty/SOURCE.md"); !ready || got != "/research-presentations/empty/presentation/index.html" {
+		t.Fatalf("researchPresentation() = %q, %v; want substantive package admitted", got, ready)
 	}
 }
 
