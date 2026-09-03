@@ -481,7 +481,7 @@ func researchSummary(markdown string) string {
 			inFence = !inFence
 			continue
 		}
-		if inFence || line == "" || line == "---" || strings.HasPrefix(line, "#") ||
+		if inFence || line == "" || researchSummaryThematicBreak(line) || strings.HasPrefix(line, "#") ||
 			strings.HasPrefix(line, "|") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "* ") ||
 			strings.HasPrefix(line, ">") || (line[0] >= '0' && line[0] <= '9') {
 			continue
@@ -500,6 +500,26 @@ func researchSummary(markdown string) string {
 		return line
 	}
 	return ""
+}
+
+func researchSummaryThematicBreak(line string) bool {
+	var marker rune
+	count := 0
+	for _, r := range line {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		if r != '*' && r != '_' && r != '-' {
+			return false
+		}
+		if marker == 0 {
+			marker = r
+		} else if marker != r {
+			return false
+		}
+		count++
+	}
+	return count >= 3
 }
 
 func researchSummaryPlainText(line string) string {

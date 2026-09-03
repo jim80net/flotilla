@@ -51,6 +51,14 @@ func TestResearchCatalogSummaryDoesNotExposeStrongMarkers(t *testing.T) {
 			"# Catalog paper\n\nIdentifiers snake_case_value and path_with_id keep **bold words** and _italic words_ as prose.",
 			"Identifiers snake_case_value and path_with_id keep bold words and italic words as prose.",
 		},
+		"star-thematic-break": {
+			"# Catalog paper\n\n***\n\nThe paragraph after the star break is the summary.",
+			"The paragraph after the star break is the summary.",
+		},
+		"underscore-thematic-break": {
+			"# Catalog paper\n\n___\n\nThe paragraph after the underscore break is the summary.",
+			"The paragraph after the underscore break is the summary.",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			summary := researchEntry("catalog.md", tc.markdown, time.Now()).Summary
