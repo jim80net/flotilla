@@ -489,9 +489,9 @@ func researchSummary(markdown string) string {
 		if line == "" || strings.Contains(line, ":**") {
 			continue
 		}
-		// Catalog cards render summaries as plain text. Remove strong delimiters
-		// before the byte limit can separate an opener from its closer.
-		line = strings.NewReplacer("**", "", "__", "").Replace(line)
+		// Catalog cards render summaries as plain text. Remove inline Markdown
+		// delimiters before the byte limit can separate an opener from its closer.
+		line = strings.NewReplacer("*", "", "_", "", "`", "", "~", "").Replace(line)
 		const max = 220
 		if len(line) > max {
 			line = strings.TrimSpace(line[:max-1]) + "…"
