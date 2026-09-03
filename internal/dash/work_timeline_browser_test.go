@@ -62,6 +62,8 @@ earlier_attempts = {"count": 0}
 
 def timeline(route):
     query = parse_qs(urlparse(route.request.url).query)
+    if query.get("issue") == ["46"]:
+        return
     if query.get("goal") == ["goal-long"]:
         before = query.get("before", [""])[0]
         if before and earlier_attempts["count"] == 0:
@@ -107,7 +109,7 @@ def timeline(route):
 
 def prepare(page):
     page.set_default_timeout(8000)
-    page.add_init_script("window.EventSource = undefined")
+    page.add_init_script("window.EventSource = undefined; window.FLOTILLA_TIMELINE_TIMEOUT_MS = 100")
     page.route("**/api/work-timeline?**", timeline)
     page.route("**/api/goals", lambda route: route.fulfill(
         status=200, content_type="application/json", body=json.dumps({
@@ -198,6 +200,11 @@ with sync_playwright() as p:
             expect(page.locator("#wc-timeline-summary")).to_have_text("No recorded facts")
             expect(page.locator(".wc-timeline-empty")).to_contain_text("No timeline facts")
             expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(0)
+
+            open_issue(page, 46)
+            expect(page.locator("#wc-timeline-summary")).to_have_text("No matched facts · partial coverage")
+            expect(page.locator(".wc-source-unavailable")).to_contain_text("Timeline composer")
+            expect(page.locator("#wc-timeline")).not_to_contain_text("Loading")
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             if evidence_dir:
                 page.screenshot(path=os.path.join(evidence_dir, "work-timeline-empty-%d.png" % width), full_page=False)

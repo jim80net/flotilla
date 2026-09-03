@@ -14,7 +14,9 @@
     return safe
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/__([^_]+)__/g, "<strong>$1</strong>")
       .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      .replace(/_([^_]+)_/g, "<em>$1</em>")
       .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/\[([^\]]+)\]\((#[a-zA-Z0-9_-]+)\)/g, '<a href="$2">$1</a>');
   }
@@ -265,6 +267,27 @@
     if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
     return cut.trim() + "…";
   }
+  function decisionCardMarkup(value) {
+    var markdown = String(value || "")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/<\/?[a-z][^>]*>/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    var limit = 180;
+    if (markdown.length > limit) {
+      var cut = markdown.slice(0, limit + 1);
+      var lastSpace = cut.lastIndexOf(" ");
+      if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
+      markdown = cut.trim();
+      [["**", "**"], ["__", "__"], ["`", "`"], ["*", "*"], ["_", "_"]].forEach(function (pair) {
+        var count = markdown.split(pair[0]).length - 1;
+        if (count % 2) markdown += pair[1];
+      });
+      markdown += "…";
+    }
+    return inline(markdown);
+  }
   function decisionTitle(decision) {
     var base = String(decision.node.title || decision.node.id || decision.label || "Decision")
       .replace(/\s+public release and installed marketplace rollout$/i, " marketplace release")
@@ -323,6 +346,7 @@
   var currentFocus = focusFromURL(), searchQuery = "";
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
   var documentRequestEpoch = 0, annotationSession = 0;
+  var presentationLoadTimeoutMS = Math.max(100, Number(window.FLOTILLA_PRESENTATION_TIMEOUT_MS) || 5000);
   var annotationState = null, pendingAnchor = null, pendingRoute = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
@@ -381,11 +405,12 @@
     var title = document.createElement("strong");
     title.textContent = decisionTitle(decision);
     var reason = document.createElement("span"); reason.className = "research-card-blocker";
-    reason.textContent = "Why you care · " + decisionCardProse(decision.reason);
+    reason.innerHTML = "Why you care · " + decisionCardMarkup(decision.reason);
     var action = document.createElement("span"); action.className = "research-card-summary";
-    action.textContent = "Your next move · " + (decisionCardProse(
-      decisionBriefField(decision.brief, ["recommendation", "recommended"])
-    ) || "Open the decision and tell your fleet what you decide.");
+    var nextMove = decisionBriefField(decision.brief, ["recommendation", "recommended"]);
+    action.innerHTML = "Your next move · " + (nextMove
+      ? decisionCardMarkup(nextMove)
+      : "Open the decision and tell your fleet what you decide.");
     var next = document.createElement("span"); next.className = "research-card-next";
     next.textContent = "Open working paper →";
     item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(action); item.appendChild(next);
@@ -749,10 +774,13 @@
     el("research-decision-title").textContent = currentDecision
       ? decisionTitle(currentDecision)
       : "Waiting on you";
-    el("research-decision-summary").textContent = currentDecision
-      ? ("What you decide · " + (decisionBriefField(currentDecision.brief, ["decision", "question", "recommendation", "recommended"]) ||
-          "Read the paper, then tell your fleet what you decide."))
+    var decisionSummary = currentDecision
+      ? (decisionBriefField(currentDecision.brief, ["decision", "question", "recommendation", "recommended"]) ||
+          "Read the paper, then tell your fleet what you decide.")
       : "This paper is waiting for what you decide.";
+    el("research-decision-summary").innerHTML = currentDecision
+      ? "What you decide · " + decisionCardMarkup(decisionSummary)
+      : decisionSummary;
     el("research-decision-respond").hidden = !currentDecision;
     el("research-decision-response").hidden = true;
     el("research-decision-response-input").value = "";
@@ -773,15 +801,44 @@
       else link.removeAttribute("href");
     });
   }
+  function showPresentationUnavailable(frame, status) {
+    frame.hidden = true;
+    status.classList.add("error");
+    status.textContent = "Presentation preview unavailable. The source document is shown below; the full-screen presentation remains available.";
+    el("research-body").hidden = false;
+  }
   function renderPresentation(doc, entry) {
     renderDocument(doc);
     currentRendered = null;
     el("research-body").hidden = true;
     el("research-toc").hidden = true;
     var frame = el("research-presentation");
+    var status = el("research-presentation-status");
     frame.title = doc.title + " presentation";
+    frame.hidden = true;
+    status.hidden = false;
+    status.classList.remove("error");
+    status.textContent = "Loading presentation preview…";
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled || currentDocument !== doc) return;
+      settled = true;
+      showPresentationUnavailable(frame, status);
+    }, presentationLoadTimeoutMS);
+    frame.onload = function () {
+      if (settled || currentDocument !== doc) return;
+      settled = true;
+      clearTimeout(timer);
+      status.hidden = true;
+      frame.hidden = false;
+    };
+    frame.onerror = function () {
+      if (settled || currentDocument !== doc) return;
+      settled = true;
+      clearTimeout(timer);
+      showPresentationUnavailable(frame, status);
+    };
     frame.src = entry.presentation_url;
-    frame.hidden = false;
     setPresentationLinks(entry);
     el("research-presentation-stage").hidden = false;
     el("research-annotation-summary").textContent = "Document comments stay private to this host; passage highlights remain on the source.";

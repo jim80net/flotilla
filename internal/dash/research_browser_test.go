@@ -359,6 +359,7 @@ with sync_playwright() as p:
     cards.nth(0).click()
     frame = page.locator("#research-presentation")
     expect(frame).to_be_visible()
+    expect(page.locator("#research-presentation-status")).to_be_hidden()
     assert frame.get_attribute("sandbox") == "allow-scripts"
     expect(page.locator("#research-body")).to_be_hidden()
     expect(page.frame_locator("#research-presentation").locator("h1")).to_have_text("Market event flow")

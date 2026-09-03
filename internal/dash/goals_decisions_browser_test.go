@@ -56,7 +56,7 @@ for i in range(7):
     if i == 0:
         brief = (
             "## Recommendation\n**Keep option 1 reversible** while the generic operating team "
-            "reviews a deliberately long sequence of reversible checks, bounded observations, "
+            "reviews a deliberately long sequence of reversible checks, _bounded observations_, "
             "and routine follow-up steps without exposing raw formatting markers or turning "
             "the card into the full operational brief.\n\n## Safe default\nHold the current state."
             "\n\n[Read paper](/research/decisions/generic-1.md)"
@@ -167,6 +167,8 @@ with sync_playwright() as p:
             assert summary.inner_text().startswith("Your next move · ")
             assert len(summary.inner_text()) <= 205
             assert summary.inner_text().endswith("…")
+            expect(summary.locator("strong")).to_have_text("Keep option 1 reversible")
+            expect(summary.locator("em")).to_have_text("bounded observations")
             expect(formatted.locator(".research-card-next")).to_have_text("Open working paper →")
             expect(formatted.locator(".research-card-blocker")).to_have_text(
                 "Why you care · authorize the bounded choice")
@@ -194,6 +196,8 @@ with sync_playwright() as p:
             expect(page).to_have_url(url + "/research/decisions/generic-1.md")
             expect(page.locator("#research-annotation-bar")).to_be_visible()
             expect(page.locator("#research-decision-summary")).to_contain_text("What you decide ·")
+            expect(page.locator("#research-decision-summary strong")).to_have_text("Keep option 1 reversible")
+            expect(page.locator("#research-decision-summary em")).to_have_text("bounded observations")
             expect(page.locator("#research-decision-respond")).to_have_text("Tell your fleet")
             page.locator("#research-decision-respond").click()
             expect(page.locator('label[for="research-decision-response-input"]')).to_have_text("What you decide")

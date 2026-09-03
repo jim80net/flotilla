@@ -64,7 +64,7 @@ url = sys.argv[1]
 
 def prepare(page):
     page.set_default_timeout(8000)
-    page.add_init_script("window.EventSource = undefined")
+    page.add_init_script("window.EventSource = undefined; window.FLOTILLA_PRESENTATION_TIMEOUT_MS = 100")
     page.route("**/api/goals", lambda route: route.fulfill(
         status=200, content_type="application/json",
         body=json.dumps({"found": True, "goals": []})))
@@ -96,6 +96,14 @@ with sync_playwright() as p:
             prepare(page)
             assert_ready(page, "research-ready/SOURCE.md", "/research-presentations/research-ready/presentation/index.html")
             assert_ready(page, "decision-ready/SOURCE.md", "/research-presentations/decision-ready/presentation/index.html")
+
+            page.route("**/research-presentations/decision-ready/presentation/index.html", lambda route: route.abort())
+            page.goto(url + "/research/decision-ready/SOURCE.md", wait_until="domcontentloaded")
+            expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
+            expect(page.locator("#research-presentation")).to_be_hidden()
+            expect(page.locator("#research-presentation-stage")).to_be_visible()
+            expect(page.locator("#research-body")).to_be_visible()
+            expect(page.locator("#research-body")).to_contain_text("The source remains available")
 
             page.goto(url + "/research/source-only.md", wait_until="domcontentloaded")
             expect(page.locator("#research-document")).to_be_visible()

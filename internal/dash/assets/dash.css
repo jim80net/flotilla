@@ -3215,6 +3215,13 @@ html, body { overflow-x: clip; }
   border-radius: var(--r-sm) var(--r-sm) 0 0; background: var(--abyss-1); color: var(--ink-2);
   font: 600 .7rem var(--display); text-transform: uppercase; letter-spacing: .05em;
 }
+.research-presentation-status {
+  display: grid; place-content: center; min-height: 12rem; margin: 0; padding: 1rem;
+  border: 1px solid var(--line); border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: var(--abyss-1); color: var(--ink-2); text-align: center;
+}
+.research-presentation-status.error { color: var(--amber); }
+.research-presentation-status[hidden] { display: none; }
 .research-presentation { display: block; width: 100%; min-height: max(42rem, calc(100dvh - 15rem)); border: 1px solid var(--line); border-radius: 0 0 var(--r-sm) var(--r-sm); background: #0b1020; }
 .research-presentation[hidden] { display: none; }
 .research-markdown h1, .research-markdown h2, .research-markdown h3, .research-markdown h4 { scroll-margin-top: 5.5rem; color: var(--ink); font-family: var(--display); line-height: 1.12; }

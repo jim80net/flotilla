@@ -523,13 +523,13 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Depth · decisions", "R&amp;D", "Waiting on you", "What we learned", "not status notes", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="learn"`, `id="research-decision-more"`, `id="research-learn-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
+	for _, marker := range []string{"Depth · decisions", "R&amp;D", "Waiting on you", "What we learned", "not status notes", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="learn"`, `id="research-decision-more"`, `id="research-learn-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation-status"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

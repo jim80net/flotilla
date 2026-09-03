@@ -2338,7 +2338,8 @@ func TestIssuesWorkContext716(t *testing.T) {
 		`D.onLiveUpdate`, `D.routeMessage`, `D.routeOutcomeCopy`,
 		`no live seat mapped`, `composer.hidden = true`, `requestAnimationFrame`,
 		`/api/issues/`, `fetchIssueOnce(); // GitHub is external`, `fetchMirror(loadedAll`,
-		`streamPinned`, `onViewChange`, `"opened "`,
+		`streamPinned`, `onViewChange`, `"opened "`, `timelineLoadTimeoutMS`,
+		`Timeline sources did not respond within`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("work-context.js must preserve the #716 contract (missing %q)", marker)
