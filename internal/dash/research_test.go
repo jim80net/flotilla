@@ -59,7 +59,8 @@ func TestResearchInlineMarkdownKeepsWordUnderscoresLiteral(t *testing.T) {
 	}
 }
 
-func TestDecisionCardMarkupClosesEmphasisAtTruncationBoundary(t *testing.T) {
+func researchDecisionFormatterVM(t *testing.T) *goja.Runtime {
+	t.Helper()
 	raw, err := os.ReadFile("assets/research.js")
 	if err != nil {
 		t.Fatal(err)
@@ -67,21 +68,22 @@ func TestDecisionCardMarkupClosesEmphasisAtTruncationBoundary(t *testing.T) {
 	source := string(raw)
 	inlineStart := strings.Index(source, "  function esc(value)")
 	inlineEnd := strings.Index(source, "  function slug(text, used)")
+	briefStart := strings.Index(source, "  function decisionBriefField(brief, names)")
+	briefEnd := strings.Index(source, "  function decisionCardProse(value)")
 	cardStart := strings.Index(source, "  function decisionCardMarkup(value)")
 	cardEnd := strings.Index(source, "  function decisionTitle(decision)")
-	if inlineStart < 0 || inlineEnd <= inlineStart || cardStart < 0 || cardEnd <= cardStart {
+	if inlineStart < 0 || inlineEnd <= inlineStart || briefStart < 0 || briefEnd <= briefStart || cardStart < 0 || cardEnd <= cardStart {
 		t.Fatal("could not isolate Research decision-card formatter")
 	}
 	vm := goja.New()
-	if _, err := vm.RunString(source[inlineStart:inlineEnd] + source[cardStart:cardEnd]); err != nil {
+	if _, err := vm.RunString(source[inlineStart:inlineEnd] + source[briefStart:briefEnd] + source[cardStart:cardEnd]); err != nil {
 		t.Fatalf("load decision-card formatter: %v", err)
 	}
-	brief := strings.Repeat("A", 172) + "**Label:** trailing copy forces truncation"
-	value, err := vm.RunString("decisionCardMarkup(" + strconv.Quote(brief) + ")")
-	if err != nil {
-		t.Fatal(err)
-	}
-	markup := value.String()
+	return vm
+}
+
+func researchRenderedText(t *testing.T, markup string) string {
+	t.Helper()
 	doc, err := html.Parse(strings.NewReader(markup))
 	if err != nil {
 		t.Fatal(err)
@@ -97,12 +99,49 @@ func TestDecisionCardMarkupClosesEmphasisAtTruncationBoundary(t *testing.T) {
 		}
 	}
 	collectText(doc)
-	innerText := renderedText.String()
+	return renderedText.String()
+}
+
+func TestDecisionCardMarkupClosesEmphasisAtTruncationBoundary(t *testing.T) {
+	vm := researchDecisionFormatterVM(t)
+	brief := strings.Repeat("A", 172) + "**Label:** trailing copy forces truncation"
+	value, err := vm.RunString("decisionCardMarkup(" + strconv.Quote(brief) + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := value.String()
+	innerText := researchRenderedText(t, markup)
 	if strings.Contains(innerText, "**") {
 		t.Fatalf("truncated decision inner_text leaks Markdown emphasis: %q (markup %q)", innerText, markup)
 	}
 	if !strings.Contains(markup, "<strong>Label:</strong>") {
 		t.Fatalf("truncated decision must retain balanced emphasis: %q", markup)
+	}
+}
+
+func TestDecisionBriefFieldPreservesFollowingBoldLabel(t *testing.T) {
+	vm := researchDecisionFormatterVM(t)
+	tail := " **Safe default:** Keep the reversible setting."
+	recommendation := strings.Repeat("A", 161-len(tail)) + tail
+	brief := "**Recommendation:** " + recommendation
+	value, err := vm.RunString("decisionBriefField(" + strconv.Quote(brief) + ", ['recommendation'])")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extracted := value.String()
+	if len(extracted) != 161 {
+		t.Fatalf("labeled field length = %d, want non-truncated 161-character arm; field %q", len(extracted), extracted)
+	}
+	value, err = vm.RunString("decisionCardMarkup(" + strconv.Quote(extracted) + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := value.String()
+	if innerText := researchRenderedText(t, markup); strings.Contains(innerText, "**") {
+		t.Fatalf("non-truncated decision inner_text leaks Markdown emphasis: %q (markup %q)", innerText, markup)
+	}
+	if !strings.Contains(markup, "<strong>Safe default:</strong>") {
+		t.Fatalf("following labeled field must retain balanced emphasis: %q", markup)
 	}
 }
 

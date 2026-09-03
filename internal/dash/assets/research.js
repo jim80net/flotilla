@@ -233,7 +233,9 @@
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
-      var labeled = line.match(/^(?:[-*]\s*)?(?:\*\*)?([^:*—]+)(?:\*\*)?\s*[:—-]\s*(.+)$/);
+      var labeled = line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\s*[:—-]\*\*\s*(.+)$/) ||
+        line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\*\*\s*[:—-]\s*(.+)$/) ||
+        line.match(/^(?:[-*](?!\*)\s*)?([^:*—]+)\s*[:—-]\s*(.+)$/);
       if (heading && wanted.indexOf(fieldName(heading[1])) !== -1) {
         var paragraph = [];
         for (var j = i + 1; j < lines.length; j++) {
