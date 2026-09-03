@@ -3,9 +3,13 @@
 
   var expectedParentOrigin = "";
   try { expectedParentOrigin = new URL(document.referrer).origin; } catch (_) {}
-  var stopImmediatePropagation = Event.prototype.stopImmediatePropagation;
-  var postReply = MessagePort.prototype.postMessage;
-  var closeReply = MessagePort.prototype.close;
+  // Uncurry while this first script still owns the pristine realm. Calling
+  // these bound invokers directly cannot be redirected by later assignments
+  // to a captured native function's mutable `.call` property.
+  var stopEvent = Function.prototype.call.bind(Event.prototype.stopImmediatePropagation);
+  var postReply = Function.prototype.call.bind(MessagePort.prototype.postMessage);
+  var closeReply = Function.prototype.call.bind(MessagePort.prototype.close);
+  var some = Function.prototype.call.bind(Array.prototype.some);
   var requestFrame = window.requestAnimationFrame.bind(window);
 
   function elementPaints(element) {
@@ -22,7 +26,7 @@
 	if (!node.parentElement || !elementPaints(node.parentElement)) return false;
 	var range = document.createRange();
 	range.selectNodeContents(node);
-	var paints = Array.prototype.some.call(range.getClientRects(), function (rect) {
+	var paints = some(range.getClientRects(), function (rect) {
 	  return rect.width > 0 && rect.height > 0;
 	});
 	range.detach();
@@ -39,7 +43,7 @@
   }
 
   function presentationReady() {
-	return Array.prototype.some.call(document.querySelectorAll("main, section, article"), function (root) {
+	return some(document.querySelectorAll("main, section, article"), function (root) {
 	  if (!elementPaints(root)) return false;
 	  var rect = root.getBoundingClientRect();
 	  return rect.width > 0 && rect.height > 0 && visibleCopyLength(root) >= 8;
@@ -51,12 +55,12 @@
 		!event.data || event.data.type !== "flotilla-presentation-probe" || event.ports.length !== 1) return;
 	// This script is injected before package code. Stop same-window listeners
 	// before exposing the capability-bearing port to presentation-authored JS.
-	stopImmediatePropagation.call(event);
+	stopEvent(event);
 	var reply = event.ports[0];
 	requestFrame(function () {
 	  requestFrame(function () {
-		postReply.call(reply, { type: "flotilla-presentation-ready", ready: presentationReady() });
-		closeReply.call(reply);
+		postReply(reply, { type: "flotilla-presentation-ready", ready: presentationReady() });
+		closeReply(reply);
 	  });
 	});
   }, true);

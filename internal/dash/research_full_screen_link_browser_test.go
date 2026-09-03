@@ -53,6 +53,9 @@ The source remains available inside the reading room.
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(hiddenPresentation, []byte(`<!doctype html><script>
+Event.prototype.stopImmediatePropagation.call = function () {};
+MessagePort.prototype.postMessage.call = function () {};
+MessagePort.prototype.close.call = function () {};
 addEventListener("message", function (event) {
   if (event.data && event.data.type === "flotilla-presentation-probe" && event.ports.length) {
     event.ports[0].postMessage({type: "flotilla-presentation-ready", ready: true});
