@@ -280,6 +280,14 @@
       var lastSpace = cut.lastIndexOf(" ");
       if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
       markdown = cut.trim();
+      // A hard cut can retain only the first byte of a ** or __ closer.
+      // Remove that partial closer before balancing the complete delimiter.
+      [["**", "*"], ["__", "_"]].forEach(function (pair) {
+        var count = markdown.split(pair[0]).length - 1;
+        if (count % 2 && markdown.slice(-1) === pair[1] && markdown.slice(-2) !== pair[0]) {
+          markdown = markdown.slice(0, -1);
+        }
+      });
       [["**", "**"], ["__", "__"], ["`", "`"], ["*", "*"], ["_", "_"]].forEach(function (pair) {
         var count = markdown.split(pair[0]).length - 1;
         if (count % 2) markdown += pair[1];
