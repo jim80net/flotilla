@@ -119,29 +119,54 @@ func TestDecisionCardMarkupClosesEmphasisAtTruncationBoundary(t *testing.T) {
 	}
 }
 
-func TestDecisionBriefFieldPreservesFollowingBoldLabel(t *testing.T) {
+func TestDecisionCardMarkupBalancesNestedEmphasisAtTruncationBoundary(t *testing.T) {
 	vm := researchDecisionFormatterVM(t)
-	tail := " **Safe default:** Keep the reversible setting."
-	recommendation := strings.Repeat("A", 161-len(tail)) + tail
-	brief := "**Recommendation:** " + recommendation
-	value, err := vm.RunString("decisionBriefField(" + strconv.Quote(brief) + ", ['recommendation'])")
-	if err != nil {
-		t.Fatal(err)
-	}
-	extracted := value.String()
-	if len(extracted) != 161 {
-		t.Fatalf("labeled field length = %d, want non-truncated 161-character arm; field %q", len(extracted), extracted)
-	}
-	value, err = vm.RunString("decisionCardMarkup(" + strconv.Quote(extracted) + ")")
+	brief := "**" + strings.Repeat("A", 175) + "*em* trailing copy forces truncation"
+	value, err := vm.RunString("decisionCardMarkup(" + strconv.Quote(brief) + ")")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := value.String()
 	if innerText := researchRenderedText(t, markup); strings.Contains(innerText, "**") {
-		t.Fatalf("non-truncated decision inner_text leaks Markdown emphasis: %q (markup %q)", innerText, markup)
+		t.Fatalf("nested emphasis at the truncation edge leaks Markdown: %q (markup %q)", innerText, markup)
 	}
-	if !strings.Contains(markup, "<strong>Safe default:</strong>") {
-		t.Fatalf("following labeled field must retain balanced emphasis: %q", markup)
+	if !strings.Contains(markup, "<strong>") {
+		t.Fatalf("outer emphasis must remain balanced after nested edge repair: %q", markup)
+	}
+}
+
+func TestDecisionBriefFieldPreservesFollowingBoldLabel(t *testing.T) {
+	vm := researchDecisionFormatterVM(t)
+	tail := " **Safe default:** Keep the reversible setting."
+	recommendation := strings.Repeat("A", 161-len(tail)) + tail
+	for name, label := range map[string]string{
+		"punctuation-inside-closer":        "**Recommendation:** ",
+		"punctuation-inside-spaced-closer": "**Recommendation: ** ",
+		"punctuation-after-closer":         "**Recommendation**: ",
+		"plain-label":                      "Recommendation: ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			brief := label + recommendation
+			value, err := vm.RunString("decisionBriefField(" + strconv.Quote(brief) + ", ['recommendation'])")
+			if err != nil {
+				t.Fatal(err)
+			}
+			extracted := value.String()
+			if len(extracted) != 161 {
+				t.Fatalf("labeled field length = %d, want non-truncated 161-character arm; field %q", len(extracted), extracted)
+			}
+			value, err = vm.RunString("decisionCardMarkup(" + strconv.Quote(extracted) + ")")
+			if err != nil {
+				t.Fatal(err)
+			}
+			markup := value.String()
+			if innerText := researchRenderedText(t, markup); strings.Contains(innerText, "**") {
+				t.Fatalf("non-truncated decision inner_text leaks Markdown emphasis: %q (markup %q)", innerText, markup)
+			}
+			if !strings.Contains(markup, "<strong>Safe default:</strong>") {
+				t.Fatalf("following labeled field must retain balanced emphasis: %q", markup)
+			}
+		})
 	}
 }
 

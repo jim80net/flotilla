@@ -233,7 +233,7 @@
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
-      var labeled = line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\s*[:—-]\*\*\s*(.+)$/) ||
+      var labeled = line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\s*[:—-]\s*\*\*\s*(.+)$/) ||
         line.match(/^(?:[-*](?!\*)\s*)?\*\*([^:*—]+)\*\*\s*[:—-]\s*(.+)$/) ||
         line.match(/^(?:[-*](?!\*)\s*)?([^:*—]+)\s*[:—-]\s*(.+)$/);
       if (heading && wanted.indexOf(fieldName(heading[1])) !== -1) {
@@ -282,13 +282,20 @@
       var lastSpace = cut.lastIndexOf(" ");
       if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
       markdown = cut.trim();
-      // A hard cut can retain only the first byte of a ** or __ closer.
-      // Remove that partial closer before balancing the complete delimiter.
+      // Repair an unmatched strong span using only its own suffix. A terminal
+      // single marker is a partial strong closer only when it does not close a
+      // nested emphasis pair; balanced nested emphasis is flattened before the
+      // outer closer is appended because inline() deliberately stays shallow.
       [["**", "*"], ["__", "_"]].forEach(function (pair) {
         var count = markdown.split(pair[0]).length - 1;
-        if (count % 2 && markdown.slice(-1) === pair[1] && markdown.slice(-2) !== pair[0]) {
-          markdown = markdown.slice(0, -1);
-        }
+        if (!(count % 2)) return;
+        var openAt = markdown.lastIndexOf(pair[0]);
+        var prefix = markdown.slice(0, openAt + pair[0].length);
+        var suffix = markdown.slice(openAt + pair[0].length);
+        var singles = suffix.split(pair[1]).length - 1;
+        if (singles % 2 && suffix.slice(-1) === pair[1]) suffix = suffix.slice(0, -1);
+        var nested = pair[1] === "*" ? /\*([^*]+)\*/g : /_([^_]+)_/g;
+        markdown = prefix + suffix.replace(nested, "$1") + pair[0];
       });
       [["**", "**"], ["__", "__"], ["`", "`"], ["*", "*"], ["_", "_"]].forEach(function (pair) {
         var count = markdown.split(pair[0]).length - 1;
