@@ -341,6 +341,9 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 		!strings.Contains(html.Body.String(), researchPresentationProbeMarker) || !strings.Contains(html.Body.String(), "flotilla-presentation-ready") {
 		t.Fatalf("presentation HTML = %d %q", html.Code, html.Body.String())
 	}
+	if probeAt, authorAt := strings.Index(html.Body.String(), researchPresentationProbeMarker), strings.Index(html.Body.String(), `src="assets/app.js"`); probeAt < 0 || authorAt < 0 || probeAt >= authorAt {
+		t.Fatalf("readiness inspector must precede author script: probe=%d author=%d body=%q", probeAt, authorAt, html.Body.String())
+	}
 	if got := html.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'none'") || !strings.Contains(got, "frame-ancestors 'self'") {
 		t.Errorf("presentation CSP = %q", got)
 	}
@@ -353,7 +356,7 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
 		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
 	}
-	if probe := doGet(t, srv, "/static/research-presentation-ready.js"); probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), "flotilla-presentation-ready") || !strings.Contains(probe.Body.String(), "getComputedStyle") {
+	if probe := doGet(t, srv, "/static/research-presentation-ready.js"); probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), "flotilla-presentation-ready") || !strings.Contains(probe.Body.String(), "getComputedStyle") || !strings.Contains(probe.Body.String(), "event.source !== parent") || !strings.Contains(probe.Body.String(), "event.origin !== expectedParentOrigin") || !strings.Contains(probe.Body.String(), "stopImmediatePropagation.call(event)") {
 		t.Fatalf("presentation readiness probe = %d %q", probe.Code, probe.Body.String())
 	}
 	if source := doGet(t, srv, "/research-presentations/buzz/SOURCE.md"); source.Code != http.StatusOK || !strings.Contains(source.Body.String(), "Source evidence") {

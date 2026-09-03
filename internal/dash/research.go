@@ -998,15 +998,41 @@ func injectResearchPresentationProbe(body, script []byte) []byte {
 	probe = append(probe, `<script data-flotilla-presentation-probe>`...)
 	probe = append(probe, script...)
 	probe = append(probe, `</script>`...)
-	lower := bytes.ToLower(body)
-	if at := bytes.LastIndex(lower, []byte("</body>")); at >= 0 {
-		result := make([]byte, 0, len(body)+len(probe))
-		result = append(result, body[:at]...)
-		result = append(result, probe...)
-		result = append(result, body[at:]...)
-		return result
+	at := researchPresentationProbeInsertion(body)
+	result := make([]byte, 0, len(body)+len(probe))
+	result = append(result, body[:at]...)
+	result = append(result, probe...)
+	result = append(result, body[at:]...)
+	return result
+}
+
+// researchPresentationProbeInsertion keeps a leading HTML5 doctype (and any
+// preceding whitespace/comments) ahead of the inspector so standards mode is
+// preserved. Otherwise the inspector is byte zero. In both cases it executes
+// before any presentation-authored script can register for the probe channel.
+func researchPresentationProbeInsertion(body []byte) int {
+	tokens := html.NewTokenizer(bytes.NewReader(body))
+	offset := 0
+	for {
+		kind := tokens.Next()
+		raw := tokens.Raw()
+		switch kind {
+		case html.TextToken:
+			text := strings.TrimPrefix(string(raw), "\ufeff")
+			if strings.TrimSpace(text) != "" {
+				return 0
+			}
+			offset += len(raw)
+		case html.CommentToken:
+			offset += len(raw)
+		case html.DoctypeToken:
+			return offset + len(raw)
+		case html.ErrorToken:
+			return 0
+		default:
+			return 0
+		}
 	}
-	return append(append(append([]byte{}, body...), '\n'), probe...)
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {

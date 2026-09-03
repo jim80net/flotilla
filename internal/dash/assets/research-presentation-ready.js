@@ -1,6 +1,13 @@
 (function () {
   "use strict";
 
+  var expectedParentOrigin = "";
+  try { expectedParentOrigin = new URL(document.referrer).origin; } catch (_) {}
+  var stopImmediatePropagation = Event.prototype.stopImmediatePropagation;
+  var postReply = MessagePort.prototype.postMessage;
+  var closeReply = MessagePort.prototype.close;
+  var requestFrame = window.requestAnimationFrame.bind(window);
+
   function elementPaints(element) {
 	for (var current = element; current; current = current.parentElement) {
 	  var style = getComputedStyle(current);
@@ -40,13 +47,17 @@
   }
 
   addEventListener("message", function (event) {
-	if (!event.data || event.data.type !== "flotilla-presentation-probe" || event.ports.length !== 1) return;
+	if (event.source !== parent || !expectedParentOrigin || event.origin !== expectedParentOrigin ||
+		!event.data || event.data.type !== "flotilla-presentation-probe" || event.ports.length !== 1) return;
+	// This script is injected before package code. Stop same-window listeners
+	// before exposing the capability-bearing port to presentation-authored JS.
+	stopImmediatePropagation.call(event);
 	var reply = event.ports[0];
-	requestAnimationFrame(function () {
-	  requestAnimationFrame(function () {
-		reply.postMessage({ type: "flotilla-presentation-ready", ready: presentationReady() });
-		reply.close();
+	requestFrame(function () {
+	  requestFrame(function () {
+		postReply.call(reply, { type: "flotilla-presentation-ready", ready: presentationReady() });
+		closeReply.call(reply);
 	  });
 	});
-  });
+  }, true);
 }());
