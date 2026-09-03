@@ -29,6 +29,23 @@ func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
 	}
 }
 
+func TestResearchCatalogSummaryDoesNotExposeStrongMarkers(t *testing.T) {
+	for name, markdown := range map[string]string{
+		"unmatched-opener": "# Catalog paper\n\nA useful catalog summary with **unfinished strong emphasis visible.",
+		"closer-after-cut": "# Catalog paper\n\n" + strings.Repeat("A", 200) + " **" + strings.Repeat("B", 30) + "** trailing copy.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			summary := researchEntry("catalog.md", markdown, time.Now()).Summary
+			if strings.Contains(summary, "**") {
+				t.Fatalf("catalog summary exposes strong Markdown markers: %q", summary)
+			}
+			if summary == "" {
+				t.Fatal("catalog summary unexpectedly empty")
+			}
+		})
+	}
+}
+
 func TestResearchInlineMarkdownKeepsWordUnderscoresLiteral(t *testing.T) {
 	raw, err := os.ReadFile("assets/research.js")
 	if err != nil {
