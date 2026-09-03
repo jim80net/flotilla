@@ -52,16 +52,7 @@ The source remains available inside the reading room.
 	if err := os.MkdirAll(filepath.Dir(hiddenPresentation), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(hiddenPresentation, []byte(`<!doctype html><script>
-Event.prototype.stopImmediatePropagation.call = function () {};
-MessagePort.prototype.postMessage.call = function () {};
-MessagePort.prototype.close.call = function () {};
-addEventListener("message", function (event) {
-  if (event.data && event.data.type === "flotilla-presentation-probe" && event.ports.length) {
-    event.ports[0].postMessage({type: "flotilla-presentation-ready", ready: true});
-  }
-});
-</script><style>main { display:none }</style><main>Invisible styled evidence</main>`), 0o600); err != nil {
+	if err := os.WriteFile(hiddenPresentation, []byte(`<!doctype html><style>main { display:none }</style><main>Invisible styled evidence</main>`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeResearchFixture(t, root, "source-only.md", "# Source-only paper\n\nNo presentation package exists.\n", time.Now())

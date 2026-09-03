@@ -1008,8 +1008,8 @@ func injectResearchPresentationProbe(body, script []byte) []byte {
 
 // researchPresentationProbeInsertion keeps a leading HTML5 doctype (and any
 // preceding whitespace/comments) ahead of the inspector so standards mode is
-// preserved. Otherwise the inspector is byte zero. In both cases it executes
-// before any presentation-authored script can register for the probe channel.
+// preserved. Otherwise the inspector is byte zero. In both cases the bridge is
+// ready before package startup and before the outer viewer sends its probe.
 func researchPresentationProbeInsertion(body []byte) int {
 	tokens := html.NewTokenizer(bytes.NewReader(body))
 	offset := 0

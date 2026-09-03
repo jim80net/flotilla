@@ -3,9 +3,8 @@
 
   var expectedParentOrigin = "";
   try { expectedParentOrigin = new URL(document.referrer).origin; } catch (_) {}
-  // Uncurry while this first script still owns the pristine realm. Calling
-  // these bound invokers directly cannot be redirected by later assignments
-  // to a captured native function's mutable `.call` property.
+  // Bind receiver-sensitive platform methods once so the cooperative probe
+  // uses one stable response path throughout its short lifetime.
   var stopEvent = Function.prototype.call.bind(Event.prototype.stopImmediatePropagation);
   var postReply = Function.prototype.call.bind(MessagePort.prototype.postMessage);
   var closeReply = Function.prototype.call.bind(MessagePort.prototype.close);
@@ -53,8 +52,7 @@
   addEventListener("message", function (event) {
 	if (event.source !== parent || !expectedParentOrigin || event.origin !== expectedParentOrigin ||
 		!event.data || event.data.type !== "flotilla-presentation-probe" || event.ports.length !== 1) return;
-	// This script is injected before package code. Stop same-window listeners
-	// before exposing the capability-bearing port to presentation-authored JS.
+	// The injected bridge owns the viewer's one-use response port.
 	stopEvent(event);
 	var reply = event.ports[0];
 	requestFrame(function () {

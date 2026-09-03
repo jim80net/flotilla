@@ -356,7 +356,7 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
 		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
 	}
-	if probe := doGet(t, srv, "/static/research-presentation-ready.js"); probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), "flotilla-presentation-ready") || !strings.Contains(probe.Body.String(), "getComputedStyle") || !strings.Contains(probe.Body.String(), "event.source !== parent") || !strings.Contains(probe.Body.String(), "event.origin !== expectedParentOrigin") || !strings.Contains(probe.Body.String(), "Function.prototype.call.bind(Event.prototype.stopImmediatePropagation)") || !strings.Contains(probe.Body.String(), "stopEvent(event)") {
+	if probe := doGet(t, srv, "/static/research-presentation-ready.js"); probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), "flotilla-presentation-ready") || !strings.Contains(probe.Body.String(), "getComputedStyle") || !strings.Contains(probe.Body.String(), "event.source !== parent") || !strings.Contains(probe.Body.String(), "event.origin !== expectedParentOrigin") {
 		t.Fatalf("presentation readiness probe = %d %q", probe.Code, probe.Body.String())
 	}
 	if source := doGet(t, srv, "/research-presentations/buzz/SOURCE.md"); source.Code != http.StatusOK || !strings.Contains(source.Body.String(), "Source evidence") {

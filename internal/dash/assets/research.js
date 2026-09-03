@@ -846,9 +846,8 @@
       probePort.start();
       try {
 		// The allow-scripts sandbox intentionally gives the child an opaque
-		// origin, so targetOrigin must be "*". The injected first script
-		// authenticates this parent and exclusively consumes the transferred
-		// one-use port before presentation-authored listeners can observe it.
+		// origin, so targetOrigin must be "*". The injected bridge validates
+		// the parent source/origin and owns this one-use response port.
         frame.contentWindow.postMessage({ type: "flotilla-presentation-probe" }, "*", [channel.port2]);
       } catch (_) {
         settlePresentation(false);

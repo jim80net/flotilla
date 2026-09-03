@@ -18,11 +18,14 @@ state/research/
 ```
 
 `SOURCE.md` supplies the stable R&D ID, title, summary, decision metadata, and
-annotation record. A regular, non-symlink `presentation/index.html` makes the
-package `showpiece` and the shelf opens it in the existing R&D reading canvas.
-If the presentation is absent, the source remains inspectable but is labeled
-`source-only · not ready`; it is not represented as a finished operator
-publication. Showpieces sort ahead of source-only papers within the same shelf.
+annotation record. A regular, non-symlink `presentation/index.html` that passes
+package admission makes the package a showpiece candidate. The reading canvas
+reveals its iframe only after an injected browser probe finds substantive text
+that actually occupies rendered layout. Empty, hidden, failed, or non-responsive
+presentations leave the source visible with an honest unavailable state. If the
+presentation is absent, the source is labeled `source-only · not ready`; it is
+not represented as a finished operator publication. Showpieces sort ahead of
+source-only papers within the same shelf.
 
 Presentation assets must be local to the package. The private dash serves a
 bounded allowlist of HTML, CSS, JavaScript, JSON, image, font, and video files
@@ -31,6 +34,15 @@ components, symlinks, unsupported extensions, and presentation directories
 without a sibling `SOURCE.md` fail closed. Presentation HTML runs in a sandboxed
 frame with no forms or network connections. Build self-contained work: do not
 depend on a CDN, remote script, analytics endpoint, or token.
+
+Presentation packages are curated operator teaching artifacts, not hostile
+untrusted documents. Package JavaScript and the injected browser probe execute
+in the same sandboxed child realm. The probe is a visual-honesty check for
+cooperative packages, not a security boundary against presentation code that
+deliberately replaces browser APIs or fabricates readiness. Review package HTML,
+CSS, and JavaScript before publication; never place untrusted active content in
+the research root. The outer sandbox remains the security boundary that limits
+the package's browser capabilities.
 
 Normal relative package URLs are preserved. From `presentation/index.html`,
 `assets/showpiece.css`, `assets/showpiece.js`, `media/briefing.mp4`, and the
