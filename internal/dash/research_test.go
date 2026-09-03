@@ -461,6 +461,7 @@ func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 		"hidden-body":               `<!doctype html><main hidden>invisible hidden evidence</main>`,
 		"inline-style-hidden-body":  "<!doctype html><main style=\"display :\tnone\">invisible styled evidence</main>",
 		"zero-opacity-body":         `<!doctype html><main style="opacity: 0">invisible transparent evidence</main>`,
+		"zero-percent-opacity-body": `<!doctype html><main style="opacity: 0%">invisible transparent evidence</main>`,
 		"closed-details-body":       `<!doctype html><main><details><p>invisible collapsed evidence</p></details></main>`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -485,6 +486,43 @@ func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 	}
 	if got, ready := researchPresentation(root, "empty/SOURCE.md"); !ready || got == "" {
 		t.Fatalf("researchPresentation() = %q, %v; non-zero opacity must remain admitted", got, ready)
+	}
+
+	if err := os.WriteFile(presentation, []byte(`<!doctype html><main style="opacity: 90%">Visible percent-opacity evidence</main>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, ready := researchPresentation(root, "empty/SOURCE.md"); !ready || got == "" {
+		t.Fatalf("researchPresentation() = %q, %v; non-zero percent opacity must remain admitted", got, ready)
+	}
+}
+
+func TestDashClearJSONPreservesNewerRequest(t *testing.T) {
+	raw, err := os.ReadFile("assets/dash.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(raw), "  function clearJSON(path, request)")
+	end := strings.Index(string(raw), "  function postJSON(path, body)")
+	if start < 0 || end <= start {
+		t.Fatal("could not isolate dashboard JSON eviction helper")
+	}
+	vm := goja.New()
+	if _, err := vm.RunString("var inFlightJSON = {};\n" + string(raw[start:end])); err != nil {
+		t.Fatalf("load JSON eviction helper: %v", err)
+	}
+	value, err := vm.RunString(`
+var stale = {}, current = {};
+inFlightJSON["/api/work-timeline"] = current;
+clearJSON("/api/work-timeline", stale);
+var preserved = inFlightJSON["/api/work-timeline"] === current;
+clearJSON("/api/work-timeline", current);
+preserved && inFlightJSON["/api/work-timeline"] === undefined;
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value.ToBoolean() {
+		t.Fatal("stale timeout evicted a newer request or current timeout failed to evict itself")
 	}
 }
 
@@ -640,7 +678,7 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "MessageChannel", "flotilla-presentation-probe", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "decisionCardMarkup", "presentationLoadTimeoutMS", "showPresentationUnavailable", "MessageChannel", "flotilla-presentation-probe", "research-presentation-status", "Presentation preview unavailable", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation", `frame.setAttribute("inert", "")`, `frame.removeAttribute("inert")`} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

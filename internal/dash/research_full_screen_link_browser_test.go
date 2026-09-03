@@ -80,7 +80,11 @@ def prepare(page):
 def assert_ready(page, document_id, expected_path):
     page.goto(url + "/research/" + document_id, wait_until="domcontentloaded")
     expect(page.locator("#research-document")).to_be_visible()
-    expect(page.locator("#research-presentation")).to_be_visible()
+    frame = page.locator("#research-presentation")
+    expect(frame).to_be_visible()
+    assert frame.get_attribute("inert") is None
+    assert frame.get_attribute("aria-hidden") is None
+    assert frame.get_attribute("tabindex") is None
     links = page.locator(".research-full-screen-link")
     expect(links).to_have_count(2)
     for link in links.all():
@@ -106,15 +110,17 @@ with sync_playwright() as p:
             assert_ready(page, "decision-ready/SOURCE.md", "/research-presentations/decision-ready/presentation/index.html")
 
             page.route("**/research-presentations/decision-ready/presentation/index.html", lambda route: route.abort())
-            page.evaluate("window.FLOTILLA_PRESENTATION_TIMEOUT_MS = 100")
+            page.add_init_script('if (location.pathname === "/research/decision-ready/SOURCE.md") window.FLOTILLA_PRESENTATION_TIMEOUT_MS = 100')
             page.goto(url + "/research/decision-ready/SOURCE.md", wait_until="domcontentloaded")
             expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
             expect(page.locator("#research-presentation")).to_be_hidden()
             expect(page.locator("#research-presentation-stage")).to_be_visible()
             expect(page.locator("#research-body")).to_be_visible()
             expect(page.locator("#research-body")).to_contain_text("The source remains available")
+            expect(page.locator("#research-presentation")).to_have_attribute("inert", "")
+            expect(page.locator("#research-presentation")).to_have_attribute("aria-hidden", "true")
+            expect(page.locator("#research-presentation")).to_have_attribute("tabindex", "-1")
 
-            page.evaluate("window.FLOTILLA_PRESENTATION_TIMEOUT_MS = 5000")
             page.goto(url + "/research/stylesheet-hidden/SOURCE.md", wait_until="domcontentloaded")
             expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
             expect(page.locator("#research-presentation")).to_be_hidden()

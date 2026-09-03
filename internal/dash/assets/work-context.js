@@ -111,13 +111,14 @@
     return new Promise(function (resolve, reject) {
       var settled = false;
       var timeoutMS = timelineLoadTimeoutMS();
+      var request = D.getJSON(path);
       var timer = setTimeout(function () {
         if (settled) return;
         settled = true;
-        if (D.clearJSON) D.clearJSON(path);
+        if (D.clearJSON) D.clearJSON(path, request);
         reject(new Error("Timeline sources did not respond within " + timeoutMS + "ms."));
       }, timeoutMS);
-      D.getJSON(path).then(function (doc) {
+      request.then(function (doc) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);

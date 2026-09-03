@@ -39,8 +39,8 @@
     request.then(clear, clear);
     return request;
   }
-  function clearJSON(path) {
-    delete inFlightJSON[path];
+  function clearJSON(path, request) {
+    if (inFlightJSON[path] === request) delete inFlightJSON[path];
   }
 
   function postJSON(path, body) {

@@ -823,6 +823,9 @@
     frame.title = doc.title + " presentation";
     frame.hidden = false;
     frame.classList.add("is-probing");
+    frame.setAttribute("inert", "");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("tabindex", "-1");
     status.hidden = false;
     status.classList.add("is-probing");
     status.classList.remove("error");
@@ -837,6 +840,9 @@
       if (!ready) { showPresentationUnavailable(frame, status); return; }
       currentRendered = null;
       frame.classList.remove("is-probing");
+      frame.removeAttribute("inert");
+      frame.removeAttribute("aria-hidden");
+      frame.removeAttribute("tabindex");
       status.classList.remove("is-probing");
       status.hidden = true;
     }

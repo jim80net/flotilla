@@ -371,7 +371,14 @@ func researchPresentationInlineStyleHidden(style string) bool {
 				return true
 			}
 		case "opacity":
+			percent := strings.HasSuffix(value, "%")
+			if percent {
+				value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
+			}
 			opacity, err := strconv.ParseFloat(value, 64)
+			if percent {
+				opacity /= 100
+			}
 			if err == nil && opacity <= 0 {
 				return true
 			}
