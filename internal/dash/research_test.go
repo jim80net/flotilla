@@ -135,6 +135,22 @@ func TestDecisionCardMarkupBalancesNestedEmphasisAtTruncationBoundary(t *testing
 	}
 }
 
+func TestDecisionCardMarkupDropsNestedOpenerCutInsideStrong(t *testing.T) {
+	vm := researchDecisionFormatterVM(t)
+	brief := "**" + strings.Repeat("A", 172) + "*nested trailing copy forces truncation"
+	value, err := vm.RunString("decisionCardMarkup(" + strconv.Quote(brief) + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := value.String()
+	if innerText := researchRenderedText(t, markup); strings.Contains(innerText, "*") {
+		t.Fatalf("nested opener cut inside strong leaks Markdown: %q (markup %q)", innerText, markup)
+	}
+	if !strings.Contains(markup, "<strong>") {
+		t.Fatalf("outer emphasis must remain balanced after nested opener repair: %q", markup)
+	}
+}
+
 func TestDecisionBriefFieldPreservesFollowingBoldLabel(t *testing.T) {
 	vm := researchDecisionFormatterVM(t)
 	tail := " **Safe default:** Keep the reversible setting."

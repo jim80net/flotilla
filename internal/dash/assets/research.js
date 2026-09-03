@@ -282,10 +282,9 @@
       var lastSpace = cut.lastIndexOf(" ");
       if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
       markdown = cut.trim();
-      // Repair an unmatched strong span using only its own suffix. A terminal
-      // single marker is a partial strong closer only when it does not close a
-      // nested emphasis pair; balanced nested emphasis is flattened before the
-      // outer closer is appended because inline() deliberately stays shallow.
+      // Repair an unmatched strong span using only its own suffix. Remove the
+      // last unpaired single marker wherever the cut left it, then flatten any
+      // balanced nested emphasis before closing the deliberately shallow span.
       [["**", "*"], ["__", "_"]].forEach(function (pair) {
         var count = markdown.split(pair[0]).length - 1;
         if (!(count % 2)) return;
@@ -293,7 +292,10 @@
         var prefix = markdown.slice(0, openAt + pair[0].length);
         var suffix = markdown.slice(openAt + pair[0].length);
         var singles = suffix.split(pair[1]).length - 1;
-        if (singles % 2 && suffix.slice(-1) === pair[1]) suffix = suffix.slice(0, -1);
+        if (singles % 2) {
+          var unmatchedAt = suffix.lastIndexOf(pair[1]);
+          suffix = suffix.slice(0, unmatchedAt) + suffix.slice(unmatchedAt + pair[1].length);
+        }
         var nested = pair[1] === "*" ? /\*([^*]+)\*/g : /_([^_]+)_/g;
         markdown = prefix + suffix.replace(nested, "$1") + pair[0];
       });
