@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/sys/unix"
@@ -481,17 +482,17 @@ func researchSummary(markdown string) string {
 			continue
 		}
 		if inFence || line == "" || line == "---" || strings.HasPrefix(line, "#") ||
-			strings.HasPrefix(line, "|") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") ||
+			strings.HasPrefix(line, "|") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "* ") ||
 			strings.HasPrefix(line, ">") || (line[0] >= '0' && line[0] <= '9') {
 			continue
 		}
-		line = strings.Trim(line, "*_` ")
+		line = strings.TrimSpace(line)
 		if line == "" || strings.Contains(line, ":**") {
 			continue
 		}
-		// Catalog cards render summaries as plain text. Remove inline Markdown
-		// delimiters before the byte limit can separate an opener from its closer.
-		line = strings.NewReplacer("*", "", "_", "", "`", "", "~", "").Replace(line)
+		// Catalog cards render summaries as plain text. Normalize inline Markdown
+		// before the byte limit can separate an opener from its closer.
+		line = researchSummaryPlainText(line)
 		const max = 220
 		if len(line) > max {
 			line = strings.TrimSpace(line[:max-1]) + "…"
@@ -499,6 +500,36 @@ func researchSummary(markdown string) string {
 		return line
 	}
 	return ""
+}
+
+func researchSummaryPlainText(line string) string {
+	runes := []rune(line)
+	var plain strings.Builder
+	for i := 0; i < len(runes); {
+		marker := runes[i]
+		if marker != '*' && marker != '_' && marker != '`' && marker != '~' {
+			plain.WriteRune(marker)
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(runes) && runes[end] == marker {
+			end++
+		}
+		leftWord := i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsNumber(runes[i-1]))
+		rightWord := end < len(runes) && (unicode.IsLetter(runes[end]) || unicode.IsNumber(runes[end]))
+		if leftWord && rightWord {
+			plain.WriteString(string(runes[i:end]))
+		} else {
+			leftSpace := i == 0 || unicode.IsSpace(runes[i-1])
+			rightSpace := end == len(runes) || unicode.IsSpace(runes[end])
+			if leftSpace && rightSpace {
+				plain.WriteString(string(runes[i:end]))
+			}
+		}
+		i = end
+	}
+	return strings.TrimSpace(plain.String())
 }
 
 func parseResearchPublication(markdown string) (ResearchPublication, []ResearchDiagnostic) {

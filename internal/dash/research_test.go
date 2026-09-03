@@ -30,18 +30,32 @@ func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
 }
 
 func TestResearchCatalogSummaryDoesNotExposeStrongMarkers(t *testing.T) {
-	for name, markdown := range map[string]string{
-		"unmatched-strong-opener":  "# Catalog paper\n\nThe operating boundary was hit.** Three independent fields remain visible.",
-		"unmatched-inline-markers": "# Catalog paper\n\nA useful catalog summary with *open emphasis, _open alternate, `open code, and ~open strike.",
-		"strong-closer-after-cut":  "# Catalog paper\n\n" + strings.Repeat("A", 200) + " **" + strings.Repeat("B", 30) + "** trailing copy.",
+	cutSummary := strings.Repeat("A", 200) + " " + strings.Repeat("B", 18) + "…"
+	for name, tc := range map[string]struct {
+		markdown string
+		want     string
+	}{
+		"unmatched-strong-opener": {
+			"# Catalog paper\n\nThe operating boundary was hit.** Three independent fields remain visible.",
+			"The operating boundary was hit. Three independent fields remain visible.",
+		},
+		"unmatched-inline-markers": {
+			"# Catalog paper\n\nA useful catalog summary with *open emphasis, _open alternate, `open code, and ~open strike.",
+			"A useful catalog summary with open emphasis, open alternate, open code, and open strike.",
+		},
+		"strong-closer-after-cut": {
+			"# Catalog paper\n\n" + strings.Repeat("A", 200) + " **" + strings.Repeat("B", 30) + "** trailing copy.",
+			cutSummary,
+		},
+		"literal-identifiers-and-paired-emphasis": {
+			"# Catalog paper\n\nIdentifiers snake_case_value and path_with_id keep **bold words** and _italic words_ as prose.",
+			"Identifiers snake_case_value and path_with_id keep bold words and italic words as prose.",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			summary := researchEntry("catalog.md", markdown, time.Now()).Summary
-			if strings.ContainsAny(summary, "*_`~") {
-				t.Fatalf("catalog card inner text exposes Markdown markers: %q", summary)
-			}
-			if summary == "" {
-				t.Fatal("catalog summary unexpectedly empty")
+			summary := researchEntry("catalog.md", tc.markdown, time.Now()).Summary
+			if summary != tc.want {
+				t.Fatalf("catalog card inner text = %q, want %q", summary, tc.want)
 			}
 		})
 	}
