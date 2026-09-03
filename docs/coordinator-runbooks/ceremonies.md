@@ -73,3 +73,8 @@ in durable state, dispatch a one-line ask to the owning XO — don't trawl trans
 
 Edit `<roster-dir>/schedules/*.md` when ceremony shape changes — the daemon injects
 what's on disk.
+
+When a ceremony prompt cites a required local artifact, declare it at the top of
+the prompt with `<!-- flotilla:require-file ../relative/path.md -->`. The daemon
+will not dispatch the prompt or consume its scheduled occurrence while that
+file is missing.

@@ -49,6 +49,13 @@ running process until that restart.
 Delivery uses the same injector path as change-detector wakes (`KindDetector` —
 dropped when the target pane is busy, re-evaluated on the next poll).
 
+A prompt file can declare a local dependency with
+`<!-- flotilla:require-file ../recipes/capture.md -->`. Relative requirements
+resolve from the prompt file's directory. If a requirement is missing or names
+a directory, the scheduler fails closed: it logs the error, does not enqueue the
+dispatch, and does not advance `last_fired`, so a later poll can recover after
+the file is restored.
+
 ## Prerequisites
 
 1. **Install the binary:** `go install github.com/jim80net/flotilla/cmd/flotilla@latest` (or `go install ./cmd/flotilla` from a checkout) → `~/go/bin/flotilla`.
