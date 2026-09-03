@@ -47,6 +47,14 @@ The source remains available inside the reading room.
 			t.Fatal(err)
 		}
 	}
+	writeResearchFixture(t, root, "stylesheet-hidden/SOURCE.md", "# Stylesheet hidden paper\n\nThe source remains available when the presentation is not visible.\n\n## Evidence\n\nThe preview has no painted evidence.\n\n## Next step\n\nRead the source instead.\n", time.Now())
+	hiddenPresentation := filepath.Join(root, "stylesheet-hidden", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(hiddenPresentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hiddenPresentation, []byte(`<!doctype html><style>main { display:none }</style><main>Invisible styled evidence</main>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeResearchFixture(t, root, "source-only.md", "# Source-only paper\n\nNo presentation package exists.\n", time.Now())
 
 	httpServer := httptest.NewServer(srv.mux)
@@ -72,7 +80,12 @@ def prepare(page):
 def assert_ready(page, document_id, expected_path):
     page.goto(url + "/research/" + document_id, wait_until="domcontentloaded")
     expect(page.locator("#research-document")).to_be_visible()
-    expect(page.locator("#research-presentation")).to_be_visible()
+    frame = page.locator("#research-presentation")
+    expect(frame).to_be_visible()
+    expect(page.locator("#research-presentation-status")).to_be_hidden()
+    assert frame.get_attribute("inert") is None
+    assert frame.get_attribute("aria-hidden") is None
+    assert frame.get_attribute("tabindex") is None
     links = page.locator(".research-full-screen-link")
     expect(links).to_have_count(2)
     for link in links.all():
@@ -96,6 +109,26 @@ with sync_playwright() as p:
             prepare(page)
             assert_ready(page, "research-ready/SOURCE.md", "/research-presentations/research-ready/presentation/index.html")
             assert_ready(page, "decision-ready/SOURCE.md", "/research-presentations/decision-ready/presentation/index.html")
+
+            page.route("**/research-presentations/decision-ready/presentation/index.html", lambda route: route.abort())
+            page.add_init_script('if (location.pathname === "/research/decision-ready/SOURCE.md") window.FLOTILLA_PRESENTATION_TIMEOUT_MS = 100')
+            page.goto(url + "/research/decision-ready/SOURCE.md", wait_until="domcontentloaded")
+            expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
+            expect(page.locator("#research-presentation")).to_be_hidden()
+            expect(page.locator("#research-presentation-stage")).to_be_visible()
+            expect(page.locator("#research-body")).to_be_visible()
+            expect(page.locator("#research-body")).to_contain_text("The source remains available")
+            expect(page.locator("#research-presentation")).to_have_attribute("inert", "")
+            expect(page.locator("#research-presentation")).to_have_attribute("aria-hidden", "true")
+            expect(page.locator("#research-presentation")).to_have_attribute("tabindex", "-1")
+
+            page.goto(url + "/research/stylesheet-hidden/SOURCE.md", wait_until="domcontentloaded")
+            expect(page.locator("#research-presentation-status")).to_contain_text("Presentation preview unavailable")
+            expect(page.locator("#research-presentation")).to_be_hidden()
+            expect(page.locator("#research-presentation-stage")).to_be_visible()
+            expect(page.locator("#research-body")).to_be_visible()
+            expect(page.locator("#research-body")).to_contain_text("The source remains available")
+            expect(page.locator("#research-toc")).to_be_visible()
 
             page.goto(url + "/research/source-only.md", wait_until="domcontentloaded")
             expect(page.locator("#research-document")).to_be_visible()

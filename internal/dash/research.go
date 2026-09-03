@@ -7,10 +7,12 @@ package dash
 // request-derived paths never become readable host files.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -18,13 +20,17 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
 	"golang.org/x/sys/unix"
 )
 
 const maxResearchDocumentBytes = 4 << 20
+
+const researchPresentationProbeMarker = `data-flotilla-presentation-probe`
 
 type ResearchEntry struct {
 	ID                string               `json:"id"`
@@ -255,14 +261,139 @@ func researchPresentation(root, sourceID string) (string, bool) {
 		return "", false
 	}
 	presentationID := path.Join(path.Dir(sourceID), "presentation", "index.html")
-	file, _, found, err := openResearchPresentation(root, presentationID)
+	file, info, found, err := openResearchPresentation(root, presentationID)
 	if file != nil {
-		_ = file.Close()
+		defer file.Close()
 	}
-	if err != nil || !found {
+	if err != nil || !found || !usableResearchPresentation(file, info) {
 		return "", false
 	}
 	return "/research-presentations/" + presentationID, true
+}
+
+// usableResearchPresentation is the package admission boundary for an embedded
+// preview. A successful iframe load is only transport evidence: empty HTML and
+// non-rendering DOM also load, but render the blank slab this gate exists to
+// prevent. Parse the HTML tree and require substantive rendered text inside a
+// presentation-shaped region before advertising it as ready.
+func usableResearchPresentation(file *os.File, info os.FileInfo) bool {
+	if file == nil || info == nil || info.Size() <= 0 || info.Size() > maxResearchDocumentBytes {
+		return false
+	}
+	doc, err := html.Parse(io.LimitReader(file, maxResearchDocumentBytes+1))
+	if err != nil {
+		return false
+	}
+	return len([]rune(strings.Join(strings.Fields(researchPresentationVisibleText(doc, false)), " "))) >= 8
+}
+
+func researchPresentationVisibleText(node *html.Node, inPresentation bool) string {
+	if node.Type == html.ElementNode {
+		// Non-HTML namespaces need their own rendering model (for example SVG
+		// defs versus text). Do not guess that their text nodes paint pixels.
+		if node.Namespace != "" || researchPresentationNodeHidden(node) {
+			return ""
+		}
+		switch node.Data {
+		case "main", "section", "article":
+			inPresentation = true
+		}
+	}
+	if node.Type == html.TextNode {
+		if inPresentation {
+			return node.Data
+		}
+		return ""
+	}
+	var text strings.Builder
+	closedDetails := node.Type == html.ElementNode && node.Data == "details" && !researchPresentationHasAttr(node, "open", "")
+	visibleSummarySeen := false
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if closedDetails {
+			if child.Type != html.ElementNode || child.Data != "summary" || visibleSummarySeen {
+				continue
+			}
+			visibleSummarySeen = true
+		}
+		text.WriteString(researchPresentationVisibleText(child, inPresentation))
+		text.WriteByte(' ')
+	}
+	return text.String()
+}
+
+func researchPresentationNodeHidden(node *html.Node) bool {
+	switch node.Data {
+	case "head", "title", "script", "style", "template", "noscript", "noembed", "noframes", "datalist",
+		"iframe", "object", "embed", "canvas", "audio", "video", "source", "track", "param", "rp":
+		return true
+	case "dialog":
+		if !researchPresentationHasAttr(node, "open", "") {
+			return true
+		}
+	case "input":
+		if researchPresentationHasAttr(node, "type", "hidden") {
+			return true
+		}
+	}
+	for _, attr := range node.Attr {
+		if attr.Key == "hidden" {
+			return true
+		}
+		if attr.Key == "style" {
+			if researchPresentationInlineStyleHidden(attr.Val) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func researchPresentationInlineStyleHidden(style string) bool {
+	for _, declaration := range strings.Split(style, ";") {
+		property, value, ok := strings.Cut(declaration, ":")
+		if !ok {
+			continue
+		}
+		property = strings.ToLower(strings.TrimSpace(property))
+		value = strings.ToLower(strings.TrimSpace(value))
+		value = strings.TrimSpace(strings.TrimSuffix(value, "!important"))
+		switch property {
+		case "display":
+			if value == "none" {
+				return true
+			}
+		case "visibility":
+			if value == "hidden" || value == "collapse" {
+				return true
+			}
+		case "content-visibility":
+			if value == "hidden" {
+				return true
+			}
+		case "opacity":
+			percent := strings.HasSuffix(value, "%")
+			if percent {
+				value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
+			}
+			opacity, err := strconv.ParseFloat(value, 64)
+			if percent {
+				opacity /= 100
+			}
+			if err == nil && opacity <= 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func researchPresentationHasAttr(node *html.Node, key, value string) bool {
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, key) && (value == "" || strings.EqualFold(strings.TrimSpace(attr.Val), value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func openResearchVideo(root, id string) (*os.File, os.FileInfo, bool, error) {
@@ -855,7 +986,8 @@ func (s *Server) handleResearchVideo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Request) {
-	file, info, found, err := openResearchPresentation(s.cfg.ResearchPath, r.PathValue("id"))
+	id := r.PathValue("id")
+	file, info, found, err := openResearchPresentation(s.cfg.ResearchPath, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
 		return
@@ -874,7 +1006,71 @@ func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Reque
 	if strings.EqualFold(filepath.Ext(info.Name()), ".html") {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
 	}
+	if path.Base(id) == "index.html" && info.Size() <= maxResearchDocumentBytes {
+		body, readErr := io.ReadAll(io.LimitReader(file, maxResearchDocumentBytes+1))
+		if readErr != nil || len(body) > maxResearchDocumentBytes {
+			writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
+			return
+		}
+		probe, probeErr := assetsFS.ReadFile("assets/research-presentation-ready.js")
+		if probeErr != nil {
+			writeError(w, http.StatusInternalServerError, "the research presentation readiness probe is unavailable")
+			return
+		}
+		body = injectResearchPresentationProbe(body, probe)
+		http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(body))
+		return
+	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func injectResearchPresentationProbe(body, script []byte) []byte {
+	probe := make([]byte, 0, len(script)+64)
+	probe = append(probe, `<script data-flotilla-presentation-probe>`...)
+	probe = append(probe, script...)
+	probe = append(probe, `</script>`...)
+	at := researchPresentationProbeInsertion(body)
+	if at < 0 || at > len(body) {
+		at = 0
+	}
+	result := make([]byte, 0, len(body)+len(probe))
+	result = append(result, body[:at]...)
+	result = append(result, probe...)
+	result = append(result, body[at:]...)
+	return result
+}
+
+// researchPresentationProbeInsertion keeps a leading HTML5 doctype (and any
+// preceding whitespace/comments) ahead of the inspector so standards mode is
+// preserved. Otherwise the inspector is byte zero. In both cases the bridge is
+// ready before package startup and before the outer viewer sends its probe.
+func researchPresentationProbeInsertion(body []byte) int {
+	offset := 0
+	if bytes.HasPrefix(body, []byte{0xef, 0xbb, 0xbf}) {
+		offset = 3
+	}
+	for offset < len(body) {
+		for offset < len(body) && strings.ContainsRune(" \t\r\n\f", rune(body[offset])) {
+			offset++
+		}
+		if !bytes.HasPrefix(body[offset:], []byte("<!--")) {
+			break
+		}
+		end := bytes.Index(body[offset+4:], []byte("-->"))
+		if end < 0 {
+			return 0
+		}
+		offset += 4 + end + 3
+	}
+	const doctype = "<!doctype"
+	if len(body)-offset < len(doctype) || !bytes.EqualFold(body[offset:offset+len(doctype)], []byte(doctype)) {
+		return 0
+	}
+	end := bytes.IndexByte(body[offset+len(doctype):], '>')
+	if end < 0 {
+		return 0
+	}
+	return offset + len(doctype) + end + 1
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {

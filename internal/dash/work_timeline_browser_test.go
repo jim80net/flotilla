@@ -59,9 +59,13 @@ def event(i):
 
 long_events = [event(i) for i in range(28)]
 earlier_attempts = {"count": 0}
+hung_attempts = {"count": 0}
 
 def timeline(route):
     query = parse_qs(urlparse(route.request.url).query)
+    if query.get("issue") == ["46"] and hung_attempts["count"] == 0:
+        hung_attempts["count"] += 1
+        return
     if query.get("goal") == ["goal-long"]:
         before = query.get("before", [""])[0]
         if before and earlier_attempts["count"] == 0:
@@ -156,6 +160,7 @@ with sync_playwright() as p:
     try:
         for width, height in [(390, 844), (1440, 900)]:
             earlier_attempts["count"] = 0
+            hung_attempts["count"] = 0
             page = browser.new_page(viewport={"width":width,"height":height})
             prepare(page)
             page.goto(url, wait_until="domcontentloaded")
@@ -198,6 +203,16 @@ with sync_playwright() as p:
             expect(page.locator("#wc-timeline-summary")).to_have_text("No recorded facts")
             expect(page.locator(".wc-timeline-empty")).to_contain_text("No timeline facts")
             expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(0)
+
+            page.evaluate("window.FLOTILLA_TIMELINE_TIMEOUT_MS = 100")
+            open_issue(page, 46)
+            expect(page.locator("#wc-timeline-summary")).to_have_text("No matched facts · partial coverage")
+            expect(page.locator(".wc-source-unavailable")).to_contain_text("Timeline composer")
+            expect(page.locator("#wc-timeline")).not_to_contain_text("Loading")
+            page.evaluate("window.FLOTILLA_TIMELINE_TIMEOUT_MS = 5000")
+            page.evaluate("window.flotillaWorkContext.refresh()")
+            expect(page.locator("#wc-timeline-summary")).to_have_text("No recorded facts")
+            expect(page.locator("#wc-timeline")).not_to_contain_text("Loading")
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             if evidence_dir:
                 page.screenshot(path=os.path.join(evidence_dir, "work-timeline-empty-%d.png" % width), full_page=False)

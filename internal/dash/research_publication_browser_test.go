@@ -40,7 +40,7 @@ This generic report contains substantive evidence for the operator.
 	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Valid evidence showpiece</title><p>Generic presentation.</p>"), 0o600); err != nil {
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Valid evidence showpiece</title><main><p>Generic presentation.</p></main>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeResearchFixture(t, root, "archival.md", `<!-- flotilla-publication

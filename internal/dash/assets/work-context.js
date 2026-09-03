@@ -19,6 +19,9 @@
   var timelineNext = "";
   var timelineSources = [];
   var timelineEarlierError = "";
+  function timelineLoadTimeoutMS() {
+    return Math.max(100, Number(window.FLOTILLA_TIMELINE_TIMEOUT_MS) || 5000);
+  }
   var pollTimer = null;
   var ageTimer = null;
   var returnFocus = null;
@@ -104,6 +107,31 @@
     earlier.textContent = timelineEarlierError ? "Retry earlier history" : "Show earlier history";
   }
 
+  function timelineJSON(path) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timeoutMS = timelineLoadTimeoutMS();
+      var request = D.getJSON(path);
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        if (D.clearJSON) D.clearJSON(path, request);
+        reject(new Error("Timeline sources did not respond within " + timeoutMS + "ms."));
+      }, timeoutMS);
+      request.then(function (doc) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(doc);
+      }, function (err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
   function fetchTimeline(reset) {
     if (!panelOpen()) return Promise.resolve();
     var before = reset ? "" : timelineNext;
@@ -125,7 +153,7 @@
       el("wc-timeline-earlier").disabled = true;
       el("wc-timeline-earlier").textContent = "Loading earlier history…";
     }
-    return D.getJSON(path).then(function (doc) {
+    return timelineJSON(path).then(function (doc) {
       if (!panelOpen() || epoch !== timelineEpoch ||
           subjectID !== String(subject().id || subject().number || "")) return;
       var incoming = Array.isArray(doc.events) ? doc.events : [];

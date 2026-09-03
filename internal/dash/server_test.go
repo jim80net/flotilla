@@ -2338,7 +2338,8 @@ func TestIssuesWorkContext716(t *testing.T) {
 		`D.onLiveUpdate`, `D.routeMessage`, `D.routeOutcomeCopy`,
 		`no live seat mapped`, `composer.hidden = true`, `requestAnimationFrame`,
 		`/api/issues/`, `fetchIssueOnce(); // GitHub is external`, `fetchMirror(loadedAll`,
-		`streamPinned`, `onViewChange`, `"opened "`,
+		`streamPinned`, `onViewChange`, `"opened "`, `timelineLoadTimeoutMS`,
+		`Timeline sources did not respond within`, `D.clearJSON(path, request)`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("work-context.js must preserve the #716 contract (missing %q)", marker)
@@ -2349,7 +2350,7 @@ func TestIssuesWorkContext716(t *testing.T) {
 		t.Error("Work Context must retain an entry point to the full GitHub write surface")
 	}
 	dashJS := doGet(t, srv, "/static/dash.js").Body.String()
-	for _, marker := range []string{"renderMirrorEntries", "routeMessage", "routeOutcomeCopy", "onLiveUpdate"} {
+	for _, marker := range []string{"renderMirrorEntries", "routeMessage", "routeOutcomeCopy", "onLiveUpdate", "clearJSON: clearJSON", "inFlightJSON[path] === request"} {
 		if !strings.Contains(dashJS, marker) {
 			t.Errorf("dash.js must expose shared Conversations primitives for #716 (missing %q)", marker)
 		}
