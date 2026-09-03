@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"io/fs"
 	"mime"
@@ -19,21 +18,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
+	"golang.org/x/net/html"
 	"golang.org/x/sys/unix"
 )
 
 const maxResearchDocumentBytes = 4 << 20
-
-var (
-	researchPresentationStructure = regexp.MustCompile(`(?i)<(?:main|section|article)\b`)
-	researchPresentationNonBody   = regexp.MustCompile(`(?is)<!--.*?-->|<head\b[^>]*>.*?</head\s*>|<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>`)
-	researchPresentationTag       = regexp.MustCompile(`(?s)<[^>]*>`)
-)
 
 type ResearchEntry struct {
 	ID                string               `json:"id"`
@@ -276,21 +270,96 @@ func researchPresentation(root, sourceID string) (string, bool) {
 
 // usableResearchPresentation is the package admission boundary for an embedded
 // preview. A successful iframe load is only transport evidence: empty HTML and
-// head/script-only shells also load, but render the blank slab this gate exists
-// to prevent. Require a bounded document with a presentation-shaped body and
-// substantive visible copy before advertising it as ready.
+// non-rendering DOM also load, but render the blank slab this gate exists to
+// prevent. Parse the HTML tree and require substantive rendered text inside a
+// presentation-shaped region before advertising it as ready.
 func usableResearchPresentation(file *os.File, info os.FileInfo) bool {
 	if file == nil || info == nil || info.Size() <= 0 || info.Size() > maxResearchDocumentBytes {
 		return false
 	}
-	body, err := io.ReadAll(io.LimitReader(file, maxResearchDocumentBytes+1))
-	if err != nil || len(body) == 0 || len(body) > maxResearchDocumentBytes || !researchPresentationStructure.Match(body) {
+	doc, err := html.Parse(io.LimitReader(file, maxResearchDocumentBytes+1))
+	if err != nil {
 		return false
 	}
-	visible := researchPresentationNonBody.ReplaceAllString(string(body), " ")
-	visible = researchPresentationTag.ReplaceAllString(visible, " ")
-	visible = html.UnescapeString(visible)
-	return len([]rune(strings.Join(strings.Fields(visible), " "))) >= 8
+	return len([]rune(strings.Join(strings.Fields(researchPresentationVisibleText(doc, false)), " "))) >= 8
+}
+
+func researchPresentationVisibleText(node *html.Node, inPresentation bool) string {
+	if node.Type == html.ElementNode {
+		// Non-HTML namespaces need their own rendering model (for example SVG
+		// defs versus text). Do not guess that their text nodes paint pixels.
+		if node.Namespace != "" || researchPresentationNodeHidden(node) {
+			return ""
+		}
+		switch node.Data {
+		case "main", "section", "article":
+			inPresentation = true
+		}
+	}
+	if node.Type == html.TextNode {
+		if inPresentation {
+			return node.Data
+		}
+		return ""
+	}
+	var text strings.Builder
+	closedDetails := node.Type == html.ElementNode && node.Data == "details" && !researchPresentationHasAttr(node, "open", "")
+	visibleSummarySeen := false
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if closedDetails {
+			if child.Type != html.ElementNode || child.Data != "summary" || visibleSummarySeen {
+				continue
+			}
+			visibleSummarySeen = true
+		}
+		text.WriteString(researchPresentationVisibleText(child, inPresentation))
+		text.WriteByte(' ')
+	}
+	return text.String()
+}
+
+func researchPresentationNodeHidden(node *html.Node) bool {
+	switch node.Data {
+	case "head", "title", "script", "style", "template", "noscript", "noembed", "noframes", "datalist",
+		"iframe", "object", "embed", "canvas", "audio", "video", "source", "track", "param", "rp":
+		return true
+	case "dialog":
+		if !researchPresentationHasAttr(node, "open", "") {
+			return true
+		}
+	case "input":
+		if researchPresentationHasAttr(node, "type", "hidden") {
+			return true
+		}
+	}
+	for _, attr := range node.Attr {
+		if attr.Key == "hidden" {
+			return true
+		}
+		if attr.Key == "style" {
+			style := strings.ToLower(strings.Map(func(r rune) rune {
+				if unicode.IsSpace(r) {
+					return -1
+				}
+				return r
+			}, attr.Val))
+			if strings.Contains(style, "display:none") || strings.Contains(style, "visibility:hidden") ||
+				strings.Contains(style, "visibility:collapse") || strings.Contains(style, "content-visibility:hidden") ||
+				strings.Contains(style, "opacity:0") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func researchPresentationHasAttr(node *html.Node, key, value string) bool {
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, key) && (value == "" || strings.EqualFold(strings.TrimSpace(attr.Val), value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func openResearchVideo(root, id string) (*os.File, os.FileInfo, bool, error) {

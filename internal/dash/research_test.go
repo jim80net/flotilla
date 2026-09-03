@@ -386,9 +386,16 @@ func TestW11EmptyPresentationMustNotBeReady(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"zero-byte":        "",
-		"empty-body":       `<!doctype html><html><head><title>Empty shell</title></head><body><main></main></body></html>`,
-		"script-only-body": `<!doctype html><main><script>document.body.dataset.loaded = "true"</script></main>`,
+		"zero-byte":                 "",
+		"empty-body":                `<!doctype html><html><head><title>Empty shell</title></head><body><main></main></body></html>`,
+		"script-only-body":          `<!doctype html><main><script>document.body.dataset.loaded = "true"</script></main>`,
+		"unclosed-script-only-body": `<!doctype html><main><script>invisible script evidence`,
+		"template-only-body":        `<!doctype html><main><template>invisible template evidence</template></main>`,
+		"title-only-body":           `<!doctype html><main><title>invisible title evidence</title></main>`,
+		"svg-definitions-only-body": `<!doctype html><main><svg><defs><text>invisible vector evidence</text></defs></svg></main>`,
+		"hidden-body":               `<!doctype html><main hidden>invisible hidden evidence</main>`,
+		"inline-style-hidden-body":  "<!doctype html><main style=\"display :\tnone\">invisible styled evidence</main>",
+		"closed-details-body":       `<!doctype html><main><details><p>invisible collapsed evidence</p></details></main>`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := os.WriteFile(presentation, []byte(body), 0o600); err != nil {
