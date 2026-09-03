@@ -1023,6 +1023,9 @@ func injectResearchPresentationProbe(body, script []byte) []byte {
 	probe = append(probe, script...)
 	probe = append(probe, `</script>`...)
 	at := researchPresentationProbeInsertion(body)
+	if at < 0 || at > len(body) {
+		at = 0
+	}
 	result := make([]byte, 0, len(body)+len(probe))
 	result = append(result, body[:at]...)
 	result = append(result, probe...)

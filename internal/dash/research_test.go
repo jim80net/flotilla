@@ -48,6 +48,13 @@ func TestResearchInlineMarkdownKeepsWordUnderscoresLiteral(t *testing.T) {
 	if got, want := value.String(), `snake_case_value and <em>visible emphasis</em>`; got != want {
 		t.Fatalf("inline markdown = %q, want %q", got, want)
 	}
+	value, err = vm.RunString(`inline("<img src=x onerror=alert(1)> **safe copy**")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := value.String(), `&lt;img src=x onerror=alert(1)&gt; <strong>safe copy</strong>`; got != want {
+		t.Fatalf("inline markdown must escape before formatting: got %q, want %q", got, want)
+	}
 }
 
 func TestResearchVideoAssetRangeAndBoundary(t *testing.T) {
