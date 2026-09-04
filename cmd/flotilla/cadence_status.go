@@ -233,10 +233,16 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 	}
 	type resolvedMember struct {
 		manifest cadenceManifestMember
-		path     string
+		artifact cadenceArtifactStatus
 	}
 	resolved := make([]resolvedMember, 0, len(manifest.Members))
 	artifactOwners := make(map[string]string, len(manifest.Members))
+	type existingArtifact struct {
+		owner string
+		path  string
+		info  os.FileInfo
+	}
+	existingArtifacts := make([]existingArtifact, 0, len(manifest.Members))
 	for _, member := range manifest.Members {
 		artifactPath, err := resolveCadenceArtifactPath(cfg, rosterDir, member)
 		if err != nil {
@@ -250,7 +256,19 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 			return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
 		}
 		artifactOwners[identity] = member.Coordinator
-		resolved = append(resolved, resolvedMember{manifest: member, path: artifactPath})
+		artifact, info, err := inspectCadenceArtifact(member.Coordinator, artifactPath, started)
+		if err != nil {
+			return cadenceStatusDoc{}, fmt.Errorf("cadence status: inspect artifact for %q: %w", member.Coordinator, err)
+		}
+		if info != nil {
+			for _, prior := range existingArtifacts {
+				if os.SameFile(prior.info, info) {
+					return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact file %q and %q", prior.owner, member.Coordinator, prior.path, artifactPath)
+				}
+			}
+			existingArtifacts = append(existingArtifacts, existingArtifact{owner: member.Coordinator, path: artifactPath, info: info})
+		}
+		resolved = append(resolved, resolvedMember{manifest: member, artifact: artifact})
 	}
 
 	completed := 0
@@ -269,7 +287,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 			receipt.Detail = fmt.Sprintf("durable recipient %q does not match expected coordinator %q or its adjutant", status.Recipient, member.Coordinator)
 		}
 		doc.DispatchReceipts = append(doc.DispatchReceipts, receipt)
-		artifact := inspectCadenceArtifact(member.Coordinator, resolvedMember.path, started)
+		artifact := resolvedMember.artifact
 		doc.RecursiveArtifactPaths = append(doc.RecursiveArtifactPaths, artifact)
 		if artifact.Current {
 			completed++
@@ -355,15 +373,21 @@ func cadenceReceiptRecipientAllowed(cfg *roster.Config, coordinator, recipient s
 	return false
 }
 
-func inspectCadenceArtifact(coordinator, path string, started time.Time) cadenceArtifactStatus {
+func inspectCadenceArtifact(coordinator, path string, started time.Time) (cadenceArtifactStatus, os.FileInfo, error) {
 	result := cadenceArtifactStatus{Coordinator: coordinator, Path: path}
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return result
+	if os.IsNotExist(err) {
+		return result, nil, nil
+	}
+	if err != nil {
+		return result, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return result, info, nil
 	}
 	result.Present = true
 	result.NonEmpty = info.Size() > 0
 	result.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339Nano)
 	result.Current = result.NonEmpty && !info.ModTime().Before(started)
-	return result
+	return result, info, nil
 }

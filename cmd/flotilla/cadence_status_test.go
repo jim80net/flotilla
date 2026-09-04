@@ -129,25 +129,37 @@ func TestCadenceStatusRejectsStaleArtifact(t *testing.T) {
 func TestCadenceStatusRejectsSharedArtifactIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		alias bool
+		alias string
 	}{
 		{name: "same-resolved-path"},
-		{name: "symlink-alias", alias: true},
+		{name: "symlink-alias", alias: "symlink"},
+		{name: "hard-link-alias", alias: "hardlink"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest, cfg, rosterDir, started := cadenceFixture(t)
 			backend, _ := cfg.Agent("backend")
 			manifest.Members[1].ArtifactPath = manifest.Members[0].ArtifactPath
-			if tc.alias {
+			writeCadenceArtifact(t, backend.WorktreePath, manifest.Members[0].ArtifactPath, started.Add(time.Minute))
+			switch tc.alias {
+			case "symlink":
 				alias := filepath.Join(t.TempDir(), "shared-worktree")
 				if err := os.Symlink(backend.WorktreePath, alias); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
 				}
 				cfg.Agents[2].WorktreePath = alias
-			} else {
+			case "hardlink":
+				frontend, _ := cfg.Agent("frontend")
+				source := filepath.Join(backend.WorktreePath, filepath.FromSlash(manifest.Members[0].ArtifactPath))
+				target := filepath.Join(frontend.WorktreePath, filepath.FromSlash(manifest.Members[1].ArtifactPath))
+				if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(source, target); err != nil {
+					t.Skipf("hard link unavailable: %v", err)
+				}
+			default:
 				cfg.Agents[2].WorktreePath = backend.WorktreePath
 			}
-			writeCadenceArtifact(t, backend.WorktreePath, manifest.Members[0].ArtifactPath, started.Add(time.Minute))
 			_, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
 			if err == nil || !strings.Contains(err.Error(), "same artifact") {
 				t.Fatalf("shared artifact error = %v", err)
