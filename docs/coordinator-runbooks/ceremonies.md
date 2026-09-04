@@ -69,6 +69,44 @@ From [`visibility.md`](../visibility.md) and the `visibility-synthesis` skill:
 Answer from durable artifacts (`fleet-backlog.md`, scorecards, PRs). If a fact isn't
 in durable state, dispatch a one-line ask to the owning XO — don't trawl transcripts.
 
+## Mechanical completion status
+
+For a recursive ceremony, write a versioned manifest at
+`<roster-dir>/cadences/<nonce>.json`, then inspect it with
+`flotilla cadence status <nonce> --json`. The command joins the declared membership
+to the durable dispatch ledgers and the expected files; it reports receipt state,
+resolved artifact paths, overdue coordinators, and a completion bar without asking
+an agent to reconstruct the ceremony from prose.
+
+```json
+{
+  "version": 1,
+  "nonce": "walk-2026-09-04",
+  "started_at": "2026-09-04T12:00:00Z",
+  "due_at": "2026-09-04T13:00:00Z",
+  "members": [
+    {
+      "coordinator": "backend",
+      "dispatch_nonce": "flotilla-dispatch-aabbccdd",
+      "artifact_path": "state/retros/inputs/backend-2026-09-04.md"
+    },
+    {
+      "coordinator": "frontend",
+      "dispatch_nonce": "flotilla-dispatch-eeff0011",
+      "artifact_path": "state/retros/inputs/frontend-2026-09-04.md"
+    }
+  ]
+}
+```
+
+Relative artifact paths resolve from that coordinator's `worktree_path`; when it
+is unset they resolve beside the roster. An artifact counts only when it is a
+non-empty regular file modified at or after `started_at`, so yesterday's file
+cannot falsely complete today's cadence. Coordinator, dispatch nonce, and
+resolved artifact identity are one-to-one: duplicates fail closed. A receipt
+must name that coordinator or its configured adjutant; any other durable
+recipient is reported as `recipient_mismatch`, not as the coordinator's receipt.
+
 ## Prompt files
 
 Edit `<roster-dir>/schedules/*.md` when ceremony shape changes — the daemon injects
