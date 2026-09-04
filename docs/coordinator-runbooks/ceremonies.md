@@ -102,7 +102,10 @@ an agent to reconstruct the ceremony from prose.
 Relative artifact paths resolve from that coordinator's `worktree_path`; when it
 is unset they resolve beside the roster. An artifact counts only when it is a
 non-empty regular file modified at or after `started_at`, so yesterday's file
-cannot falsely complete today's cadence.
+cannot falsely complete today's cadence. Coordinator, dispatch nonce, and
+resolved artifact identity are one-to-one: duplicates fail closed. A receipt
+must name that coordinator or its configured adjutant; any other durable
+recipient is reported as `recipient_mismatch`, not as the coordinator's receipt.
 
 ## Prompt files
 

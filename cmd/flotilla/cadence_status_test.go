@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,6 +126,72 @@ func TestCadenceStatusRejectsStaleArtifact(t *testing.T) {
 	}
 }
 
+func TestCadenceStatusRejectsSharedArtifactIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		alias bool
+	}{
+		{name: "same-resolved-path"},
+		{name: "symlink-alias", alias: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest, cfg, rosterDir, started := cadenceFixture(t)
+			backend, _ := cfg.Agent("backend")
+			manifest.Members[1].ArtifactPath = manifest.Members[0].ArtifactPath
+			if tc.alias {
+				alias := filepath.Join(t.TempDir(), "shared-worktree")
+				if err := os.Symlink(backend.WorktreePath, alias); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+				cfg.Agents[2].WorktreePath = alias
+			} else {
+				cfg.Agents[2].WorktreePath = backend.WorktreePath
+			}
+			writeCadenceArtifact(t, backend.WorktreePath, manifest.Members[0].ArtifactPath, started.Add(time.Minute))
+			_, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+			if err == nil || !strings.Contains(err.Error(), "same artifact") {
+				t.Fatalf("shared artifact error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCadenceStatusFailsClosedOnWrongReceiptRecipient(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	if _, err := dispatch.Consume(rosterDir, dispatch.ConsumedEntry{
+		Nonce: manifest.Members[0].DispatchNonce, PayloadHash: "wrong-recipient", ConsumedAt: started.Add(time.Minute),
+		Reason: dispatch.ReasonDurableAck, Sender: "xo", Recipient: "frontend",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := doc.DispatchReceipts[0]
+	if receipt.Disposition != "recipient_mismatch" || receipt.LedgerDisposition != "consumed" || receipt.Recipient != "frontend" {
+		t.Fatalf("wrong-recipient receipt = %+v", receipt)
+	}
+}
+
+func TestCadenceStatusAcceptsCoordinatorAdjutantReceipt(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	cfg.Agents = append(cfg.Agents, roster.Agent{Name: "backend-adj", AdjutantFor: "backend"})
+	if _, err := dispatch.Consume(rosterDir, dispatch.ConsumedEntry{
+		Nonce: manifest.Members[0].DispatchNonce, PayloadHash: "adjutant-recipient", ConsumedAt: started.Add(time.Minute),
+		Reason: dispatch.ReasonDurableAck, Sender: "xo", Recipient: "backend-adj",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.DispatchReceipts[0]; got.Disposition != "consumed" || got.LedgerDisposition != "" || got.Recipient != "backend-adj" {
+		t.Fatalf("adjutant receipt = %+v", got)
+	}
+}
+
 func TestCadenceStatusJSONContract(t *testing.T) {
 	manifest, cfg, rosterDir, started := cadenceFixture(t)
 	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started)
@@ -234,5 +301,21 @@ func TestLoadCadenceManifestRequiresRosterCoordinators(t *testing.T) {
 	}
 	if _, err := loadCadenceManifest(path, manifest.Nonce, cfg); err == nil {
 		t.Fatal("non-coordinator member accepted")
+	}
+}
+
+func TestLoadCadenceManifestRejectsDuplicateDispatchNonce(t *testing.T) {
+	manifest, cfg, _, _ := cadenceFixture(t)
+	manifest.Members[1].DispatchNonce = manifest.Members[0].DispatchNonce
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCadenceManifest(path, manifest.Nonce, cfg); err == nil || !strings.Contains(err.Error(), "share dispatch_nonce") {
+		t.Fatalf("duplicate dispatch nonce error = %v", err)
 	}
 }

@@ -56,14 +56,15 @@ type cadenceStatusDoc struct {
 }
 
 type cadenceDispatchReceipt struct {
-	Coordinator string `json:"coordinator"`
-	Nonce       string `json:"nonce"`
-	Disposition string `json:"disposition"`
-	Sender      string `json:"sender,omitempty"`
-	Recipient   string `json:"recipient,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	ID          string `json:"id,omitempty"`
-	Detail      string `json:"detail,omitempty"`
+	Coordinator       string `json:"coordinator"`
+	Nonce             string `json:"nonce"`
+	Disposition       string `json:"disposition"`
+	LedgerDisposition string `json:"ledger_disposition,omitempty"`
+	Sender            string `json:"sender,omitempty"`
+	Recipient         string `json:"recipient,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	ID                string `json:"id,omitempty"`
+	Detail            string `json:"detail,omitempty"`
 }
 
 type cadenceArtifactStatus struct {
@@ -190,6 +191,7 @@ func loadCadenceManifest(path, nonce string, cfg *roster.Config) (cadenceManifes
 		return cadenceManifest{}, fmt.Errorf("cadence status: manifest has no expected coordinators")
 	}
 	seen := make(map[string]bool, len(manifest.Members))
+	seenDispatch := make(map[string]string, len(manifest.Members))
 	for _, member := range manifest.Members {
 		if seen[member.Coordinator] {
 			return cadenceManifest{}, fmt.Errorf("cadence status: duplicate coordinator %q", member.Coordinator)
@@ -201,6 +203,10 @@ func loadCadenceManifest(path, nonce string, cfg *roster.Config) (cadenceManifes
 		if inbound.ParseDispatchNonce(member.DispatchNonce) != member.DispatchNonce {
 			return cadenceManifest{}, fmt.Errorf("cadence status: coordinator %q has invalid dispatch_nonce %q", member.Coordinator, member.DispatchNonce)
 		}
+		if prior := seenDispatch[member.DispatchNonce]; prior != "" {
+			return cadenceManifest{}, fmt.Errorf("cadence status: coordinators %q and %q share dispatch_nonce %q", prior, member.Coordinator, member.DispatchNonce)
+		}
+		seenDispatch[member.DispatchNonce] = member.Coordinator
 		if strings.TrimSpace(member.ArtifactPath) == "" {
 			return cadenceManifest{}, fmt.Errorf("cadence status: coordinator %q has no artifact_path", member.Coordinator)
 		}
@@ -225,20 +231,45 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		RecursiveArtifactPaths: make([]cadenceArtifactStatus, 0, len(manifest.Members)),
 		OverdueMembers:         []string{},
 	}
-	completed := 0
+	type resolvedMember struct {
+		manifest cadenceManifestMember
+		path     string
+	}
+	resolved := make([]resolvedMember, 0, len(manifest.Members))
+	artifactOwners := make(map[string]string, len(manifest.Members))
 	for _, member := range manifest.Members {
-		doc.ExpectedCoordinators = append(doc.ExpectedCoordinators, member.Coordinator)
-		status := dispatch.LookupNonce(rosterDir, member.DispatchNonce, now.UTC())
-		doc.DispatchReceipts = append(doc.DispatchReceipts, cadenceDispatchReceipt{
-			Coordinator: member.Coordinator, Nonce: member.DispatchNonce,
-			Disposition: string(status.Disposition), Sender: status.Sender, Recipient: status.Recipient,
-			Reason: status.Reason, ID: status.ID, Detail: status.Detail,
-		})
 		artifactPath, err := resolveCadenceArtifactPath(cfg, rosterDir, member)
 		if err != nil {
 			return cadenceStatusDoc{}, err
 		}
-		artifact := inspectCadenceArtifact(member.Coordinator, artifactPath, started)
+		identity, err := canonicalCadenceArtifactPath(artifactPath)
+		if err != nil {
+			return cadenceStatusDoc{}, fmt.Errorf("cadence status: resolve artifact for %q: %w", member.Coordinator, err)
+		}
+		if prior := artifactOwners[identity]; prior != "" {
+			return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
+		}
+		artifactOwners[identity] = member.Coordinator
+		resolved = append(resolved, resolvedMember{manifest: member, path: artifactPath})
+	}
+
+	completed := 0
+	for _, resolvedMember := range resolved {
+		member := resolvedMember.manifest
+		doc.ExpectedCoordinators = append(doc.ExpectedCoordinators, member.Coordinator)
+		status := dispatch.LookupNonce(rosterDir, member.DispatchNonce, now.UTC())
+		receipt := cadenceDispatchReceipt{
+			Coordinator: member.Coordinator, Nonce: member.DispatchNonce,
+			Disposition: string(status.Disposition), Sender: status.Sender, Recipient: status.Recipient,
+			Reason: status.Reason, ID: status.ID, Detail: status.Detail,
+		}
+		if status.Disposition != dispatch.DispositionUnknown && !cadenceReceiptRecipientAllowed(cfg, member.Coordinator, status.Recipient) {
+			receipt.LedgerDisposition = receipt.Disposition
+			receipt.Disposition = "recipient_mismatch"
+			receipt.Detail = fmt.Sprintf("durable recipient %q does not match expected coordinator %q or its adjutant", status.Recipient, member.Coordinator)
+		}
+		doc.DispatchReceipts = append(doc.DispatchReceipts, receipt)
+		artifact := inspectCadenceArtifact(member.Coordinator, resolvedMember.path, started)
 		doc.RecursiveArtifactPaths = append(doc.RecursiveArtifactPaths, artifact)
 		if artifact.Current {
 			completed++
@@ -275,6 +306,53 @@ func resolveCadenceArtifactPath(cfg *roster.Config, rosterDir string, member cad
 		base = agent.WorktreePath
 	}
 	return filepath.Clean(filepath.Join(base, artifactPath)), nil
+}
+
+func canonicalCadenceArtifactPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	suffix := ""
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			if suffix != "" {
+				resolved = filepath.Join(resolved, suffix)
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs), nil
+		}
+		if suffix == "" {
+			suffix = filepath.Base(current)
+		} else {
+			suffix = filepath.Join(filepath.Base(current), suffix)
+		}
+		current = parent
+	}
+}
+
+func cadenceReceiptRecipientAllowed(cfg *roster.Config, coordinator, recipient string) bool {
+	if recipient == coordinator {
+		return true
+	}
+	for _, agent := range cfg.Agents {
+		adjutantFor := agent.AdjutantFor
+		if adjutantFor == "" {
+			adjutantFor = agent.AssistantFor
+		}
+		if agent.Name == recipient && adjutantFor == coordinator {
+			return true
+		}
+	}
+	return false
 }
 
 func inspectCadenceArtifact(coordinator, path string, started time.Time) cadenceArtifactStatus {
