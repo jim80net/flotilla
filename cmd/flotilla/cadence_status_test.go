@@ -94,6 +94,12 @@ func TestCadenceStatusNamesOverdueMissingMember(t *testing.T) {
 	manifest, cfg, rosterDir, started := cadenceFixture(t)
 	backend, _ := cfg.Agent("backend")
 	writeCadenceArtifact(t, backend.WorktreePath, manifest.Members[0].ArtifactPath, started.Add(10*time.Minute))
+	if _, err := dispatch.Consume(rosterDir, dispatch.ConsumedEntry{
+		Nonce: manifest.Members[0].DispatchNonce, PayloadHash: "backend-payload", ConsumedAt: started.Add(5 * time.Minute),
+		Reason: dispatch.ReasonDurableAck, Sender: "xo", Recipient: "backend",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +111,23 @@ func TestCadenceStatusNamesOverdueMissingMember(t *testing.T) {
 		t.Fatalf("frontend receipt = %+v, want unknown", doc.DispatchReceipts[1])
 	}
 	if doc.CompletionBar != (cadenceCompletionBar{Completed: 1, Total: 2, Remaining: 1, Percent: 50, State: "overdue"}) {
+		t.Fatalf("completion bar = %+v", doc.CompletionBar)
+	}
+}
+
+func TestCadenceStatusDoesNotCompleteWithoutConsumedReceipt(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	manifest.Members = manifest.Members[:1]
+	backend, _ := cfg.Agent("backend")
+	writeCadenceArtifact(t, backend.WorktreePath, manifest.Members[0].ArtifactPath, started.Add(10*time.Minute))
+	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !doc.RecursiveArtifactPaths[0].Current || doc.DispatchReceipts[0].Disposition != "unknown" {
+		t.Fatalf("evidence = artifact %+v receipt %+v", doc.RecursiveArtifactPaths[0], doc.DispatchReceipts[0])
+	}
+	if doc.CompletionBar != (cadenceCompletionBar{Completed: 0, Total: 1, Remaining: 1, Percent: 0, State: "in_progress"}) {
 		t.Fatalf("completion bar = %+v", doc.CompletionBar)
 	}
 }
@@ -165,6 +188,23 @@ func TestCadenceStatusRejectsSharedArtifactIdentity(t *testing.T) {
 				t.Fatalf("shared artifact error = %v", err)
 			}
 		})
+	}
+}
+
+func TestCadenceStatusRejectsDanglingArtifactSymlink(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	frontend, _ := cfg.Agent("frontend")
+	aliasPath := filepath.Join(frontend.WorktreePath, filepath.FromSlash(manifest.Members[1].ArtifactPath))
+	if err := os.MkdirAll(filepath.Dir(aliasPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(cfg.Agents[1].WorktreePath, filepath.FromSlash(manifest.Members[0].ArtifactPath))
+	if err := os.Symlink(targetPath, aliasPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "unresolved symlink") {
+		t.Fatalf("dangling artifact symlink error = %v", err)
 	}
 }
 
@@ -261,6 +301,12 @@ func TestCmdCadenceStatusJSONReadsDefaultManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeCadenceArtifact(t, backendDir, manifest.Members[0].ArtifactPath, started.Add(30*time.Second))
+	if _, err := dispatch.Consume(rosterDir, dispatch.ConsumedEntry{
+		Nonce: manifest.Members[0].DispatchNonce, PayloadHash: "backend-payload", ConsumedAt: started.Add(15 * time.Second),
+		Reason: dispatch.ReasonDurableAck, Sender: "xo", Recipient: "backend",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var commandErr error
 	stdout, _ := captureStdoutStderr(t, func() {

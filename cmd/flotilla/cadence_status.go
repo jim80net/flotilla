@@ -289,7 +289,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		doc.DispatchReceipts = append(doc.DispatchReceipts, receipt)
 		artifact := resolvedMember.artifact
 		doc.RecursiveArtifactPaths = append(doc.RecursiveArtifactPaths, artifact)
-		if artifact.Current {
+		if artifact.Current && receipt.Disposition == string(dispatch.DispositionConsumed) {
 			completed++
 		} else if !now.Before(due) {
 			doc.OverdueMembers = append(doc.OverdueMembers, member.Coordinator)
@@ -343,6 +343,11 @@ func canonicalCadenceArtifactPath(path string) (string, error) {
 		}
 		if !os.IsNotExist(err) {
 			return "", err
+		}
+		if info, statErr := os.Lstat(current); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("unresolved symlink %q", current)
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return "", statErr
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
