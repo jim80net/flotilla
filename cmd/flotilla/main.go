@@ -152,6 +152,7 @@ usage:
   flotilla speak --file <path>                         speak body from a file ('-' = stdin)
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
+  flotilla watch identity [--json]                    list running watch/dash binary identity and dashboard binds (read-only)
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
   flotilla quality context <seat> --work-class <class> [--work-ref <ref>]
                                                       tag the seat's active task for finish-edge quality events
