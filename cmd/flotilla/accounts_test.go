@@ -355,6 +355,18 @@ func TestOAuthOutputBrokerPromptDoesNotDiscardIncompleteURL(t *testing.T) {
 	}
 }
 
+func TestOAuthOutputBrokerEmitsCompletePromptURLBeforeProcessExit(t *testing.T) {
+	var out bytes.Buffer
+	broker := newOAuthOutputBroker(&out)
+	if _, err := broker.Write([]byte("Press Enter to open the browser https://claude.ai/oauth/authorize?state=needed")); err != nil {
+		t.Fatal(err)
+	}
+	want := "OAuth URL: https://claude.ai/oauth/authorize?state=needed\nPress Enter to open the OAuth page in your browser.\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output before provider exit = %q, want %q", got, want)
+	}
+}
+
 func TestOAuthOutputBrokerDoesNotTreatPartialStateAsComplete(t *testing.T) {
 	var out bytes.Buffer
 	broker := newOAuthOutputBroker(&out)

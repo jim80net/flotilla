@@ -151,7 +151,7 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 			// browser flow is usable while the child remains running.
 			pending := b.pending.String()
 			if prompt := safeOAuthPrompt(pending); prompt != "" {
-				authURL := completeOAuthURL(pending)
+				authURL := completeOAuthPromptURL(pending)
 				if authURL != "" {
 					fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
 				}
@@ -190,6 +190,18 @@ func (b *oauthOutputBroker) emitSafeLine(line string) {
 	if prompt := safeOAuthPrompt(line); prompt != "" {
 		fmt.Fprintln(b.dst, prompt)
 	}
+}
+
+func completeOAuthPromptURL(line string) string {
+	authURL := allowedOAuthURL(line)
+	if authURL == "" {
+		return ""
+	}
+	u, err := url.Parse(authURL)
+	if err != nil || u.Query().Get("state") == "" {
+		return ""
+	}
+	return authURL
 }
 
 func completeOAuthURL(line string) string {
