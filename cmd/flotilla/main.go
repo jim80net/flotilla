@@ -53,6 +53,8 @@ func run(args []string) error {
 		return cmdDispatchAck(args[1:])
 	case "cadence":
 		return cmdCadence(args[1:])
+	case "settle":
+		return cmdSettle(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
 	case "synthesis":
@@ -134,6 +136,7 @@ usage:
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
   flotilla cadence status <nonce> --json              ceremony membership, receipts, artifacts, overdue work, and completion
+  flotilla settle --from <seat> [--file <path>]       commit drained work, prove backup ancestry, then mark settled
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
