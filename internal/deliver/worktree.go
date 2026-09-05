@@ -9,8 +9,181 @@ import (
 )
 
 // WorktreeExitTailLines bounds the scan for Claude Code's worktree-exit menu to the
-// live footer (the prompt renders at the bottom of the pane during /exit).
+// live footer (the prompt renders at the bottom of the pane during /exit). Measured
+// coverage for the standard two-action background-work menu is at most six task-detail
+// rows when it includes one spacer; seven rows push the status summary outside this
+// 12-line window and deliberately fail closed. No checked-in live frame exceeds two.
 const WorktreeExitTailLines = 12
+
+// HarnessExitConfirmationChoice recognizes the unattended-close confirmation shown when
+// a harness still has background work. It returns the numbered choice whose label actually
+// exits; callers must not assume that "exit anyway" is always choice 1.
+//
+// Detection is deliberately narrow: both background-work chrome and an exit confirmation
+// must be present in the live tail. This keeps ordinary numbered prompts and historical
+// conversation prose from being submitted by recycle.
+func HarnessExitConfirmationChoice(captured string) (string, bool) {
+	lines := strings.Split(strings.ToLower(TailRegion(captured, WorktreeExitTailLines)), "\n")
+	footer := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "enter to confirm" || line == "press enter to confirm" {
+			footer = i
+			break
+		}
+	}
+	if footer < 2 {
+		return "", false
+	}
+
+	// The numbered action rows must be the contiguous block immediately above the
+	// confirmation footer. This binds choices to this menu rather than to arbitrary
+	// numbered prose elsewhere in the captured tail.
+	type action struct{ choice, label string }
+	var reversed []action
+	i := footer - 1
+	for ; i >= 0; i-- {
+		choice, label, ok := exitMenuAction(lines[i])
+		if !ok {
+			break
+		}
+		reversed = append(reversed, action{choice: choice, label: label})
+	}
+	if len(reversed) == 0 {
+		return "", false
+	}
+
+	// The exit question must immediately introduce that action block (one visual
+	// spacer is allowed), and a genuine background-work status line must occur in
+	// the same small menu region above it. Exact line shapes reject quoted prose.
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i--
+		if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+			return "", false
+		}
+	}
+	if i < 0 || !exitConfirmationQuestion(lines[i]) {
+		return "", false
+	}
+	// The live #557 menu may render one spacer and bounded task-detail rows
+	// between its background summary and question. Every intervening non-blank
+	// line must itself be task chrome; arbitrary prose cannot bridge the region.
+	i--
+	if i >= 0 && strings.TrimSpace(lines[i]) == "" {
+		i--
+	}
+	taskRows := 0
+	for i >= 0 && taskRows < 8 && backgroundTaskDetail(lines[i]) {
+		taskRows++
+		i--
+	}
+	if i < 0 || !backgroundWorkStatus(lines[i]) {
+		return "", false
+	}
+
+	for i := len(reversed) - 1; i >= 0; i-- {
+		if exitConfirmationAction(reversed[i].label) {
+			return reversed[i].choice, true
+		}
+	}
+	return "", false
+}
+
+func exitMenuAction(line string) (choice, label string, ok bool) {
+	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "›>❯ "))
+	sep := strings.IndexAny(line, ".)")
+	if sep <= 0 {
+		return "", "", false
+	}
+	choice = strings.TrimSpace(line[:sep])
+	label = strings.TrimSpace(line[sep+1:])
+	if choice == "" || label == "" || strings.IndexFunc(choice, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return "", "", false
+	}
+	return choice, label, true
+}
+
+func exitConfirmationQuestion(line string) bool {
+	line = strings.TrimSpace(line)
+	return line == "are you sure you want to exit?" || line == "exit session?"
+}
+
+func backgroundWorkStatus(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "background work is still running" {
+		return true
+	}
+
+	fields := strings.Fields(line)
+	if len(fields) == 5 && fields[0] == "background" && backgroundWorkNoun(fields[1]) && fields[2] == "still" && fields[3] == "running" && parenthesizedCount(fields[4]) {
+		return true
+	}
+	if len(fields) == 4 && fields[0] == "background" && backgroundWorkNoun(fields[1]) && fields[2] == "running" && parenthesizedCount(fields[3]) {
+		return true
+	}
+	if len(fields) != 4 && len(fields) != 5 {
+		return false
+	}
+	if !allASCIIInteger(fields[0]) || fields[1] != "background" {
+		return false
+	}
+	if !backgroundWorkNoun(fields[2]) {
+		return false
+	}
+	if len(fields) == 4 {
+		return fields[3] == "running"
+	}
+	return fields[3] == "still" && fields[4] == "running"
+}
+
+func backgroundWorkNoun(value string) bool {
+	return value == "agent" || value == "agents" || value == "task" || value == "tasks"
+}
+
+func parenthesizedCount(value string) bool {
+	return len(value) >= 3 && value[0] == '(' && value[len(value)-1] == ')' && allASCIIInteger(value[1:len(value)-1])
+}
+
+func backgroundTaskDetail(line string) bool {
+	const renderedStatus = "● running"
+	line = strings.TrimSpace(line)
+	if !strings.HasSuffix(line, renderedStatus) {
+		return false
+	}
+	prefix := strings.TrimSuffix(line, renderedStatus)
+	name := strings.TrimRight(prefix, " ")
+	separatorWidth := len(prefix) - len(name)
+	if separatorWidth < 2 || len(name) == 0 || len(name) > 32 || strings.ContainsAny(name, " \t") {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func allASCIIInteger(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func exitConfirmationAction(label string) bool {
+	switch strings.TrimSpace(label) {
+	case "exit anyway", "confirm exit", "save and exit":
+		return true
+	default:
+		return false
+	}
+}
 
 // ClaudeWorktreeExitPrompt reports whether captured shows Claude Code's interactive
 // worktree-exit menu ("Exiting worktree session — 1. Keep worktree / 2. Remove

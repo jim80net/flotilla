@@ -18,6 +18,7 @@ type recycleAbortClass string
 
 const (
 	abortBusyDesk    recycleAbortClass = "busy-desk"
+	abortComposing   recycleAbortClass = "composing"
 	abortPhase2Close recycleAbortClass = "phase-2-close"
 	abortHandoff     recycleAbortClass = "handoff"
 	abortSelf        recycleAbortClass = "self-recycle"
@@ -31,6 +32,8 @@ func classifyRecycleAbort(err error) recycleAbortClass {
 	}
 	s := err.Error()
 	switch {
+	case strings.Contains(s, "working/composing"):
+		return abortComposing
 	case strings.Contains(s, "phase 0:") || strings.Contains(s, "did not settle to idle"):
 		return abortBusyDesk
 	case strings.Contains(s, "phase 2 re-verify") && strings.Contains(s, "no longer idle"):
@@ -86,6 +89,11 @@ func recycleAbortNotice(agent, phase string, class recycleAbortClass, err error,
 	}
 	b.WriteString("Prescribed recovery:\n")
 	switch class {
+	case abortComposing:
+		b.WriteString("  - The desk is actively working/composing: do NOT use resume --force and do NOT retry this stale recycle request\n")
+		b.WriteString("  - Wait for a fresh chapter-end warrant; inspect the durable generation with: flotilla recycle status --json ")
+		b.WriteString(agent)
+		b.WriteString("\n")
 	case abortBusyDesk:
 		b.WriteString("  - Wait for the desk to settle Idle, then: flotilla recycle ")
 		b.WriteString(agent)

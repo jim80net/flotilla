@@ -1,6 +1,9 @@
 package surface
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // #557 live gap: desk at an unanswered interactive exit-confirmation prompt (with
 // live background subagents) assessed plain Idle while recycle's idle∧cleared gate
@@ -9,15 +12,11 @@ import "testing"
 func TestInteractiveConfirmPrompt_ExitConfirm557(t *testing.T) {
 	// Sole-supervisor-as-member analog for prompts: numbered exit menu + Enter to confirm
 	// (no working spinner) — the frame recycle aborts on and status must not call idle.
-	exitConfirm := "" +
-		"  background agents still running (6)\n" +
-		"  review-task  ● running\n" +
-		"  migration    ● running\n" +
-		"\n" +
-		"  Exit session?\n" +
-		"  1. Save and exit\n" +
-		"  2. Cancel\n" +
-		"  Enter to confirm\n"
+	raw, err := os.ReadFile("testdata/exit-confirm-557.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitConfirm := string(raw)
 	if !InteractiveConfirmPrompt(exitConfirm) {
 		t.Fatal("exit-confirmation + numbered menu must detect InteractiveConfirmPrompt")
 	}

@@ -44,6 +44,99 @@ func TestClaudeWorktreeExitPrompt(t *testing.T) {
 	}
 }
 
+func TestHarnessExitConfirmationChoice(t *testing.T) {
+	live557, err := os.ReadFile("../surface/testdata/exit-confirm-557.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		captured string
+		choice   string
+		want     bool
+	}{
+		{
+			"live 557 count-suffix menu with task details",
+			string(live557),
+			"1", true,
+		},
+		{
+			"exit anyway is first",
+			"3 background agents still running\nAre you sure you want to exit?\n❯ 1. Exit anyway\n  2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
+			"exit choice is discovered rather than assumed",
+			"Background work is still running\nExit session?\n  1. Keep running\n› 2) Save and exit\nEnter to confirm",
+			"2", true,
+		},
+		{
+			"one visual spacer is allowed",
+			"1 background task running\nAre you sure you want to exit?\n\n1. Exit anyway\n2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
+			"ordinary numbered prompt is untouched",
+			"Choose a deployment\n1. Exit staging\n2. Production\nEnter to confirm",
+			"", false,
+		},
+		{
+			"background prose without confirmation is untouched",
+			"Earlier we discussed background work and exit behavior\n❯ ",
+			"", false,
+		},
+		{
+			"quoted background exit prose does not bind unrelated numbered menu",
+			"Earlier output quoted: \"4 background agents still running\"\n" +
+				"Earlier question: \"Are you sure you want to exit?\"\n" +
+				"1. Exit staging\n2. Production\nEnter to confirm",
+			"", false,
+		},
+		{
+			"more than one spacer does not bind a menu",
+			"4 background agents still running\nAre you sure you want to exit?\n\n\n\n" +
+				"1. Exit anyway\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+		{
+			"background status embedded in prose does not bind a menu",
+			"The report says 4 background agents still running\n" +
+				"Are you sure you want to exit?\n1. Exit anyway\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+		{
+			"prose ending in task glyph does not bridge menu",
+			"background agents still running (1)\nThe report says migration ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+		{
+			"six task rows remain inside twelve-line coverage",
+			"background agents still running (6)\n" +
+				"task-1  ● running\ntask-2  ● running\ntask-3  ● running\n" +
+				"task-4  ● running\ntask-5  ● running\ntask-6  ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"1", true,
+		},
+		{
+			"seven task rows exceed documented twelve-line coverage",
+			"background agents still running (7)\n" +
+				"task-1  ● running\ntask-2  ● running\ntask-3  ● running\n" +
+				"task-4  ● running\ntask-5  ● running\ntask-6  ● running\ntask-7  ● running\n\n" +
+				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
+			"", false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			choice, ok := HarnessExitConfirmationChoice(tc.captured)
+			if choice != tc.choice || ok != tc.want {
+				t.Errorf("HarnessExitConfirmationChoice = (%q, %v), want (%q, %v)", choice, ok, tc.choice, tc.want)
+			}
+		})
+	}
+}
+
 func TestSendMenuChoiceArgs(t *testing.T) {
 	want := [][]string{
 		{"send-keys", "-t", "flotilla:0.1", "-l", "--", "1"},
