@@ -20,8 +20,8 @@ type watchProcessIdentity struct {
 	DiskSHA256      string   `json:"disk_sha256"`
 	ExeSHA256       string   `json:"exe_sha256"`
 	Revision        string   `json:"vcs_revision"`
-	DeletedInode    bool     `json:"deleted_inode"`
-	Leftover        bool     `json:"leftover"`
+	DeletedInode    bool     `json:"deleted_inode,omitempty"`
+	Leftover        bool     `json:"leftover,omitempty"`
 	ListenAddresses []string `json:"listen_addresses,omitempty"`
 	Warning         string   `json:"warning,omitempty"`
 }
@@ -49,15 +49,21 @@ func cmdWatchIdentity(args []string) error {
 		return nil
 	}
 	for _, identity := range identities {
-		fmt.Printf("%s pid=%d disk=%s disk_sha256=%s exe_sha256=%s vcs.revision=%s deleted_inode=%t",
+		fmt.Printf("%s pid=%d disk=%s disk_sha256=%s exe_sha256=%s vcs.revision=%s",
 			identity.Kind, identity.PID, identity.DiskPath, identity.DiskSHA256,
-			identity.ExeSHA256, identity.Revision, identity.DeletedInode)
+			identity.ExeSHA256, identity.Revision)
+		if identity.Warning == "" {
+			fmt.Printf(" deleted_inode=%t", identity.DeletedInode)
+		}
 		if identity.Kind == "dash" {
 			binds := identity.ListenAddresses
 			if len(binds) == 0 {
 				binds = []string{"none"}
 			}
-			fmt.Printf(" listen=%s leftover=%t", strings.Join(binds, ","), identity.Leftover)
+			fmt.Printf(" listen=%s", strings.Join(binds, ","))
+			if identity.Warning == "" || identity.Leftover {
+				fmt.Printf(" leftover=%t", identity.Leftover)
+			}
 		}
 		if identity.Warning != "" {
 			fmt.Printf(" warning=%q", identity.Warning)

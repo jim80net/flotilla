@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,6 +87,44 @@ func TestCollectWatchIdentitySurfacesUnreadableExecutable(t *testing.T) {
 	if got[0].DiskPath != "unavailable" || got[0].DiskSHA256 != "unavailable" ||
 		got[0].ExeSHA256 != "unavailable" || got[0].Revision != "unavailable" || got[0].Warning == "" {
 		t.Fatalf("degraded identity = %+v", got[0])
+	}
+	encoded, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"deleted_inode"`) || strings.Contains(string(encoded), `"leftover"`) {
+		t.Fatalf("unknown executable identity painted false booleans: %s", encoded)
+	}
+}
+
+func TestCollectWatchIdentitySurfacesVersionedDashboardWithUnreadableExecutable(t *testing.T) {
+	root := t.TempDir()
+	writeWatchIdentityProc(t, root, "505", "/opt/flotilla-abc123 dash --bind 127.0.0.1:8799", "/missing/flotilla-abc123")
+	if err := os.Remove(filepath.Join(root, "505", "exe")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("socket:[77]", filepath.Join(root, "505", "fd", "9")); err != nil {
+		t.Fatal(err)
+	}
+	netDir := filepath.Join(root, "505", "net")
+	if err := os.MkdirAll(netDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tcp := "  sl  local_address rem_address st tx_queue tr tm->when retrnsmt uid timeout inode\n   0: 0100007F:225F 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 77\n"
+	if err := os.WriteFile(filepath.Join(netDir, "tcp"), []byte(tcp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := collectWatchIdentities(root, func(_, _ string) (string, string, string) {
+		t.Fatal("inspector must not run without a readable executable link")
+		return "", "", ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Warning == "" || !got[0].Leftover ||
+		!reflect.DeepEqual(got[0].ListenAddresses, []string{"127.0.0.1:8799"}) {
+		t.Fatalf("degraded versioned dash identity = %+v", got)
 	}
 }
 
