@@ -1116,22 +1116,22 @@ func printRecyclePlan(p recyclePlan, r launch.Recipe, reapSupportErr error) {
 // writeLastRecycle records the outcome to ~/.flotilla/<agent>/last-recycle.json ATOMICALLY
 // (write-temp + rename), so the outcome survives the process / a relay outage and a back-to-
 // back recycle never reads a torn file. Best-effort: a write failure is logged, never fatal.
-func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
-	writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, nil, processes...)
+func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, nil, processes...)
 }
 
 // writeLastRecycleWithBarrier holds one cross-process lock across the existing-record
 // decision and atomic replacement. The optional barrier is test-only orchestration for
 // proving an overlapping writer cannot publish between that decision and the rename.
-func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), processes ...recycleProcessIdentity) {
-	writeLastRecycleTransaction(agent, p, msg, runErr, wt, afterExistingCheck, readRecycleStatus, processes...)
+func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleTransaction(agent, p, msg, runErr, wt, afterExistingCheck, readRecycleStatus, processes...)
 }
 
-func writeLastRecycleWithStatusReader(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) {
-	writeLastRecycleTransaction(agent, p, msg, runErr, wt, nil, readStatus, processes...)
+func writeLastRecycleWithStatusReader(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleTransaction(agent, p, msg, runErr, wt, nil, readStatus, processes...)
 }
 
-func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) {
+func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) bool {
 	var process recycleProcessIdentity
 	if len(processes) > 0 {
 		process = processes[0]
@@ -1139,37 +1139,37 @@ func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr
 	// The successful record is the exactly-once admission authority. A stale retry
 	// must never replace it with its own refusal record.
 	if errors.Is(runErr, errRecycleStaleRetry) {
-		return
+		return false
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return false
 	}
 	dir := filepath.Join(home, ".flotilla", agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
-		return
+		return false
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, "last-recycle.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		log.Printf("flotilla: recycle: could not open the status lock: %v", err)
-		return
+		return false
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		log.Printf("flotilla: recycle: could not lock the status record: %v", err)
-		return
+		return false
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
 	if runErr != nil && !p.startedAt.IsZero() {
 		existing, readErr := readStatus(lastRecyclePath(home, agent))
 		if readErr != nil && !os.IsNotExist(readErr) {
-			return
+			return false
 		}
 		if readErr == nil && existing.OK {
 			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
 			if parseErr != nil || !existingAt.Before(p.startedAt) {
-				return
+				return false
 			}
 		}
 	}
@@ -1224,33 +1224,34 @@ func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr
 	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
-		return
+		return false
 	}
 	tmp, err := os.CreateTemp(dir, "last-recycle-*.json.tmp")
 	if err != nil {
 		log.Printf("flotilla: recycle: could not write the status record: %v", err)
-		return
+		return false
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return
+		return false
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return
+		return false
 	}
 	if err := os.Rename(tmpName, final); err != nil {
 		os.Remove(tmpName)
 		log.Printf("flotilla: recycle: could not finalize the status record: %v", err)
-		return
+		return false
 	}
 	if runErr == nil {
 		if err := recordSuccessfulRecycleCooldown(dir, p.token, at); err != nil {
 			log.Printf("flotilla: recycle: could not record chapter-end cooldown: %v", err)
 		}
 	}
+	return true
 }
 
 // writeLastRecycleRecord preserves the GHI test seam while delegating to the
@@ -1261,7 +1262,15 @@ func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr erro
 
 // finalizeRecycleStatus closes the lifecycle of exactly one recycle token.
 func finalizeRecycleStatus(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
-	writeLastRecycle(agent, p, msg, runErr, wt, processes...)
+	finalizeRecycleStatusWithWriter(agent, p, runErr, func() bool {
+		return writeLastRecycle(agent, p, msg, runErr, wt, processes...)
+	})
+}
+
+func finalizeRecycleStatusWithWriter(agent string, p recyclePlan, runErr error, writeStatus func() bool) {
+	if !writeStatus() && !errors.Is(runErr, errRecycleStaleRetry) {
+		return
+	}
 	if err := clearRecyclePhase(agent, p.token); err != nil {
 		log.Printf("flotilla: recycle: could not clear terminal phase record: %v", err)
 	}

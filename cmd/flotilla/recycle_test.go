@@ -361,6 +361,26 @@ func TestFailedRecycleDoesNotReplacePossibleSuccessOnTransientReadError(t *testi
 	}
 }
 
+func TestFinalizeRecycleStatusKeepsPhaseWhenStatusWriteFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	plan := testPlan()
+	plan.token = "FAILED"
+	plan.startedAt = time.Now().UTC().Add(-time.Minute)
+	if err := writeRecyclePhase("backend", plan, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	runErr := errors.New("late abandoned attempt")
+	finalizeRecycleStatusWithWriter("backend", plan, runErr, func() bool {
+		return writeLastRecycleWithStatusReader("backend", plan, "", runErr, worktreeCloseNote{}, func(string) (recycleStatusRecord, error) {
+			return recycleStatusRecord{}, errors.New("transient status read failure")
+		})
+	})
+	if _, err := os.Stat(recyclePhasePath(home, "backend", plan.token)); err != nil {
+		t.Fatalf("phase sidecar removed without a terminal status: %v", err)
+	}
+}
+
 func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
