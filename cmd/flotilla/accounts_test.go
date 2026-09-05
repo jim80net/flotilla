@@ -378,13 +378,6 @@ func TestOAuthOutputBrokerBuffersPromptURLWithSplitNonemptyState(t *testing.T) {
 	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
 		t.Fatalf("partial prompt URL output = %q", got)
 	}
-	operatorInput := strings.NewReader("\n")
-	if _, err := operatorInput.Read(make([]byte, 1)); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
-		t.Fatalf("operator input emitted a partial URL: %q", got)
-	}
 	if _, err := broker.Write([]byte("ed\r")); err != nil {
 		t.Fatal(err)
 	}
