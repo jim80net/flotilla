@@ -151,7 +151,7 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 			// browser flow is usable while the child remains running.
 			pending := b.pending.String()
 			if prompt := safeOAuthPrompt(pending); prompt != "" {
-				authURL := completeOAuthPromptURL(pending)
+				authURL := completeOAuthURL(pending)
 				if authURL != "" {
 					fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
 				}
@@ -165,6 +165,12 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 						_, _ = b.pending.WriteString(candidate)
 					}
 				}
+			} else if authURL := completeOAuthURL(pending); authURL != "" {
+				// A prompt may have arrived in an earlier write, leaving only its
+				// split URL token buffered. Emit once a later write supplies a
+				// structural record delimiter.
+				fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+				b.pending.Reset()
 			}
 			break
 		}
@@ -190,18 +196,6 @@ func (b *oauthOutputBroker) emitSafeLine(line string) {
 	if prompt := safeOAuthPrompt(line); prompt != "" {
 		fmt.Fprintln(b.dst, prompt)
 	}
-}
-
-func completeOAuthPromptURL(line string) string {
-	authURL := allowedOAuthURL(line)
-	if authURL == "" {
-		return ""
-	}
-	u, err := url.Parse(authURL)
-	if err != nil || u.Query().Get("state") == "" {
-		return ""
-	}
-	return authURL
 }
 
 func completeOAuthURL(line string) string {
