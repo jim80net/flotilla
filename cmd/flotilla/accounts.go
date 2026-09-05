@@ -53,15 +53,9 @@ type accountRefreshReport struct {
 var runClaudeAuthLogin = func(configDir string) error {
 	cmd := exec.Command("claude", "auth", "login", "--claudeai")
 	cmd.Env = accountEnv(configDir)
+	cmd.Stdin = os.Stdin
 	stdout := newOAuthOutputBroker(os.Stderr)
 	stderr := newOAuthOutputBroker(os.Stderr)
-	cmd.Stdin = &oauthPromptInput{
-		src: os.Stdin,
-		completePromptRecord: func() {
-			stdout.completePromptRecord()
-			stderr.completePromptRecord()
-		},
-	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
@@ -140,22 +134,6 @@ type oauthOutputBroker struct {
 	pending bytes.Buffer
 }
 
-// oauthPromptInput turns the operator's response into the provider prompt's
-// structural record boundary. The pending safe URL is emitted before the input
-// reaches the child, so a raw non-newline URL remains usable during login.
-type oauthPromptInput struct {
-	src                  io.Reader
-	completePromptRecord func()
-}
-
-func (r *oauthPromptInput) Read(p []byte) (int, error) {
-	n, err := r.src.Read(p)
-	if n > 0 {
-		r.completePromptRecord()
-	}
-	return n, err
-}
-
 func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 	return &oauthOutputBroker{dst: dst}
 }
@@ -165,9 +143,8 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	_, _ = b.pending.Write(p)
 	for {
-		line, err := b.pending.ReadString('\n')
-		if err != nil {
-			_, _ = b.pending.WriteString(line)
+		line, complete := b.nextRecord()
+		if !complete {
 			// Interactive CLIs commonly render the URL and input prompt without
 			// a trailing newline. Emit only their canonical safe forms now so the
 			// browser flow is usable while the child remains running.
@@ -201,16 +178,23 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (b *oauthOutputBroker) Flush() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.flushPending()
+// nextRecord accepts both ordinary line endings and carriage-return terminal
+// frame endings. Unlike an io.Writer Write call or stdin activity, either byte
+// is an actual provider-output record boundary.
+func (b *oauthOutputBroker) nextRecord() (string, bool) {
+	pending := b.pending.Bytes()
+	at := bytes.IndexAny(pending, "\r\n")
+	if at < 0 {
+		return "", false
+	}
+	end := at + 1
+	if pending[at] == '\r' && end < len(pending) && pending[end] == '\n' {
+		end++
+	}
+	return string(b.pending.Next(end)), true
 }
 
-// completePromptRecord is the pre-exit boundary supplied by the operator's
-// response to an interactive provider prompt. Write boundaries and non-empty
-// state values are deliberately not treated as completion signals.
-func (b *oauthOutputBroker) completePromptRecord() {
+func (b *oauthOutputBroker) Flush() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.flushPending()
@@ -226,7 +210,6 @@ func (b *oauthOutputBroker) flushPending() {
 func (b *oauthOutputBroker) emitSafeLine(line string) {
 	if authURL := allowedOAuthURL(line); authURL != "" {
 		fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
-		return
 	}
 	if prompt := safeOAuthPrompt(line); prompt != "" {
 		fmt.Fprintln(b.dst, prompt)
