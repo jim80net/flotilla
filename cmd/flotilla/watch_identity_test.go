@@ -66,6 +66,44 @@ func TestCollectWatchIdentityListsWatchAndDeletedDashboardBind(t *testing.T) {
 	}
 }
 
+func TestCollectWatchIdentitySurfacesUnreadableExecutable(t *testing.T) {
+	root := t.TempDir()
+	writeWatchIdentityProc(t, root, "303", "/opt/flotilla watch --interval 10m", "/missing/flotilla")
+	if err := os.Remove(filepath.Join(root, "303", "exe")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := collectWatchIdentities(root, func(_, _ string) (string, string, string) {
+		t.Fatal("inspector must not run without a readable executable link")
+		return "", "", ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Kind != "watch" || got[0].PID != 303 {
+		t.Fatalf("identities = %+v", got)
+	}
+	if got[0].DiskPath != "unavailable" || got[0].DiskSHA256 != "unavailable" ||
+		got[0].ExeSHA256 != "unavailable" || got[0].Revision != "unavailable" || got[0].Warning == "" {
+		t.Fatalf("degraded identity = %+v", got[0])
+	}
+}
+
+func TestCollectWatchIdentityMarksVersionedLiveDashboardLeftover(t *testing.T) {
+	root := t.TempDir()
+	writeWatchIdentityProc(t, root, "404", "/opt/flotilla-6e1c6649 dash --bind 127.0.0.1:8799", "/opt/flotilla-6e1c6649")
+
+	got, err := collectWatchIdentities(root, func(_, _ string) (string, string, string) {
+		return "disk", "exe", "rev"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].DeletedInode || !got[0].Leftover {
+		t.Fatalf("versioned dashboard identity = %+v", got)
+	}
+}
+
 func TestCollectWatchIdentityIgnoresNonFlotillaAndNonListeningSockets(t *testing.T) {
 	root := t.TempDir()
 	writeWatchIdentityProc(t, root, "101", "/usr/bin/python worker.py", "/usr/bin/python")

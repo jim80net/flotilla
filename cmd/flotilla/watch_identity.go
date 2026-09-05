@@ -23,6 +23,7 @@ type watchProcessIdentity struct {
 	DeletedInode    bool     `json:"deleted_inode"`
 	Leftover        bool     `json:"leftover"`
 	ListenAddresses []string `json:"listen_addresses,omitempty"`
+	Warning         string   `json:"warning,omitempty"`
 }
 
 type watchBinaryInspector func(exePath, diskPath string) (diskSHA, exeSHA, revision string)
@@ -57,6 +58,9 @@ func cmdWatchIdentity(args []string) error {
 				binds = []string{"none"}
 			}
 			fmt.Printf(" listen=%s leftover=%t", strings.Join(binds, ","), identity.Leftover)
+		}
+		if identity.Warning != "" {
+			fmt.Printf(" warning=%q", identity.Warning)
 		}
 		fmt.Println()
 	}
@@ -100,23 +104,34 @@ func collectWatchIdentities(procRoot string, inspect watchBinaryInspector) ([]wa
 		if err != nil {
 			continue
 		}
-		kind := watchIdentityKind(cmdline)
+		kind, versioned := watchIdentityCommand(cmdline)
 		if kind == "" {
 			continue
 		}
+		identity := watchProcessIdentity{
+			Kind: kind, PID: pid, DiskPath: "unavailable", DiskSHA256: "unavailable",
+			ExeSHA256: "unavailable", Revision: "unavailable",
+		}
 		exeLink, err := os.Readlink(filepath.Join(pidRoot, "exe"))
 		if err != nil {
+			identity.Warning = fmt.Sprintf("executable identity unavailable: %v", err)
+			if kind == "dash" {
+				identity.Leftover = versioned
+				identity.ListenAddresses = processListenAddresses(pidRoot)
+			}
+			identities = append(identities, identity)
 			continue
 		}
 		deleted := strings.HasSuffix(exeLink, " (deleted)")
 		diskPath := strings.TrimSuffix(exeLink, " (deleted)")
 		diskSHA, exeSHA, revision := inspect(filepath.Join(pidRoot, "exe"), diskPath)
-		identity := watchProcessIdentity{
-			Kind: kind, PID: pid, DiskPath: diskPath, DiskSHA256: diskSHA,
-			ExeSHA256: exeSHA, Revision: revision, DeletedInode: deleted,
-		}
+		identity.DiskPath = diskPath
+		identity.DiskSHA256 = diskSHA
+		identity.ExeSHA256 = exeSHA
+		identity.Revision = revision
+		identity.DeletedInode = deleted
 		if kind == "dash" {
-			identity.Leftover = deleted
+			identity.Leftover = deleted || versioned
 			identity.ListenAddresses = processListenAddresses(pidRoot)
 		}
 		identities = append(identities, identity)
@@ -125,28 +140,29 @@ func collectWatchIdentities(procRoot string, inspect watchBinaryInspector) ([]wa
 	return identities, nil
 }
 
-func watchIdentityKind(raw []byte) string {
+func watchIdentityCommand(raw []byte) (string, bool) {
 	parts := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
 	if len(parts) < 2 {
-		return ""
+		return "", false
 	}
 	base := filepath.Base(parts[0])
-	if base != "flotilla" && !strings.HasPrefix(base, "flotilla-") {
-		return ""
+	versioned := strings.HasPrefix(base, "flotilla-")
+	if base != "flotilla" && !versioned {
+		return "", false
 	}
 	switch parts[1] {
 	case "watch":
 		if len(parts) > 2 && parts[2] == "identity" {
-			return ""
+			return "", false
 		}
-		return "watch"
+		return "watch", versioned
 	case "dash":
 		if len(parts) > 2 && parts[2] == "deploy" {
-			return ""
+			return "", false
 		}
-		return "dash"
+		return "dash", versioned
 	default:
-		return ""
+		return "", false
 	}
 }
 
