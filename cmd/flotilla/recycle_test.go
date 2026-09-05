@@ -433,6 +433,34 @@ func TestStaleRecycleTerminalRemovesOnlyItsPhaseAndPreservesSuccess(t *testing.T
 	}
 }
 
+func TestPostHandoffBusyRetryFinalizesAbandonedTokenBeforeNextAttempt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	first := testPlan()
+	first.token = "FIRST"
+	if err := writeRecyclePhase("backend", first, recyclePhaseHandoffWritten); err != nil {
+		t.Fatal(err)
+	}
+	second := testPlan()
+	second.token = "SECOND"
+	if err := writeRecyclePhase("backend", second, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the cmdRecycle continue edge after a retryable phase-2 re-verify
+	// refusal: FIRST has already published handoff-written but will not be the
+	// final attempt in the loop.
+	if err := finalizeRecycleRetry("backend", first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", first.token)); !os.IsNotExist(err) {
+		t.Fatalf("abandoned retry phase still exists: %v", err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", second.token)); err != nil {
+		t.Fatalf("next attempt phase was removed: %v", err)
+	}
+}
+
 func TestLaterSelfRecycleOnSameProcessRemainsEligible(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

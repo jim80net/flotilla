@@ -853,6 +853,10 @@ func cmdRecycle(args []string) error {
 			break
 		}
 		if attempt+1 < attempts && isRetryableBusy(runErr) {
+			if err := finalizeRecycleRetry(agentName, plan); err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("finalize recycle retry token %s: %w", plan.token, err))
+				break
+			}
 			log.Printf("flotilla: recycle: busy-desk abort for %q (attempt %d/%d) — retrying after settle wait (#436)", agentName, attempt+1, attempts)
 			time.Sleep(2 * time.Second)
 			continue
@@ -1148,13 +1152,24 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 // successor publishing a different token between the read and remove.
 func finalizeRecycleStatus(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
 	writeLastRecycle(agent, p, msg, runErr, wt, processes...)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	if err := os.Remove(recyclePhasePath(home, agent, p.token)); err != nil && !os.IsNotExist(err) {
+	if err := clearRecyclePhase(agent, p.token); err != nil {
 		log.Printf("flotilla: recycle: could not clear terminal phase record: %v", err)
 	}
+}
+
+func finalizeRecycleRetry(agent string, p recyclePlan) error {
+	return clearRecyclePhase(agent, p.token)
+}
+
+func clearRecyclePhase(agent, token string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(recyclePhasePath(home, agent, token)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // parseRecycleArgs resolves the agent, roster path, launch path, and flags, accepting
