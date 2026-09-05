@@ -32,11 +32,13 @@ func cadenceFixture(t *testing.T) (cadenceManifest, *roster.Config, string, time
 	manifest := cadenceManifest{
 		Version: cadenceManifestVersion, Nonce: "walk-2026-09-04",
 		StartedAt: started.Format(time.RFC3339Nano), DueAt: started.Add(time.Hour).Format(time.RFC3339Nano),
+		PackagePath: "state/retros/cos-2026-09-04.md",
 		Members: []cadenceManifestMember{
 			{Coordinator: "backend", DispatchNonce: "flotilla-dispatch-aabbccdd", ArtifactPath: "state/retros/inputs/backend.md"},
 			{Coordinator: "frontend", DispatchNonce: "flotilla-dispatch-eeff0011", ArtifactPath: "state/retros/inputs/frontend.md"},
 		},
 	}
+	writeCadenceArtifact(t, rosterDir, manifest.PackagePath, started.Add(20*time.Minute))
 	return manifest, cfg, rosterDir, started
 }
 
@@ -85,7 +87,7 @@ func TestCadenceStatusReportsReceiptsArtifactsAndCompleteBar(t *testing.T) {
 	if len(doc.OverdueMembers) != 0 {
 		t.Fatalf("overdue members = %v", doc.OverdueMembers)
 	}
-	if doc.CompletionBar != (cadenceCompletionBar{Completed: 2, Total: 2, Remaining: 0, Percent: 100, State: "complete"}) {
+	if doc.CompletionBar != (cadenceCompletionBar{Completed: 3, Total: 3, Remaining: 0, Percent: 100, State: "complete"}) {
 		t.Fatalf("completion bar = %+v", doc.CompletionBar)
 	}
 }
@@ -110,7 +112,7 @@ func TestCadenceStatusNamesOverdueMissingMember(t *testing.T) {
 	if doc.DispatchReceipts[1].Disposition != "unknown" {
 		t.Fatalf("frontend receipt = %+v, want unknown", doc.DispatchReceipts[1])
 	}
-	if doc.CompletionBar != (cadenceCompletionBar{Completed: 1, Total: 2, Remaining: 1, Percent: 50, State: "overdue"}) {
+	if doc.CompletionBar != (cadenceCompletionBar{Completed: 2, Total: 3, Remaining: 1, Percent: 66, State: "overdue"}) {
 		t.Fatalf("completion bar = %+v", doc.CompletionBar)
 	}
 }
@@ -127,8 +129,50 @@ func TestCadenceStatusDoesNotCompleteWithoutConsumedReceipt(t *testing.T) {
 	if !doc.RecursiveArtifactPaths[0].Current || doc.DispatchReceipts[0].Disposition != "unknown" {
 		t.Fatalf("evidence = artifact %+v receipt %+v", doc.RecursiveArtifactPaths[0], doc.DispatchReceipts[0])
 	}
-	if doc.CompletionBar != (cadenceCompletionBar{Completed: 0, Total: 1, Remaining: 1, Percent: 0, State: "in_progress"}) {
+	if doc.CompletionBar != (cadenceCompletionBar{Completed: 1, Total: 2, Remaining: 1, Percent: 50, State: "in_progress"}) {
 		t.Fatalf("completion bar = %+v", doc.CompletionBar)
+	}
+}
+
+func TestCadenceStatusDoesNotCompleteWithoutSynthesisPackage(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	if err := os.Remove(filepath.Join(rosterDir, filepath.FromSlash(manifest.PackagePath))); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range manifest.Members {
+		agent, err := cfg.Agent(member.Coordinator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeCadenceArtifact(t, agent.WorktreePath, member.ArtifactPath, started.Add(10*time.Minute))
+		if _, err := dispatch.Consume(rosterDir, dispatch.ConsumedEntry{
+			Nonce: member.DispatchNonce, PayloadHash: member.Coordinator + "-payload", ConsumedAt: started.Add(5 * time.Minute),
+			Reason: dispatch.ReasonDurableAck, Sender: "xo", Recipient: member.Coordinator,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.CompletionBar.State == "complete" || doc.CompletionBar.Completed != 2 || doc.CompletionBar.Total != 3 {
+		t.Fatalf("missing synthesis package completion = %+v", doc.CompletionBar)
+	}
+	if doc.SynthesisPackage.Present || doc.SynthesisPackage.Current {
+		t.Fatalf("missing synthesis package = %+v", doc.SynthesisPackage)
+	}
+}
+
+func TestCadenceStatusDoesNotCompleteWithStaleSynthesisPackage(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	writeCadenceArtifact(t, rosterDir, manifest.PackagePath, started.Add(-time.Minute))
+	doc, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.SynthesisPackage.Current || doc.CompletionBar.State == "complete" {
+		t.Fatalf("stale synthesis package completed cadence: package=%+v bar=%+v", doc.SynthesisPackage, doc.CompletionBar)
 	}
 }
 
@@ -146,6 +190,18 @@ func TestCadenceStatusRejectsStaleArtifact(t *testing.T) {
 	}
 	if doc.CompletionBar.State != "in_progress" || len(doc.OverdueMembers) != 0 {
 		t.Fatalf("pre-deadline status = bar %+v overdue %v", doc.CompletionBar, doc.OverdueMembers)
+	}
+}
+
+func TestCadenceStatusSynthesisCollisionUsesCoordinatorNeutralWording(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	manifest.PackagePath = filepath.Join(cfg.Agents[1].WorktreePath, filepath.FromSlash(manifest.Members[0].ArtifactPath))
+	_, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+	if err == nil || !strings.Contains(err.Error(), `artifact owners "synthesis package" and "backend"`) {
+		t.Fatalf("collision error = %v, want coordinator-neutral owners", err)
+	}
+	if strings.Contains(err.Error(), "coordinators") {
+		t.Fatalf("collision mislabels synthesis package as coordinator: %v", err)
 	}
 }
 
@@ -254,7 +310,7 @@ func TestCadenceStatusJSONContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"expected_coordinators", "dispatch_receipts", "recursive_artifact_paths", "overdue_members", "completion_bar"} {
+	for _, field := range []string{"expected_coordinators", "dispatch_receipts", "recursive_artifact_paths", "synthesis_package", "overdue_members", "completion_bar"} {
 		if !json.Valid(raw) || !containsJSONField(raw, field) {
 			t.Fatalf("JSON missing %q: %s", field, raw)
 		}
@@ -284,11 +340,13 @@ func TestCmdCadenceStatusJSONReadsDefaultManifest(t *testing.T) {
 	manifest := cadenceManifest{
 		Version: cadenceManifestVersion, Nonce: "retro-2026-09-04",
 		StartedAt: started.Format(time.RFC3339Nano), DueAt: started.Add(time.Hour).Format(time.RFC3339Nano),
+		PackagePath: "state/retros/cos-2026-09-04.md",
 		Members: []cadenceManifestMember{{
 			Coordinator: "backend", DispatchNonce: "flotilla-dispatch-1234abcd",
 			ArtifactPath: "state/retros/inputs/backend.md",
 		}},
 	}
+	writeCadenceArtifact(t, rosterDir, manifest.PackagePath, started.Add(45*time.Second))
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -359,6 +417,22 @@ func TestLoadCadenceManifestRequiresRosterCoordinators(t *testing.T) {
 	}
 	if _, err := loadCadenceManifest(path, manifest.Nonce, cfg); err == nil {
 		t.Fatal("non-coordinator member accepted")
+	}
+}
+
+func TestLoadCadenceManifestRequiresSynthesisPackagePath(t *testing.T) {
+	manifest, cfg, _, _ := cadenceFixture(t)
+	manifest.PackagePath = ""
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCadenceManifest(path, manifest.Nonce, cfg); err == nil || !strings.Contains(err.Error(), "package_path") {
+		t.Fatalf("missing package path error = %v", err)
 	}
 }
 
