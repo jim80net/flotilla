@@ -375,7 +375,7 @@ func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testin
 		t.Fatal(err)
 	}
 	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
-	writeLastRecycle("backend", plan, "done", nil, worktreeCloseNote{}, process)
+	finalizeRecycleStatus("backend", plan, "done", nil, worktreeCloseNote{}, process)
 	final, err := latestRecycleStatus(home, "backend")
 	if err != nil {
 		t.Fatal(err)
@@ -383,8 +383,53 @@ func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testin
 	if final.Phase != recyclePhaseTakeoverConfirmed || final.InProgress || !final.OK {
 		t.Fatalf("final status = %+v", final)
 	}
-	if _, err := os.Stat(recyclePhasePath(home, "backend")); !os.IsNotExist(err) {
+	if _, err := os.Stat(recyclePhasePath(home, "backend", plan.token)); !os.IsNotExist(err) {
 		t.Fatalf("completed phase sidecar still exists: %v", err)
+	}
+}
+
+func TestStaleRecycleTerminalRemovesOnlyItsPhaseAndPreservesSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	success := testPlan()
+	success.token = "SUCCESS"
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+
+	stale := testPlan()
+	stale.token = "STALE"
+	if err := writeRecyclePhase("backend", stale, recyclePhaseHandoffWritten); err != nil {
+		t.Fatal(err)
+	}
+	newer := testPlan()
+	newer.token = "NEWER"
+	if err := writeRecyclePhase("backend", newer, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	finalizeRecycleStatus("backend", stale, "", fmt.Errorf("wrapped: %w", errRecycleStaleRetry), worktreeCloseNote{})
+
+	if _, err := os.Stat(recyclePhasePath(home, "backend", stale.token)); !os.IsNotExist(err) {
+		t.Fatalf("stale terminal phase still exists: %v", err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", newer.token)); err != nil {
+		t.Fatalf("newer token phase was removed: %v", err)
+	}
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Token != success.token || !rec.OK {
+		t.Fatalf("successful record was masked or replaced: %+v", rec)
+	}
+	if err := os.Remove(recyclePhasePath(home, "backend", newer.token)); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if visible.Token != success.token || visible.InProgress {
+		t.Fatalf("exited stale attempt masked the successful status: %+v", visible)
 	}
 }
 

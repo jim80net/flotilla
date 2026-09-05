@@ -864,7 +864,7 @@ func cmdRecycle(args []string) error {
 			runErr = errors.New("recycle completion: retired process generation was not captured")
 		}
 	}
-	writeLastRecycle(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	finalizeRecycleStatus(agentName, plan, msg, runErr, wtNote, retiredProcess)
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
 		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
@@ -987,8 +987,8 @@ func cmdRecycleStatus(args []string) error {
 	return nil
 }
 
-func recyclePhasePath(home, agent string) string {
-	return filepath.Join(home, ".flotilla", agent, "recycle-phase.json")
+func recyclePhasePath(home, agent, token string) string {
+	return filepath.Join(home, ".flotilla", agent, "recycle-phase-"+token+".json")
 }
 
 func writeRecyclePhase(agent string, p recyclePlan, phase recyclePhase) error {
@@ -1003,22 +1003,26 @@ func writeRecyclePhase(agent string, p recyclePlan, phase recyclePhase) error {
 	if p.selfPath {
 		rec.Mode = "self"
 	}
-	return writeJSONAtomic(recyclePhasePath(home, agent), rec)
+	return writeJSONAtomic(recyclePhasePath(home, agent, p.token), rec)
 }
 
 func latestRecycleStatus(home, agent string) (recycleStatusRecord, error) {
 	last, lastErr := readRecycleStatus(lastRecyclePath(home, agent))
-	phase, phaseErr := readRecycleStatus(recyclePhasePath(home, agent))
-	if phaseErr == nil {
+	phasePaths, phaseGlobErr := filepath.Glob(filepath.Join(home, ".flotilla", agent, "recycle-phase-*.json"))
+	if phaseGlobErr != nil {
+		return recycleStatusRecord{}, phaseGlobErr
+	}
+	for _, phasePath := range phasePaths {
+		phase, phaseErr := readRecycleStatus(phasePath)
+		if phaseErr != nil {
+			return recycleStatusRecord{}, phaseErr
+		}
 		if lastErr != nil || recycleStatusTime(phase).After(recycleStatusTime(last)) {
-			return phase, nil
+			last, lastErr = phase, nil
 		}
 	}
 	if lastErr == nil {
 		return last, nil
-	}
-	if phaseErr != nil && !os.IsNotExist(phaseErr) {
-		return recycleStatusRecord{}, phaseErr
 	}
 	return recycleStatusRecord{}, lastErr
 }
@@ -1076,7 +1080,7 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		"ok":           runErr == nil,
 		"result":       strings.TrimSpace(msg),
 	}
-	phasePath := recyclePhasePath(home, agent)
+	phasePath := recyclePhasePath(home, agent, p.token)
 	if phaseRec, phaseErr := readRecycleStatus(phasePath); phaseErr == nil && phaseRec.Token == p.token {
 		rec["phase"] = phaseRec.Phase
 	}
@@ -1131,15 +1135,25 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		log.Printf("flotilla: recycle: could not finalize the status record: %v", err)
 		return
 	}
-	if phaseRec, phaseErr := readRecycleStatus(phasePath); phaseErr == nil && phaseRec.Token == p.token {
-		if err := os.Remove(phasePath); err != nil && !os.IsNotExist(err) {
-			log.Printf("flotilla: recycle: could not clear completed phase record: %v", err)
-		}
-	}
 	if runErr == nil {
 		if err := recordSuccessfulRecycleCooldown(dir, p.token, at); err != nil {
 			log.Printf("flotilla: recycle: could not record chapter-end cooldown: %v", err)
 		}
+	}
+}
+
+// finalizeRecycleStatus closes the lifecycle of exactly one recycle token. The
+// outcome write is best-effort, but an exited attempt must never remain visible
+// as in-progress. Per-token phase paths make cleanup immune to a concurrent
+// successor publishing a different token between the read and remove.
+func finalizeRecycleStatus(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
+	writeLastRecycle(agent, p, msg, runErr, wt, processes...)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	if err := os.Remove(recyclePhasePath(home, agent, p.token)); err != nil && !os.IsNotExist(err) {
+		log.Printf("flotilla: recycle: could not clear terminal phase record: %v", err)
 	}
 }
 
