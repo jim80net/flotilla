@@ -54,6 +54,9 @@ func TestSessionUncooperative_ProviderAvailabilityProseNotHit(t *testing.T) {
 	for _, prose := range []string{
 		"There are no models available that support this, so I'll do it manually.",
 		"The provider unavailable situation does not change our conclusion.",
+		"Provider unavailable handling is documented for the recovery review.",
+		"Provider stopped is the state we expect during scheduled maintenance.",
+		"No models available is the phrase this test discusses.",
 	} {
 		if hit, phrase := SessionUncooperative(prose + "\n❯ \n"); hit {
 			t.Fatalf("provider prose %q must not diagnose uncooperative, phrase=%q", prose, phrase)

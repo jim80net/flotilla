@@ -76,7 +76,7 @@ func cmdStatus(args []string) error {
 		if fi, statErr := os.Stat(*snapshotPath); statErr == nil {
 			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
-		doc := buildStatusJSONWithDispositions(cfg, xo, generatedAt, snap, loopByAgent, dispositions)
+		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent, dispositions)
 		doc.Quality = harnessquality.LoadSummary(filepath.Dir(*rosterPath), now)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -94,7 +94,7 @@ func cmdStatus(args []string) error {
 // beside pane state; older consumers ignore unknown fields.
 type statusDoc struct {
 	GeneratedAt      string                 `json:"generated_at"`
-	GeneratedAtScope string                 `json:"generated_at_scope"`
+	GeneratedAtScope string                 `json:"generated_at_scope,omitempty"`
 	XO               string                 `json:"xo,omitempty"`
 	Utilization      utilization.Summary    `json:"utilization"`
 	Quality          harnessquality.Summary `json:"harness_quality"`
@@ -125,12 +125,11 @@ type statusItem struct {
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
 // unit-testable with an in-memory snapshot; cmdStatus supplies generated_at
 // (the snapshot's mtime), the loaded snapshot, and pre-derived loop evidence.
-func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) statusDoc {
-	return buildStatusJSONWithDispositions(cfg, xo, generatedAt, snap, loopByAgent, nil)
-}
-
-func buildStatusJSONWithDispositions(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, dispositions map[string]statusSeatDisposition) statusDoc {
-	doc := statusDoc{GeneratedAt: generatedAt, GeneratedAtScope: "detector_snapshot_only", XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
+func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, dispositions map[string]statusSeatDisposition) statusDoc {
+	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
+	if generatedAt != "" {
+		doc.GeneratedAtScope = "detector_snapshot_only"
+	}
 	for _, a := range cfg.Agents {
 		evidence, evidenceOK := loopByAgent[a.Name]
 		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
@@ -209,7 +208,7 @@ func writeStatusWithDispositions(out io.Writer, cfg *roster.Config, xo, snapshot
 		fmt.Fprintf(out, "flotilla status — no readable detector snapshot at %s\n", snapshotPath)
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
-	utilSummary := buildStatusJSONWithDispositions(cfg, xo, "", snap, loopByAgent, dispositions).Utilization
+	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent, dispositions).Utilization
 	fmt.Fprintf(out, "Fleet — %s\n", utilization.Line(utilSummary))
 	if read := utilization.WallRead(utilSummary); read != "" {
 		fmt.Fprintf(out, "Next — %s\n", read)

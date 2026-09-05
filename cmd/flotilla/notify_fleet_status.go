@@ -54,7 +54,8 @@ func loadFleetStatusBlock(rosterPath, skipFrom string) (string, error) {
 	if fi, err := os.Stat(snapshotPath); err == nil {
 		generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 	}
-	doc := buildStatusJSONWithDispositions(cfg, xo, generatedAt, snap, loopByAgent, statusSeatDispositions(rosterDir, cfg))
+	dispositions := statusSeatDispositions(rosterDir, cfg)
+	doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent, dispositions)
 	sdoc := status.Doc{
 		GeneratedAt: doc.GeneratedAt,
 		XO:          doc.XO,

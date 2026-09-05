@@ -80,7 +80,22 @@ func isProviderStoppedFooterLine(line string) bool {
 	line = strings.TrimSpace(line)
 	line = strings.TrimLeft(line, "│┃╭╰─>*❯⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
 	loc := sessionProviderStoppedRE.FindStringIndex(line)
-	return loc != nil && loc[0] == 0 && isThrottleFooterLine(line)
+	if loc == nil || loc[0] != 0 {
+		return false
+	}
+	remainder := strings.TrimSpace(line[loc[1]:])
+	remainder = strings.TrimSpace(strings.TrimLeft(remainder, ".:;!—-"))
+	if remainder == "" {
+		return true
+	}
+	// A provider-stop footer may include a short recovery instruction. Reject
+	// ordinary prose merely because its first words quote the provider phrase.
+	for _, action := range []string{"select ", "choose ", "switch ", "try ", "please ", "run ", "use "} {
+		if strings.HasPrefix(remainder, action) {
+			return isThrottleFooterLine(line)
+		}
+	}
+	return false
 }
 
 func excerptPhrase(tail string, start, end int) string {
