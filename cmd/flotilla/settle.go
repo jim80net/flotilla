@@ -126,6 +126,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return fmt.Errorf("settle: refusing commit: staged files %q are outside the intended settle allowlist %q", extras, intendedFiles)
 	}
 	committed := len(stagedFiles) != 0
+	committedSHA := ""
 	if committed {
 		// Re-read the index at the commit edge. An unrelated actor can stage a
 		// file after the first allowlist check; committing that file would make
@@ -137,8 +138,33 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		if extras := valuesOutsideSet(nonEmptyLines(staged), intendedFiles); len(extras) != 0 {
 			return fmt.Errorf("settle: refusing commit: staged files %q appeared outside the intended settle allowlist %q", extras, intendedFiles)
 		}
-		if _, commitErr := ops.git("commit", "-m", "settle("+plan.Actor+"): "+plan.Reason); commitErr != nil {
-			return fmt.Errorf("settle: commit: %w", commitErr)
+		parentRaw, err := ops.git("rev-parse", "HEAD")
+		if err != nil {
+			return fmt.Errorf("settle: capture parent HEAD: %w", err)
+		}
+		parentSHA := strings.TrimSpace(parentRaw)
+		treeRaw, err := ops.git("write-tree")
+		if err != nil {
+			return fmt.Errorf("settle: write immutable index tree: %w", err)
+		}
+		treeSHA := strings.TrimSpace(treeRaw)
+		treeFilesRaw, err := ops.git("diff", "--name-only", parentSHA, treeSHA)
+		if err != nil {
+			return fmt.Errorf("settle: inspect immutable settle tree: %w", err)
+		}
+		if extras := valuesOutsideSet(nonEmptyLines(treeFilesRaw), intendedFiles); len(extras) != 0 {
+			return fmt.Errorf("settle: refusing commit: immutable tree contains files %q outside the intended settle allowlist %q", extras, intendedFiles)
+		}
+		commitRaw, err := ops.git("commit-tree", treeSHA, "-p", parentSHA, "-m", "settle("+plan.Actor+"): "+plan.Reason)
+		if err != nil {
+			return fmt.Errorf("settle: create immutable settle commit: %w", err)
+		}
+		committedSHA = strings.TrimSpace(commitRaw)
+		if committedSHA == "" {
+			return errors.New("settle: commit-tree returned an empty commit SHA")
+		}
+		if _, err := ops.git("update-ref", "HEAD", committedSHA, parentSHA); err != nil {
+			return fmt.Errorf("settle: advance HEAD to immutable settle commit: %w", err)
 		}
 	}
 	sha, err := ops.git("rev-parse", "HEAD")
@@ -148,6 +174,9 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
 		return errors.New("settle: captured empty HEAD")
+	}
+	if committed && sha != committedSHA {
+		return fmt.Errorf("settle: captured HEAD %s does not match immutable settle commit %s", sha, committedSHA)
 	}
 	remoteLine, err := ops.git("ls-remote", "--exit-code", plan.Remote, plan.Ref)
 	if err != nil {

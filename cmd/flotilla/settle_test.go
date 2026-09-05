@@ -14,12 +14,13 @@ import (
 )
 
 type settleHarness struct {
-	t       *testing.T
-	root    string
-	calls   [][]string
-	failAt  string
-	touched []string
-	audits  []settleAudit
+	t           *testing.T
+	root        string
+	calls       [][]string
+	failAt      string
+	touched     []string
+	audits      []settleAudit
+	headUpdated bool
 }
 
 func newSettleHarness(t *testing.T, backlogBody string) (*settleHarness, settlePlan, settleOps) {
@@ -49,7 +50,19 @@ func newSettleHarness(t *testing.T, backlogBody string) (*settleHarness, settleP
 			case "diff --cached --name-only":
 				return "state/flotilla-backend-backlog.md\n", nil
 			case "rev-parse HEAD":
+				if !h.headUpdated {
+					return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", nil
+				}
 				return "0123456789abcdef0123456789abcdef01234567\n", nil
+			case "write-tree":
+				return "cccccccccccccccccccccccccccccccccccccccc\n", nil
+			case "diff --name-only bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc":
+				return "state/flotilla-backend-backlog.md\n", nil
+			case "commit-tree cccccccccccccccccccccccccccccccccccccccc -p bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -m settle(backend): walk complete":
+				return "0123456789abcdef0123456789abcdef01234567\n", nil
+			case "update-ref HEAD 0123456789abcdef0123456789abcdef01234567 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
+				h.headUpdated = true
+				return "", nil
 			case "ls-remote --exit-code origin " + defaultSettleRef:
 				return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t" + defaultSettleRef + "\n", nil
 			case "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567":
@@ -80,7 +93,11 @@ func TestRunSettleCapturesSHAProvesAncestorThenTouchesMarkers(t *testing.T) {
 		{"add", "--", filepath.Join(h.root, "state", "flotilla-backend-backlog.md")},
 		{"diff", "--cached", "--name-only"},
 		{"diff", "--cached", "--name-only"},
-		{"commit", "-m", "settle(backend): walk complete"},
+		{"rev-parse", "HEAD"},
+		{"write-tree"},
+		{"diff", "--name-only", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccccccccccccccccccc"},
+		{"commit-tree", "cccccccccccccccccccccccccccccccccccccccc", "-p", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "-m", "settle(backend): walk complete"},
+		{"update-ref", "HEAD", "0123456789abcdef0123456789abcdef01234567", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "--exit-code", "origin", defaultSettleRef},
 		{"merge-base", "--is-ancestor", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "0123456789abcdef0123456789abcdef01234567"},
@@ -215,6 +232,7 @@ func TestRunSettleResolvesRelativeFilesFromRosterGitRoot(t *testing.T) {
 
 func TestRunSettleAllowsUnchangedCommittedBacklogWithEmptyIndex(t *testing.T) {
 	h, plan, ops := newSettleHarness(t, "## Backlog\n- [done] already committed\n")
+	h.headUpdated = true
 	const head = "0123456789abcdef0123456789abcdef01234567"
 	baseGit := ops.git
 	ops.git = func(args ...string) (string, error) {
@@ -243,6 +261,41 @@ func TestRunSettleAllowsUnchangedCommittedBacklogWithEmptyIndex(t *testing.T) {
 	}
 	if len(h.touched) != 2 || len(h.audits) != 1 {
 		t.Fatalf("zero-commit settle did not finish: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleRefusesRiderInImmutableIndexTree(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "diff --name-only bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc" {
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "state/flotilla-backend-backlog.md\nunrelated.txt\n", nil
+		}
+		return baseGit(args...)
+	}
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "immutable tree contains") {
+		t.Fatalf("error = %v, want immutable-tree allowlist refusal", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && (call[0] == "commit-tree" || call[0] == "update-ref" || call[0] == "push") {
+			t.Fatalf("immutable rider reached %s: %v", call[0], h.calls)
+		}
+	}
+}
+
+func TestRunSettleConcurrentHeadAdvanceFailsCompareAndSwapBeforePush(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	h.failAt = "update-ref HEAD"
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "advance HEAD") {
+		t.Fatalf("error = %v, want compare-and-swap refusal", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && call[0] == "push" {
+			t.Fatalf("concurrent HEAD rider reached push: %v", h.calls)
+		}
 	}
 }
 
