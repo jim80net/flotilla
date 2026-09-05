@@ -544,10 +544,22 @@ func cmdWatch(args []string) error {
 		// the edge into a present-but-unparseable state. The gate is called only from the detector's
 		// continueXO under its mutex, so the latch inside is single-goroutine.
 		var backlogGate func() backlog.Status
+		var heartbeatBacklogOwed func() bool
 		if *backlogPath != "" {
 			bp := *backlogPath
 			backlogGate = backlogStatusGate(bp, func() ([]byte, error) { return os.ReadFile(bp) }, alert)
+			heartbeatBacklogOwed = func() bool {
+				raw, err := os.ReadFile(bp)
+				return err == nil && len(backlog.Parse(string(raw)).Unblocked) > 0
+			}
 		}
+		heartbeatOwedWork := heartbeatOwedWorkGate(
+			heartbeatBacklogOwed,
+			func() bool { return outbox.HasPendingRecipient(rosterDir, xo) },
+			func() bool {
+				return awaiting.Present() || recipientRoutingHeld(rosterDir, currentRoster(), xo)
+			},
+		)
 
 		// The continuation prompt carries the narrow-answer discipline (advance the next
 		// AUTHORIZED step or reply idle — never manufacture work) and tells the XO how to
@@ -956,6 +968,7 @@ func cmdWatch(args []string) error {
 			MaxMissedAcks:       *maxMissed,
 			MaxQuietIntervals:   *maxQuiet,
 			LivenessPingMode:    cfg.LivenessPingMode,
+			HeartbeatOwedWork:   heartbeatOwedWork,
 			MaxSelfContinuation: *maxSelfCont,
 			BacklogGate:         backlogGate,
 			BacklogStuckCap:     *backlogStuckCap,
@@ -1454,6 +1467,22 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 			flagged = false
 		}
 		return st
+	}
+}
+
+// heartbeatOwedWorkGate joins durable obligation evidence for the primary heartbeat watchdog.
+// Backlog work and recipient-bound outbox entries are positive evidence; an explicit coordinator
+// hold wins over both. With neither source positive, an aged final ack is healthy completed idle,
+// not a wedge. The returned closure is sampled off the detector mutex.
+func heartbeatOwedWorkGate(backlogOwed, hasPendingOutbox, held func() bool) func() bool {
+	return func() bool {
+		if held != nil && held() {
+			return false
+		}
+		if backlogOwed != nil && backlogOwed() {
+			return true
+		}
+		return hasPendingOutbox != nil && hasPendingOutbox()
 	}
 }
 

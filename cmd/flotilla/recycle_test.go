@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -202,6 +203,40 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseTakeoverConfirmed)
 }
 
+func assertRecyclePhases(t *testing.T, got []recyclePhase, want ...recyclePhase) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("recycle phases = %v, want %v", got, want)
+	}
+}
+
+func TestRunRecycleRecordsSuccessBeforePaneTransactionUnlock(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	locked := false
+	recorded := false
+	ops.lock = func(string) (func(), error) {
+		locked = true
+		return func() { locked = false }, nil
+	}
+	ops.recordSuccess = func(_ recyclePlan, _ string, _ worktreeCloseNote, process recycleProcessIdentity) error {
+		if !locked {
+			t.Fatal("successful recycle status was recorded after pane transaction unlock")
+		}
+		if process != r.process {
+			t.Fatalf("recorded process = %+v, want %+v", process, r.process)
+		}
+		recorded = true
+		return nil
+	}
+	if _, _, err := runRecycle(ops, testPlan()); err != nil {
+		t.Fatal(err)
+	}
+	if !recorded || locked {
+		t.Fatalf("recorded=%t locked-after-return=%t", recorded, locked)
+	}
+}
+
 func TestRunRecyclePublishesSuccessBeforePaneLockRelease(t *testing.T) {
 	r := happyRec()
 	ops := fakeRecycleOps(r)
@@ -227,121 +262,6 @@ func TestRunRecyclePublishesSuccessBeforePaneLockRelease(t *testing.T) {
 	}
 }
 
-func assertRecyclePhases(t *testing.T, got []recyclePhase, want ...recyclePhase) {
-	t.Helper()
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("recycle phases = %v, want %v", got, want)
-	}
-}
-
-func TestRunRecycleRefusesWorkingComposingImmediately(t *testing.T) {
-	r := happyRec()
-	r.failPhase0 = true
-	ops := fakeRecycleOps(r)
-	sleeps := 0
-	ops.sleep = func(time.Duration) { sleeps++ }
-
-	_, _, err := runRecycle(ops, testPlan())
-	if err == nil || !strings.Contains(err.Error(), "working/composing") || !strings.Contains(err.Error(), "desk untouched") {
-		t.Fatalf("err = %v, want named composing refusal", err)
-	}
-	if len(r.delivered) != 0 || r.closed || r.respawned || sleeps != 0 {
-		t.Fatalf("composing refusal touched desk: delivered=%v closed=%t respawned=%t sleeps=%d", r.delivered, r.closed, r.respawned, sleeps)
-	}
-	if classifyRecycleAbort(err) != abortComposing || isRetryableBusy(err) {
-		t.Fatalf("composing refusal class=%q retryable=%t", classifyRecycleAbort(err), isRetryableBusy(err))
-	}
-	notice := recycleAbortNotice("backend", "", classifyRecycleAbort(err), err, "")
-	if !strings.Contains(notice, "do NOT use resume --force") || !strings.Contains(notice, "do NOT retry") {
-		t.Fatalf("notice invites unsafe recovery:\n%s", notice)
-	}
-}
-
-func TestRunRecycleRequiresLivePIDToPredateHandoff(t *testing.T) {
-	r := happyRec()
-	r.process.StartedAt = r.handoffAt
-	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
-	if err == nil || !strings.Contains(err.Error(), "does not predate handoff") {
-		t.Fatalf("err = %v, want generation-bound handoff refusal", err)
-	}
-	if r.closed || r.respawned || len(r.delivered) != 1 {
-		t.Fatalf("PID/handoff refusal crossed close boundary: %+v", r)
-	}
-}
-
-func TestRunRecycleRefusesProcessGenerationChangeDuringHandoff(t *testing.T) {
-	r := happyRec()
-	ops := fakeRecycleOps(r)
-	ops.process = func(string) (recycleProcessIdentity, error) {
-		r.processCalls++
-		if r.processCalls == 1 {
-			return r.process, nil
-		}
-		return recycleProcessIdentity{PID: 84, StartedAt: r.process.StartedAt.Add(time.Minute)}, nil
-	}
-	_, _, err := runRecycle(ops, testPlan())
-	if err == nil || !strings.Contains(err.Error(), "process generation changed") {
-		t.Fatalf("err = %v, want process generation refusal", err)
-	}
-	if r.closed || r.respawned {
-		t.Fatalf("generation change crossed close boundary: %+v", r)
-	}
-}
-
-func TestRunRecycleRefusesNewerSuccessfulGenerationBeforeClose(t *testing.T) {
-	r := happyRec()
-	ops := fakeRecycleOps(r)
-	calls := 0
-	ops.newerSuccess = func(recycleProcessIdentity) (recycleStatusRecord, bool, error) {
-		calls++
-		if calls < 3 {
-			return recycleStatusRecord{}, false, nil
-		}
-		return recycleStatusRecord{Agent: "backend", At: "2026-08-21T10:00:30Z", Token: "NEW", OK: true}, true, nil
-	}
-	_, _, err := runRecycle(ops, testPlan())
-	if err == nil || !strings.Contains(err.Error(), "newer successful recycle") || !strings.Contains(err.Error(), "stale retry") {
-		t.Fatalf("err = %v, want newer-generation refusal", err)
-	}
-	if r.closed || r.respawned {
-		t.Fatalf("newer-generation refusal crossed close boundary: %+v", r)
-	}
-}
-
-func TestSuccessfulRecycleForGenerationRefusesLaterStaleRetry(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := lastRecyclePath(home, "backend")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
-	raw := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z","result":"done"}`
-	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := readRecycleStatus(path)
-	if err != nil || !rec.OK || rec.Token != "GEN-1" {
-		t.Fatalf("rec=%+v err=%v", rec, err)
-	}
-	rec, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
-	if err != nil || !stale || rec.Token != "GEN-1" {
-		t.Fatalf("successfulRecycleForGeneration rec=%+v stale=%t err=%v", rec, stale, err)
-	}
-	newProcess := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
-	if _, stale, err := successfulRecycleForGeneration("backend", newProcess, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
-		t.Fatalf("new process generation stale=%t err=%v, want legitimate future recycle", stale, err)
-	}
-	stdout, _ := captureStdoutStderr(t, func() {
-		if err := cmdRecycle([]string{"status", "--json", "backend"}); err != nil {
-			t.Errorf("cmdRecycle status: %v", err)
-		}
-	})
-	if !strings.Contains(stdout, `"token": "GEN-1"`) || !strings.Contains(stdout, `"process_pid": 421`) || !strings.Contains(stdout, `"ok": true`) {
-		t.Fatalf("status JSON = %s", stdout)
-	}
-}
-
 func TestSuccessfulRecycleForGenerationUsesWallClockForLegacyStatus(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -358,46 +278,6 @@ func TestSuccessfulRecycleForGenerationUsesWallClockForLegacyStatus(t *testing.T
 	}
 	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
 		t.Fatalf("older legacy success stale=%t err=%v", stale, err)
-	}
-}
-
-func TestRunRecycleRefusesSuccessfulSameProcessGenerationBeforeDeskTouch(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := lastRecyclePath(home, "backend")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	status := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z"}`
-	if err := os.WriteFile(path, []byte(status), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r := happyRec()
-	r.process = recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
-	ops := fakeRecycleOps(r)
-	ops.newerSuccess = func(process recycleProcessIdentity) (recycleStatusRecord, bool, error) {
-		return successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
-	}
-	_, _, err := runRecycle(ops, testPlan())
-	if !errors.Is(err, errRecycleStaleRetry) || !strings.Contains(err.Error(), "process generation") {
-		t.Fatalf("err = %v, want named stale process-generation refusal", err)
-	}
-	if r.closed || r.respawned || len(r.delivered) != 0 || r.stamped {
-		t.Fatalf("stale retry touched desk: %+v", r)
-	}
-}
-
-func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 123, time.UTC)}
-	writeLastRecycle("backend", testPlan(), "done", nil, worktreeCloseNote{}, process)
-	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) || rec.Mode != "full" {
-		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
 	}
 }
 
@@ -543,10 +423,6 @@ func TestPostHandoffBusyRetryFinalizesAbandonedTokenBeforeNextAttempt(t *testing
 	if err := writeRecyclePhase("backend", second, recyclePhaseAwaitingClose); err != nil {
 		t.Fatal(err)
 	}
-
-	// This is the cmdRecycle continue edge after a retryable phase-2 re-verify
-	// refusal: FIRST has already published handoff-written but will not be the
-	// final attempt in the loop.
 	if err := finalizeRecycleRetry("backend", first); err != nil {
 		t.Fatal(err)
 	}
@@ -555,6 +431,154 @@ func TestPostHandoffBusyRetryFinalizesAbandonedTokenBeforeNextAttempt(t *testing
 	}
 	if _, err := os.Stat(recyclePhasePath(home, "backend", second.token)); err != nil {
 		t.Fatalf("next attempt phase was removed: %v", err)
+	}
+}
+
+func TestRunRecycleRefusesWorkingComposingImmediately(t *testing.T) {
+	r := happyRec()
+	r.failPhase0 = true
+	ops := fakeRecycleOps(r)
+	sleeps := 0
+	ops.sleep = func(time.Duration) { sleeps++ }
+
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "working/composing") || !strings.Contains(err.Error(), "desk untouched") {
+		t.Fatalf("err = %v, want named composing refusal", err)
+	}
+	if len(r.delivered) != 0 || r.closed || r.respawned || sleeps != 0 {
+		t.Fatalf("composing refusal touched desk: delivered=%v closed=%t respawned=%t sleeps=%d", r.delivered, r.closed, r.respawned, sleeps)
+	}
+	if classifyRecycleAbort(err) != abortComposing || isRetryableBusy(err) {
+		t.Fatalf("composing refusal class=%q retryable=%t", classifyRecycleAbort(err), isRetryableBusy(err))
+	}
+	notice := recycleAbortNotice("backend", "", classifyRecycleAbort(err), err, "")
+	if !strings.Contains(notice, "do NOT use resume --force") || !strings.Contains(notice, "do NOT retry") {
+		t.Fatalf("notice invites unsafe recovery:\n%s", notice)
+	}
+}
+
+func TestRunRecycleRequiresLivePIDToPredateHandoff(t *testing.T) {
+	r := happyRec()
+	r.process.StartedAt = r.handoffAt
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
+	if err == nil || !strings.Contains(err.Error(), "does not predate handoff") {
+		t.Fatalf("err = %v, want generation-bound handoff refusal", err)
+	}
+	if r.closed || r.respawned || len(r.delivered) != 1 {
+		t.Fatalf("PID/handoff refusal crossed close boundary: %+v", r)
+	}
+}
+
+func TestRunRecycleRefusesProcessGenerationChangeDuringHandoff(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.process = func(string) (recycleProcessIdentity, error) {
+		r.processCalls++
+		if r.processCalls == 1 {
+			return r.process, nil
+		}
+		return recycleProcessIdentity{PID: 84, StartedAt: r.process.StartedAt.Add(time.Minute)}, nil
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "process generation changed") {
+		t.Fatalf("err = %v, want process generation refusal", err)
+	}
+	if r.closed || r.respawned {
+		t.Fatalf("generation change crossed close boundary: %+v", r)
+	}
+}
+
+func TestRunRecycleRefusesNewerSuccessfulGenerationBeforeClose(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	calls := 0
+	ops.newerSuccess = func(recycleProcessIdentity) (recycleStatusRecord, bool, error) {
+		calls++
+		if calls < 3 {
+			return recycleStatusRecord{}, false, nil
+		}
+		return recycleStatusRecord{Agent: "backend", At: "2026-08-21T10:00:30Z", Token: "NEW", OK: true}, true, nil
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil || !strings.Contains(err.Error(), "newer successful recycle") || !strings.Contains(err.Error(), "stale retry") {
+		t.Fatalf("err = %v, want newer-generation refusal", err)
+	}
+	if r.closed || r.respawned {
+		t.Fatalf("newer-generation refusal crossed close boundary: %+v", r)
+	}
+}
+
+func TestSuccessfulRecycleForGenerationRefusesLaterStaleRetry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	raw := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z","result":"done"}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := readRecycleStatus(path)
+	if err != nil || !rec.OK || rec.Token != "GEN-1" {
+		t.Fatalf("rec=%+v err=%v", rec, err)
+	}
+	rec, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
+	if err != nil || !stale || rec.Token != "GEN-1" {
+		t.Fatalf("successfulRecycleForGeneration rec=%+v stale=%t err=%v", rec, stale, err)
+	}
+	newProcess := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", newProcess, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
+		t.Fatalf("new process generation stale=%t err=%v, want legitimate future recycle", stale, err)
+	}
+	stdout, _ := captureStdoutStderr(t, func() {
+		if err := cmdRecycle([]string{"status", "--json", "backend"}); err != nil {
+			t.Errorf("cmdRecycle status: %v", err)
+		}
+	})
+	if !strings.Contains(stdout, `"token": "GEN-1"`) || !strings.Contains(stdout, `"process_pid": 421`) || !strings.Contains(stdout, `"ok": true`) {
+		t.Fatalf("status JSON = %s", stdout)
+	}
+}
+
+func TestRunRecycleRefusesSuccessfulSameProcessGenerationBeforeDeskTouch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	status := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"GEN-1","ok":true,"process_pid":421,"process_started_at":"2026-08-21T05:30:30Z"}`
+	if err := os.WriteFile(path, []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := happyRec()
+	r.process = recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	ops := fakeRecycleOps(r)
+	ops.newerSuccess = func(process recycleProcessIdentity) (recycleStatusRecord, bool, error) {
+		return successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 54, 0, 0, time.UTC))
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if !errors.Is(err, errRecycleStaleRetry) || !strings.Contains(err.Error(), "process generation") {
+		t.Fatalf("err = %v, want named stale process-generation refusal", err)
+	}
+	if r.closed || r.respawned || len(r.delivered) != 0 || r.stamped {
+		t.Fatalf("stale retry touched desk: %+v", r)
+	}
+}
+
+func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 123, time.UTC)}
+	writeLastRecycle("backend", testPlan(), "done", nil, worktreeCloseNote{}, process)
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) || rec.Mode != "full" {
+		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
 	}
 }
 
@@ -639,6 +663,119 @@ func TestStaleRetryRefusalDoesNotClobberSuccessfulRecycleStatus(t *testing.T) {
 	}
 	if string(got) != string(original) {
 		t.Fatalf("stale refusal clobbered successful status:\n got %s\nwant %s", got, original)
+	}
+}
+
+func TestFailedRecycleStatusRetainsPriorSuccessForStaleGenerationGate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+	failure := testPlan()
+	failure.token = "FAILED"
+	writeLastRecycle("backend", failure, "", errors.New("later attempt failed"), worktreeCloseNote{})
+
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.OK || len(rec.History) == 0 || rec.FirstSuccess == nil {
+		t.Fatalf("failed current record lost successful audit fields: %+v", rec)
+	}
+	statusJSON, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(statusJSON), `"history"`) || !strings.Contains(string(statusJSON), `"first_success"`) {
+		t.Fatalf("recycle status --json shape dropped audit fields: %s", statusJSON)
+	}
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("history success gate got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
+func TestOverlappingFailureWriterSerializesBehindSuccessfulStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	failure := testPlan()
+	failure.token = "FAILED"
+
+	successRead := make(chan struct{})
+	releaseSuccess := make(chan struct{})
+	successDone := make(chan struct{})
+	go func() {
+		defer close(successDone)
+		writeLastRecycleRecord("backend", success, "done", nil, worktreeCloseNote{}, process, func() {
+			close(successRead)
+			<-releaseSuccess
+		})
+	}()
+	<-successRead
+
+	failureStarted := make(chan struct{})
+	failureRead := make(chan struct{})
+	failureDone := make(chan struct{})
+	go func() {
+		defer close(failureDone)
+		close(failureStarted)
+		writeLastRecycleRecord("backend", failure, "", errors.New("overlapping failure"), worktreeCloseNote{}, recycleProcessIdentity{}, func() {
+			close(failureRead)
+		})
+	}()
+	<-failureStarted
+	select {
+	case <-failureRead:
+		t.Fatal("failure writer crossed the successful writer's status lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseSuccess)
+	<-successDone
+	<-failureDone
+
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("serialized overlap lost success authority: got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
+func TestFirstSuccessStillRefusesRetiredGenerationAfterHistoryWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+	for i := 0; i < maxRecycleStatusHistory+1; i++ {
+		failure := testPlan()
+		failure.token = fmt.Sprintf("failure-%02d", i)
+		writeLastRecycle("backend", failure, "", errors.New("later failure"), worktreeCloseNote{})
+	}
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("aged success authority got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
+func TestLegacySuccessfulRecycleWithoutGenerationDoesNotWedgeFutureRecycle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"LEGACY","ok":true}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC()); err != nil || stale {
+		t.Fatalf("legacy pre-generation status stale=%t err=%v, want eligible", stale, err)
 	}
 }
 

@@ -49,18 +49,20 @@ type recycleProcessIdentity struct {
 }
 
 type recycleStatusRecord struct {
-	Agent            string       `json:"agent"`
-	At               string       `json:"at"`
-	HandoffPath      string       `json:"handoff_path"`
-	Token            string       `json:"token"`
-	OK               bool         `json:"ok"`
-	Mode             string       `json:"mode,omitempty"`
-	ProcessPID       int          `json:"process_pid,omitempty"`
-	ProcessStartedAt string       `json:"process_started_at,omitempty"`
-	Result           string       `json:"result,omitempty"`
-	Error            string       `json:"error,omitempty"`
-	Phase            recyclePhase `json:"phase,omitempty"`
-	InProgress       bool         `json:"in_progress,omitempty"`
+	Agent            string                      `json:"agent"`
+	At               string                      `json:"at"`
+	HandoffPath      string                      `json:"handoff_path"`
+	Token            string                      `json:"token"`
+	OK               bool                        `json:"ok"`
+	Mode             string                      `json:"mode,omitempty"`
+	ProcessPID       int                         `json:"process_pid,omitempty"`
+	ProcessStartedAt string                      `json:"process_started_at,omitempty"`
+	Result           string                      `json:"result,omitempty"`
+	Error            string                      `json:"error,omitempty"`
+	History          []recycleStatusHistoryEntry `json:"history,omitempty"`
+	FirstSuccess     *recycleStatusHistoryEntry  `json:"first_success,omitempty"`
+	Phase            recyclePhase                `json:"phase,omitempty"`
+	InProgress       bool                        `json:"in_progress,omitempty"`
 }
 
 type recyclePhase string
@@ -778,6 +780,7 @@ func cmdRecycle(args []string) error {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	var retiredProcess recycleProcessIdentity
+	var plan recyclePlan
 	successRecorded := false
 	ops := recycleOps{
 		resolve:      deliver.Resolve,
@@ -861,7 +864,6 @@ func cmdRecycle(args []string) error {
 	var msg string
 	var wtNote worktreeCloseNote
 	var runErr error
-	var plan recyclePlan
 	for attempt := 0; attempt < attempts; attempt++ {
 		token, terr := recycleToken()
 		if terr != nil {
@@ -966,36 +968,58 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 	if err != nil {
 		return recycleStatusRecord{}, false, err
 	}
-	if !rec.OK {
-		return rec, false, nil
+	candidates := make([]recycleStatusRecord, 0, len(rec.History)+1)
+	if rec.OK {
+		candidates = append(candidates, rec)
 	}
-	at, err := time.Parse(time.RFC3339Nano, rec.At)
-	if err != nil {
-		return recycleStatusRecord{}, false, fmt.Errorf("parse recycle status time %q: %w", rec.At, err)
+	for i := len(rec.History) - 1; i >= 0; i-- {
+		entry := rec.History[i]
+		if entry.OK {
+			candidates = append(candidates, recycleStatusRecord{
+				Agent: agent, At: entry.At, Token: entry.Token, OK: true, Mode: entry.Mode,
+				ProcessPID: entry.ProcessPID, ProcessStartedAt: entry.ProcessStartedAt,
+			})
+		}
 	}
-	if (rec.ProcessPID == 0) != (rec.ProcessStartedAt == "") {
-		return recycleStatusRecord{}, false, fmt.Errorf("incomplete process generation in recycle status")
+	if rec.FirstSuccess != nil && rec.FirstSuccess.OK {
+		entry := rec.FirstSuccess
+		candidates = append(candidates, recycleStatusRecord{
+			Agent: agent, At: entry.At, Token: entry.Token, OK: true, Mode: entry.Mode,
+			ProcessPID: entry.ProcessPID, ProcessStartedAt: entry.ProcessStartedAt,
+		})
 	}
-	if rec.ProcessPID == 0 {
-		// Pre-generation status records remain usable through their durable wall
-		// clock. A success newer than this command still blocks it; an older
-		// legacy success cannot permanently brick all future recycle attempts.
-		return rec, at.After(after), nil
-	}
-	if rec.ProcessPID != 0 {
-		startedAt, err := time.Parse(time.RFC3339Nano, rec.ProcessStartedAt)
+	for _, candidate := range candidates {
+		at, err := time.Parse(time.RFC3339Nano, candidate.At)
 		if err != nil {
-			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle process start time %q: %w", rec.ProcessStartedAt, err)
+			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle status time %q: %w", candidate.At, err)
 		}
-		// A full recycle retires this exact process generation, so another command
-		// aimed at it is stale regardless of wall time. A self recycle rotates
-		// context in-place; the unchanged PID must remain eligible for a later
-		// chapter, while at.After(after) below still catches a concurrent success.
-		if rec.Mode != "self" && rec.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
-			return rec, true, nil
+		if (candidate.ProcessPID == 0) != (candidate.ProcessStartedAt == "") {
+			return recycleStatusRecord{}, false, fmt.Errorf("incomplete process generation in recycle status")
+		}
+		if candidate.ProcessPID == 0 {
+			// Records written before generation tracking had neither mode nor
+			// process fields. Their durable wall clock can still block a command
+			// that was already running, without wedging later generations.
+			if candidate.Mode == "" {
+				if at.After(after) {
+					return candidate, true, nil
+				}
+				continue
+			}
+			return recycleStatusRecord{}, false, fmt.Errorf("successful recycle status lacks process generation; refusing because stale retry and legitimate new generation cannot be distinguished")
+		}
+		startedAt, err := time.Parse(time.RFC3339Nano, candidate.ProcessStartedAt)
+		if err != nil {
+			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle process start time %q: %w", candidate.ProcessStartedAt, err)
+		}
+		if candidate.Mode != "self" && candidate.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
+			return candidate, true, nil
+		}
+		if at.After(after) {
+			return candidate, true, nil
 		}
 	}
-	return rec, at.After(after), nil
+	return rec, false, nil
 }
 
 func cmdRecycleStatus(args []string) error {
@@ -1133,16 +1157,9 @@ func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr
 		if existing, readErr := readRecycleStatus(lastRecyclePath(home, agent)); readErr == nil && existing.OK {
 			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
 			if parseErr != nil || !existingAt.Before(p.startedAt) {
-				// A successful terminal record not proved older than this
-				// attempt is the admission authority. A failure must not
-				// replace or hide it, even when verification of our own
-				// just-written success encountered a transient read error.
 				return
 			}
 		}
-	}
-	if afterExistingCheck != nil {
-		afterExistingCheck()
 	}
 	at := time.Now().UTC()
 	rec := map[string]any{
@@ -1174,11 +1191,20 @@ func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr
 	}
 	final := filepath.Join(dir, "last-recycle.json")
 	audit := priorRecycleStatusAudit(final)
+	if afterExistingCheck != nil {
+		afterExistingCheck()
+	}
 	if len(audit.History) > 0 {
 		rec["history"] = audit.History
 	}
 	if audit.FirstSuccess == nil && runErr == nil {
-		entry := recycleStatusHistoryEntry{At: at.Format(time.RFC3339Nano), Token: p.token, OK: true}
+		entry := recycleStatusHistoryEntry{
+			At: at.Format(time.RFC3339Nano), Token: p.token, OK: true,
+			Mode: rec["mode"].(string), ProcessPID: process.PID,
+		}
+		if !process.StartedAt.IsZero() {
+			entry.ProcessStartedAt = process.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
 		audit.FirstSuccess = &entry
 	}
 	if audit.FirstSuccess != nil {
@@ -1215,10 +1241,13 @@ func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr
 	}
 }
 
-// finalizeRecycleStatus closes the lifecycle of exactly one recycle token. The
-// outcome write is best-effort, but an exited attempt must never remain visible
-// as in-progress. Per-token phase paths make cleanup immune to a concurrent
-// successor publishing a different token between the read and remove.
+// writeLastRecycleRecord preserves the GHI test seam while delegating to the
+// transaction that owns the status lock and atomic replacement.
+func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, process recycleProcessIdentity, afterRead func()) {
+	writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, afterRead, process)
+}
+
+// finalizeRecycleStatus closes the lifecycle of exactly one recycle token.
 func finalizeRecycleStatus(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
 	writeLastRecycle(agent, p, msg, runErr, wt, processes...)
 	if err := clearRecyclePhase(agent, p.token); err != nil {

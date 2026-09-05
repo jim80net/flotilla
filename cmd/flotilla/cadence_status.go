@@ -15,7 +15,7 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 )
 
-const cadenceManifestVersion = 1
+const cadenceManifestVersion = 2
 
 var cadenceNoncePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
@@ -30,11 +30,12 @@ type cadenceStatusArgs struct {
 // cadence is dispatched. It binds prose-free completion checks to the exact
 // coordinators, delivery identities, artifact paths, and wall-clock window.
 type cadenceManifest struct {
-	Version   int                     `json:"version"`
-	Nonce     string                  `json:"nonce"`
-	StartedAt string                  `json:"started_at"`
-	DueAt     string                  `json:"due_at"`
-	Members   []cadenceManifestMember `json:"members"`
+	Version     int                     `json:"version"`
+	Nonce       string                  `json:"nonce"`
+	StartedAt   string                  `json:"started_at"`
+	DueAt       string                  `json:"due_at"`
+	PackagePath string                  `json:"package_path"`
+	Members     []cadenceManifestMember `json:"members"`
 }
 
 type cadenceManifestMember struct {
@@ -51,6 +52,7 @@ type cadenceStatusDoc struct {
 	ExpectedCoordinators   []string                 `json:"expected_coordinators"`
 	DispatchReceipts       []cadenceDispatchReceipt `json:"dispatch_receipts"`
 	RecursiveArtifactPaths []cadenceArtifactStatus  `json:"recursive_artifact_paths"`
+	SynthesisPackage       cadencePackageStatus     `json:"synthesis_package"`
 	OverdueMembers         []string                 `json:"overdue_members"`
 	CompletionBar          cadenceCompletionBar     `json:"completion_bar"`
 }
@@ -74,6 +76,14 @@ type cadenceArtifactStatus struct {
 	NonEmpty    bool   `json:"non_empty"`
 	Current     bool   `json:"current"`
 	ModifiedAt  string `json:"modified_at,omitempty"`
+}
+
+type cadencePackageStatus struct {
+	Path       string `json:"path"`
+	Present    bool   `json:"present"`
+	NonEmpty   bool   `json:"non_empty"`
+	Current    bool   `json:"current"`
+	ModifiedAt string `json:"modified_at,omitempty"`
 }
 
 type cadenceCompletionBar struct {
@@ -190,6 +200,9 @@ func loadCadenceManifest(path, nonce string, cfg *roster.Config) (cadenceManifes
 	if len(manifest.Members) == 0 {
 		return cadenceManifest{}, fmt.Errorf("cadence status: manifest has no expected coordinators")
 	}
+	if strings.TrimSpace(manifest.PackagePath) == "" {
+		return cadenceManifest{}, fmt.Errorf("cadence status: manifest has no package_path")
+	}
 	seen := make(map[string]bool, len(manifest.Members))
 	seenDispatch := make(map[string]string, len(manifest.Members))
 	for _, member := range manifest.Members {
@@ -243,6 +256,27 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		info  os.FileInfo
 	}
 	existingArtifacts := make([]existingArtifact, 0, len(manifest.Members))
+	packagePath := strings.TrimSpace(manifest.PackagePath)
+	if !filepath.IsAbs(packagePath) {
+		packagePath = filepath.Join(rosterDir, packagePath)
+	}
+	packagePath = filepath.Clean(packagePath)
+	packageIdentity, err := canonicalCadenceArtifactPath(packagePath)
+	if err != nil {
+		return cadenceStatusDoc{}, fmt.Errorf("cadence status: resolve synthesis package: %w", err)
+	}
+	artifactOwners[packageIdentity] = "synthesis package"
+	packageArtifact, packageInfo, err := inspectCadenceArtifact("", packagePath, started)
+	if err != nil {
+		return cadenceStatusDoc{}, fmt.Errorf("cadence status: inspect synthesis package: %w", err)
+	}
+	doc.SynthesisPackage = cadencePackageStatus{
+		Path: packageArtifact.Path, Present: packageArtifact.Present, NonEmpty: packageArtifact.NonEmpty,
+		Current: packageArtifact.Current, ModifiedAt: packageArtifact.ModifiedAt,
+	}
+	if packageInfo != nil {
+		existingArtifacts = append(existingArtifacts, existingArtifact{owner: "synthesis package", path: packagePath, info: packageInfo})
+	}
 	for _, member := range manifest.Members {
 		artifactPath, err := resolveCadenceArtifactPath(cfg, rosterDir, member)
 		if err != nil {
@@ -253,7 +287,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 			return cadenceStatusDoc{}, fmt.Errorf("cadence status: resolve artifact for %q: %w", member.Coordinator, err)
 		}
 		if prior := artifactOwners[identity]; prior != "" {
-			return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
+			return cadenceStatusDoc{}, fmt.Errorf("cadence status: artifact owners %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
 		}
 		artifactOwners[identity] = member.Coordinator
 		artifact, info, err := inspectCadenceArtifact(member.Coordinator, artifactPath, started)
@@ -263,7 +297,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		if info != nil {
 			for _, prior := range existingArtifacts {
 				if os.SameFile(prior.info, info) {
-					return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact file %q and %q", prior.owner, member.Coordinator, prior.path, artifactPath)
+					return cadenceStatusDoc{}, fmt.Errorf("cadence status: artifact owners %q and %q resolve to the same artifact file %q and %q", prior.owner, member.Coordinator, prior.path, artifactPath)
 				}
 			}
 			existingArtifacts = append(existingArtifacts, existingArtifact{owner: member.Coordinator, path: artifactPath, info: info})
@@ -272,6 +306,9 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 	}
 
 	completed := 0
+	if doc.SynthesisPackage.Current {
+		completed++
+	}
 	for _, resolvedMember := range resolved {
 		member := resolvedMember.manifest
 		doc.ExpectedCoordinators = append(doc.ExpectedCoordinators, member.Coordinator)
@@ -296,11 +333,11 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		}
 	}
 	sort.Strings(doc.OverdueMembers)
-	total := len(manifest.Members)
+	total := len(manifest.Members) + 1
 	state := "in_progress"
 	if completed == total {
 		state = "complete"
-	} else if len(doc.OverdueMembers) > 0 {
+	} else if len(doc.OverdueMembers) > 0 || (!now.Before(due) && !doc.SynthesisPackage.Current) {
 		state = "overdue"
 	}
 	doc.CompletionBar = cadenceCompletionBar{

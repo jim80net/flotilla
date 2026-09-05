@@ -74,16 +74,17 @@ in durable state, dispatch a one-line ask to the owning XO — don't trawl trans
 For a recursive ceremony, write a versioned manifest at
 `<roster-dir>/cadences/<nonce>.json`, then inspect it with
 `flotilla cadence status <nonce> --json`. The command joins the declared membership
-to the durable dispatch ledgers and the expected files; it reports receipt state,
-resolved artifact paths, overdue coordinators, and a completion bar without asking
-an agent to reconstruct the ceremony from prose.
+to the durable dispatch ledgers, expected input files, and the final synthesis
+package; it reports receipt state, resolved artifact paths, overdue coordinators,
+and a completion bar without asking an agent to reconstruct the ceremony from prose.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "nonce": "walk-2026-09-04",
   "started_at": "2026-09-04T12:00:00Z",
   "due_at": "2026-09-04T13:00:00Z",
+  "package_path": "state/retros/cos-2026-09-04.md",
   "members": [
     {
       "coordinator": "backend",
@@ -108,6 +109,9 @@ dispatch nonce, and
 resolved artifact identity are one-to-one: duplicates fail closed. A receipt
 must name that coordinator or its configured adjutant; any other durable
 recipient is reported as `recipient_mismatch`, not as the coordinator's receipt.
+The synthesis `package_path` resolves beside the roster and is a separate completion
+unit: every member input and receipt can be current while the cadence remains
+incomplete until that non-empty package is written at or after `started_at`.
 
 ## Prompt files
 

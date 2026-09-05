@@ -799,6 +799,7 @@ func TestDetectorOperatorWakeNotBlockedByRotate(t *testing.T) {
 func TestDetectorLivenessWedgeAndRecovery(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo"}, 3, "interval") // alert at K=3 intervals
+	cfg.HeartbeatOwedWork = func() bool { return true }
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
 	f.set("xo", surface.StateIdle)
@@ -819,6 +820,46 @@ func TestDetectorLivenessWedgeAndRecovery(t *testing.T) {
 	d.Tick()
 	if d.wd.Down() {
 		t.Error("a fresh ack should clear the down state")
+	}
+}
+
+func TestDetectorLivenessWedgeRequiresOwedWorkAndIdlePosture(t *testing.T) {
+	tests := []struct {
+		name  string
+		state surface.State
+		owed  bool
+		alert bool
+	}{
+		{name: "healthy-completed-idle", state: surface.StateIdle},
+		{name: "working-on-owed-work", state: surface.StateWorking, owed: true},
+		{name: "unknown-posture", state: surface.StateUnknown, owed: true},
+		{name: "idle-with-unblocked-owed-work", state: surface.StateIdle, owed: true, alert: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture()
+			cfg := f.config("xo", []string{"xo", "backend", "frontend"}, 3, "interval")
+			cfg.HeartbeatOwedWork = func() bool { return tc.owed }
+			d := newDet(t, f, cfg)
+			seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle, "frontend": surface.StateIdle}, "h0")
+			f.set("xo", tc.state)
+			f.set("backend", surface.StateIdle)
+			f.set("frontend", surface.StateIdle)
+			f.signal = "h0"
+			f.ackAge = 4 * time.Minute
+
+			d.Tick()
+			wantAlerts := 0
+			if tc.alert {
+				wantAlerts = 1
+			}
+			if got := len(f.alerts); got != wantAlerts {
+				t.Fatalf("alerts = %v, want count %d", f.alerts, wantAlerts)
+			}
+			if d.wd.Down() != tc.alert {
+				t.Fatalf("watchdog down = %v, want %v", d.wd.Down(), tc.alert)
+			}
+		})
 	}
 }
 
