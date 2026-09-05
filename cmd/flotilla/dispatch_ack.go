@@ -60,7 +60,7 @@ func cmdDispatchAck(args []string) error {
 					st.Remove(pending.ID)
 				}
 			}
-			fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
+			fmt.Println(dispatchAckAlreadyDurableMessage(entry, nonce, from))
 			return nil
 		}
 		if entry.Reason != dispatch.ReasonCoordinatorRecipient && foreign == nil {
@@ -93,4 +93,17 @@ func cmdDispatchAck(args []string) error {
 	st.Remove(match.ID)
 	fmt.Printf("dispatch ack durable nonce=%s recipient=%s\n", nonce, from)
 	return nil
+}
+
+func dispatchAckAlreadyDurableMessage(entry dispatch.ConsumedEntry, nonce, recipient string) string {
+	disposition := "already durable"
+	deskRanAck := "unknown"
+	switch entry.Reason {
+	case dispatch.ReasonCoordinatorRecipient:
+		disposition = "consumed-at-send"
+		deskRanAck = "false"
+	case dispatch.ReasonDurableAck:
+		deskRanAck = "true"
+	}
+	return fmt.Sprintf("dispatch ack %s nonce=%s recipient=%s reason=%s desk-ran-ack=%s", disposition, nonce, recipient, entry.Reason, deskRanAck)
 }
