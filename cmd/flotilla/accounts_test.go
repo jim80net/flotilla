@@ -358,10 +358,17 @@ func TestOAuthOutputBrokerPromptDoesNotDiscardIncompleteURL(t *testing.T) {
 func TestOAuthOutputBrokerEmitsCompletePromptURLBeforeProcessExit(t *testing.T) {
 	var out bytes.Buffer
 	broker := newOAuthOutputBroker(&out)
-	if _, err := broker.Write([]byte("Press Enter to open the browser <https://claude.ai/oauth/authorize?state=needed>")); err != nil {
+	if _, err := broker.Write([]byte("Press Enter to open the browser https://claude.ai/oauth/authorize?state=needed")); err != nil {
 		t.Fatal(err)
 	}
-	want := "OAuth URL: https://claude.ai/oauth/authorize?state=needed\nPress Enter to open the OAuth page in your browser.\n"
+	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
+		t.Fatalf("output before prompt record boundary = %q", got)
+	}
+	input := &oauthPromptInput{src: strings.NewReader("\n"), completePromptRecord: broker.completePromptRecord}
+	if _, err := input.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	want := "Press Enter to open the OAuth page in your browser.\nOAuth URL: https://claude.ai/oauth/authorize?state=needed\n"
 	if got := out.String(); got != want {
 		t.Fatalf("output before provider exit = %q, want %q", got, want)
 	}
@@ -370,13 +377,20 @@ func TestOAuthOutputBrokerEmitsCompletePromptURLBeforeProcessExit(t *testing.T) 
 func TestOAuthOutputBrokerBuffersPromptURLWithSplitNonemptyState(t *testing.T) {
 	var out bytes.Buffer
 	broker := newOAuthOutputBroker(&out)
-	if _, err := broker.Write([]byte("Press Enter to open the browser <https://claude.ai/oauth/authorize?state=need")); err != nil {
+	if _, err := broker.Write([]byte("Press Enter to open the browser https://claude.ai/oauth/authorize?state=need")); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
 		t.Fatalf("partial prompt URL output = %q", got)
 	}
-	if _, err := broker.Write([]byte("ed>")); err != nil {
+	if _, err := broker.Write([]byte("ed")); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "Press Enter to open the OAuth page in your browser.\n" {
+		t.Fatalf("split state emitted without the prompt record boundary: %q", got)
+	}
+	input := &oauthPromptInput{src: strings.NewReader("\n"), completePromptRecord: broker.completePromptRecord}
+	if _, err := input.Read(make([]byte, 1)); err != nil {
 		t.Fatal(err)
 	}
 	want := "Press Enter to open the OAuth page in your browser.\nOAuth URL: https://claude.ai/oauth/authorize?state=needed\n"

@@ -53,9 +53,15 @@ type accountRefreshReport struct {
 var runClaudeAuthLogin = func(configDir string) error {
 	cmd := exec.Command("claude", "auth", "login", "--claudeai")
 	cmd.Env = accountEnv(configDir)
-	cmd.Stdin = os.Stdin
 	stdout := newOAuthOutputBroker(os.Stderr)
 	stderr := newOAuthOutputBroker(os.Stderr)
+	cmd.Stdin = &oauthPromptInput{
+		src: os.Stdin,
+		completePromptRecord: func() {
+			stdout.completePromptRecord()
+			stderr.completePromptRecord()
+		},
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
@@ -134,6 +140,22 @@ type oauthOutputBroker struct {
 	pending bytes.Buffer
 }
 
+// oauthPromptInput turns the operator's response into the provider prompt's
+// structural record boundary. The pending safe URL is emitted before the input
+// reaches the child, so a raw non-newline URL remains usable during login.
+type oauthPromptInput struct {
+	src                  io.Reader
+	completePromptRecord func()
+}
+
+func (r *oauthPromptInput) Read(p []byte) (int, error) {
+	n, err := r.src.Read(p)
+	if n > 0 {
+		r.completePromptRecord()
+	}
+	return n, err
+}
+
 func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 	return &oauthOutputBroker{dst: dst}
 }
@@ -182,6 +204,19 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 func (b *oauthOutputBroker) Flush() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.flushPending()
+}
+
+// completePromptRecord is the pre-exit boundary supplied by the operator's
+// response to an interactive provider prompt. Write boundaries and non-empty
+// state values are deliberately not treated as completion signals.
+func (b *oauthOutputBroker) completePromptRecord() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.flushPending()
+}
+
+func (b *oauthOutputBroker) flushPending() {
 	if b.pending.Len() != 0 {
 		b.emitSafeLine(b.pending.String())
 		b.pending.Reset()
