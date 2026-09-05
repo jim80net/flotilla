@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -389,6 +391,79 @@ func TestOAuthOutputBrokerBuffersPromptURLWithSplitNonemptyState(t *testing.T) {
 	want := "Press Enter to open the OAuth page in your browser.\nOAuth URL: https://claude.ai/oauth/authorize?state=needed\n"
 	if got := out.String(); got != want {
 		t.Fatalf("completed prompt URL output = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeLoginInputBetweenSplitWritesWaitsForOutputRecord(t *testing.T) {
+	helperDir := t.TempDir()
+	helper := `#!/bin/sh
+printf 'Press Enter to open the browser https://claude.ai/oauth/authorize?state=need'
+IFS= read -r answer
+printf 'ed\r'
+`
+	if err := os.WriteFile(filepath.Join(helperDir, "claude"), []byte(helper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", helperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdin, oldStderr := os.Stdin, os.Stderr
+	os.Stdin, os.Stderr = stdinR, stderrW
+	t.Cleanup(func() {
+		os.Stdin, os.Stderr = oldStdin, oldStderr
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+	})
+
+	done := make(chan error, 1)
+	configDir := t.TempDir()
+	go func() { done <- runClaudeAuthLogin(configDir) }()
+	if err := stderrR.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(stderrR)
+	first, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read prompt before operator input: %v", err)
+	}
+	if want := "Press Enter to open the OAuth page in your browser.\n"; first != want {
+		t.Fatalf("pre-input output = %q, want %q", first, want)
+	}
+	if _, err := stdinW.Write([]byte("\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("provider did not finish after operator input")
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrR.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := first + string(rest)
+	truncated := "OAuth URL: https://claude.ai/oauth/authorize?state=need\n"
+	complete := "OAuth URL: https://claude.ai/oauth/authorize?state=needed\n"
+	if strings.Contains(all, truncated) || strings.Count(all, complete) != 1 {
+		t.Fatalf("split provider output crossed the boundary incorrectly: %q", all)
 	}
 }
 
