@@ -116,8 +116,8 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if err != nil {
 		return err
 	}
-	if !equalStringSets(stagedFiles, intendedFiles) {
-		return fmt.Errorf("settle: refusing commit: staged files %q do not exactly match intended settle files %q", stagedFiles, intendedFiles)
+	if extras := valuesOutsideSet(stagedFiles, intendedFiles); len(extras) != 0 {
+		return fmt.Errorf("settle: refusing commit: staged files %q are outside the intended settle allowlist %q", extras, intendedFiles)
 	}
 	committed := len(stagedFiles) != 0
 	if committed {
@@ -207,24 +207,18 @@ func settleIndexNames(gitRoot string, files []string) ([]string, error) {
 	return names, nil
 }
 
-func equalStringSets(got, want []string) bool {
-	gotSet := make(map[string]struct{}, len(got))
-	wantSet := make(map[string]struct{}, len(want))
+func valuesOutsideSet(got, allowed []string) []string {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, value := range allowed {
+		allowedSet[value] = struct{}{}
+	}
+	var extras []string
 	for _, value := range got {
-		gotSet[value] = struct{}{}
-	}
-	for _, value := range want {
-		wantSet[value] = struct{}{}
-	}
-	if len(gotSet) != len(wantSet) {
-		return false
-	}
-	for value := range wantSet {
-		if _, ok := gotSet[value]; !ok {
-			return false
+		if _, ok := allowedSet[value]; !ok {
+			extras = append(extras, value)
 		}
 	}
-	return true
+	return extras
 }
 
 func realSettleOps(gitRoot string) settleOps {

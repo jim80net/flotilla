@@ -144,8 +144,8 @@ func TestRunSettleRefusesUnrelatedStagedFileBeforeCommitOrPush(t *testing.T) {
 		return baseGit(args...)
 	}
 	err := runSettle(plan, ops)
-	if err == nil || !strings.Contains(err.Error(), "do not exactly match") {
-		t.Fatalf("error = %v, want exact staged-set refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "outside the intended settle allowlist") {
+		t.Fatalf("error = %v, want staged allowlist refusal", err)
 	}
 	for _, call := range h.calls {
 		if len(call) > 0 && (call[0] == "commit" || call[0] == "push") {
@@ -154,6 +154,39 @@ func TestRunSettleRefusesUnrelatedStagedFileBeforeCommitOrPush(t *testing.T) {
 	}
 	if len(h.touched) != 0 || len(h.audits) != 0 {
 		t.Fatalf("staged extra wrote settled state: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleAllowsUnchangedCommittedBacklogWithEmptyIndex(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n- [done] already committed\n")
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch joined {
+		case "diff --cached --name-only":
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "", nil
+		case "ls-remote --exit-code origin " + defaultSettleRef:
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return head + "\t" + defaultSettleRef + "\n", nil
+		case "rev-list --count " + head + ".." + head:
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "0\n", nil
+		default:
+			return baseGit(args...)
+		}
+	}
+	if err := runSettle(plan, ops); err != nil {
+		t.Fatalf("unchanged committed backlog should take zero-commit proof: %v", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && call[0] == "commit" {
+			t.Fatalf("empty cached index invoked commit: %v", h.calls)
+		}
+	}
+	if len(h.touched) != 2 || len(h.audits) != 1 {
+		t.Fatalf("zero-commit settle did not finish: touched=%v audits=%v", h.touched, h.audits)
 	}
 }
 
@@ -184,8 +217,8 @@ func TestRunSettleWithRealIndexRefusesPlantedUnrelatedStagedFile(t *testing.T) {
 		Remote: "origin", Ref: defaultSettleRef,
 	}
 	err := runSettle(plan, realSettleOps(root))
-	if err == nil || !strings.Contains(err.Error(), "do not exactly match") {
-		t.Fatalf("error = %v, want exact staged-set refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "outside the intended settle allowlist") {
+		t.Fatalf("error = %v, want staged allowlist refusal", err)
 	}
 	head := exec.Command("git", "rev-parse", "--verify", "HEAD")
 	head.Dir = root
@@ -196,6 +229,76 @@ func TestRunSettleWithRealIndexRefusesPlantedUnrelatedStagedFile(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(stateDir, "flotilla-backend-"+suffix)); !os.IsNotExist(err) {
 			t.Fatalf("settle wrote %s marker after staged-set refusal: %v", suffix, err)
 		}
+	}
+}
+
+func TestRunSettleWithRealIndexAllowsUnchangedCommittedBacklog(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backlogPath := filepath.Join(stateDir, "flotilla-backend-backlog.md")
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n- [done] already committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"add", "--", "state/flotilla-backend-backlog.md"},
+		{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "baseline"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	headCmd := exec.Command("git", "rev-parse", "HEAD")
+	headCmd.Dir = root
+	headRaw, err := headCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.TrimSpace(string(headRaw))
+
+	t.Setenv("HOME", t.TempDir())
+	plan := settlePlan{
+		Actor: "backend", Reason: "walk complete", RosterPath: filepath.Join(stateDir, "flotilla.json"),
+		Remote: "origin", Ref: defaultSettleRef,
+	}
+	ops := realSettleOps(root)
+	realGit := ops.git
+	pushed := false
+	ops.git = func(args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		switch joined {
+		case "ls-remote --exit-code origin " + defaultSettleRef:
+			return head + "\t" + defaultSettleRef + "\n", nil
+		case "push origin " + head + ":" + defaultSettleRef:
+			pushed = true
+			return "", nil
+		case "fetch --quiet origin " + defaultSettleRef:
+			return "", nil
+		case "merge-base --is-ancestor " + head + " FETCH_HEAD":
+			return "", nil
+		default:
+			return realGit(args...)
+		}
+	}
+	if err := runSettle(plan, ops); err != nil {
+		t.Fatalf("unchanged committed backlog should settle without a commit: %v", err)
+	}
+	if !pushed {
+		t.Fatal("zero-commit settle did not push its captured SHA")
+	}
+	afterCmd := exec.Command("git", "rev-parse", "HEAD")
+	afterCmd.Dir = root
+	afterRaw, err := afterCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(afterRaw)) != head {
+		t.Fatalf("settle created a commit for an unchanged backlog: before=%s after=%s", head, strings.TrimSpace(string(afterRaw)))
 	}
 }
 
