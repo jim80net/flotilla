@@ -22,6 +22,9 @@ var (
 	sessionReachedLimitRE = regexp.MustCompile(`(?i)you(?:'ve| have)\s+reached your\b.{0,80}\blimit\b`)
 	// sessionUsageLimitRE matches bare "usage limit" / "usage-limit" footers.
 	sessionUsageLimitRE = regexp.MustCompile(`(?i)\busage[-\s]?limit\b`)
+	// sessionProviderStoppedRE covers explicit terminal provider availability
+	// chrome. These are status/footer phrases, not a deployment seat name.
+	sessionProviderStoppedRE = regexp.MustCompile(`(?i)\bprovider(?:\s+is)?[-\s]+stopped\b|\bprovider unavailable\b|\bno models available\b`)
 	// sessionRateLimitRE matches provider rate-limit footers (Claude server-side phrase
 	// is checked separately as a fixed string; this covers grok/aider wording).
 	sessionRateLimitRE = regexp.MustCompile(`(?i)\brate limit(?:ed|s)?\b|\brate-limit(?:ed)?\b`)
@@ -50,7 +53,7 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 	// Prose false-positive guard: ordinary conversation that mentions "rate limit"
 	// in scrollback history is excluded by TailRegion; still require non-prose
 	// credit/limit patterns first (most load-bearing for #558).
-	for _, re := range []*regexp.Regexp{sessionUsageCreditRE, sessionReachedLimitRE, sessionUsageLimitRE} {
+	for _, re := range []*regexp.Regexp{sessionUsageCreditRE, sessionReachedLimitRE, sessionUsageLimitRE, sessionProviderStoppedRE} {
 		if loc := re.FindStringIndex(lower); loc != nil {
 			return true, excerptPhrase(tail, loc[0], loc[1])
 		}

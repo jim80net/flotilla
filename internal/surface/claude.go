@@ -73,6 +73,8 @@ func (c claudeCode) Submit(pane, text string) error { return c.send(pane, text) 
 //     glitch on an EXISTING non-shell pane — non-material into AND out of, so it
 //     never diffs as Working→Idle ("finished a turn") and fires a spurious wake;
 //     #55, converging with aider/opencode/grok)
+//   - provider/model-limit dead-end banner         → Errored (external pane
+//     evidence; a stopped session is not idle/available)
 //   - else the working-spinner is present          → Working, else Idle
 //
 // (Refines the surface-driver extraction's prior "read-error ⇒ Shell" fast-path,
@@ -99,6 +101,17 @@ func (c claudeCode) Assess(pane string) State {
 		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as unknown, not a false finish)", pane, err)
 		return StateUnknown
 	}
+	// Structurally live choice chrome outranks terminal wording co-present in
+	// the banner: the operator can still choose Switch model / Exit.
+	if InteractiveConfirmPrompt(captured) {
+		return StateAwaitingInput
+	}
+	// Some stopped sessions retain an idle-looking composer below their banner.
+	// The pane is observed by the detector; this does not rely on a wedged desk
+	// producing a self-report.
+	if unavailable, _ := deliver.SessionUncooperative(captured); unavailable {
+		return StateErrored
+	}
 	// Working requires cursor-vouched composer provenance. On cursor failure or
 	// copy/view mode, do not trust prompt glyphs in text: they may be historical.
 	// Confirm's composer gate still guards any subsequent paste.
@@ -110,12 +123,6 @@ func (c claudeCode) Assess(pane string) State {
 	}
 	if busy {
 		return StateWorking
-	}
-	// Interactive confirmation chrome (worktree-exit, numbered confirm, AskUserQuestion-
-	// style menus) must not read as plain Idle — recycle refuses idle∧cleared on the same
-	// frames, and status/loop_posture must not claim a safe seam (#557).
-	if InteractiveConfirmPrompt(captured) {
-		return StateAwaitingInput
 	}
 	return StateIdle
 }

@@ -265,6 +265,8 @@ func TestCodexAssess(t *testing.T) {
 		{"copy mode rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› \n/ for commands", nil, 1, true, nil, StateIdle},
 		{"cursor error rejects working provenance", "codex", nil, false, "◦ Working (3s • esc to interrupt)\n› \n/ for commands", nil, 1, false, boom, StateIdle},
 		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, 0, false, nil, StateIdle},
+		{"provider-stopped idle composer → errored", "codex", nil, false, "Provider stopped\n› \n/ for commands", nil, 1, false, nil, StateErrored},
+		{"provider-stopped login choice stays awaiting-input", "codex", nil, false, "Provider stopped\nWelcome to Codex\nSign in with ChatGPT", nil, 2, false, nil, StateAwaitingInput},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

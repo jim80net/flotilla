@@ -12,6 +12,7 @@ import (
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -274,6 +275,102 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 	}
 	if !foundData {
 		t.Fatalf("CLI status missing data row:\n%s", text.String())
+	}
+}
+
+func TestStatusCloseOutDispositionTriState(t *testing.T) {
+	rosterDir := t.TempDir()
+	documentDeskDir := filepath.Join(rosterDir, "desks", "frontend")
+	if err := os.MkdirAll(documentDeskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(documentDeskDir, "CLOSE-OUT-20260814.md"),
+		[]byte("# Close-out\n\n**When:** 2026-08-14T02:06Z\n\nThe seat is provider-stopped.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rosterDir, "desks", "xo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rosterDir, "desks", "xo", "CLOSE-OUT-20260813.md"), []byte("retained audit record"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	closed, restored := true, false
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "backend", ClosedOut: &closed},
+		{Name: "frontend"},
+		{Name: "xo", ClosedOut: &restored},
+	}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{}}
+	loop := map[string]loopposture.Evidence{}
+	for _, agent := range cfg.Agents {
+		snap.DeskStates[agent.Name] = surface.StateIdle
+		loop[agent.Name] = loopposture.Evidence{Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1}
+	}
+	dispositions := statusSeatDispositions(rosterDir, cfg)
+	doc := buildStatusJSONWithDispositions(cfg, "xo", "", snap, loop, dispositions)
+	for _, index := range []int{0, 1} {
+		if got := doc.Agents[index]; got.State != "closed-out" || got.LoopPosture != "unavailable" || got.QueueState != utilization.QueueUnknown {
+			t.Errorf("proven closed seat %q = %+v, want closed-out/unavailable/unknown", got.Name, got)
+		}
+	}
+	if got := doc.Agents[2]; got.State != "idle" || got.LoopPosture != "available" {
+		t.Errorf("proven open seat %q = %+v, want idle/available", got.Name, got)
+	}
+	if doc.Utilization.AcceptsDispatch != 1 {
+		t.Fatalf("accepts_dispatch = %d, want only xo", doc.Utilization.AcceptsDispatch)
+	}
+
+	var text bytes.Buffer
+	writeStatusWithDispositions(&text, cfg, "xo", "missing", "missing", snap, false, time.Now(), loop, dispositions)
+	for _, want := range []string{
+		"backend   closed-out  unavailable",
+		"frontend  closed-out  unavailable",
+		"xo        idle        available",
+	} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("CLI status missing %q:\n%s", want, text.String())
+		}
+	}
+
+	unreadableDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(unreadableDir, "desks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unreadableDir, "desks", "backend"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unreadableCfg := &roster.Config{Agents: []roster.Agent{{Name: "backend"}}}
+	unreadableSnap := watch.Snapshot{DeskStates: map[string]surface.State{"backend": surface.StateIdle}}
+	unreadableLoop := map[string]loopposture.Evidence{"backend": {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1}}
+	unreadableDoc := buildStatusJSONWithDispositions(unreadableCfg, "backend", "", unreadableSnap, unreadableLoop, statusSeatDispositions(unreadableDir, unreadableCfg))
+	if got := unreadableDoc.Agents[0]; got.State != "unknown" || got.LoopPosture != "unavailable" || got.QueueState != utilization.QueueUnknown {
+		t.Fatalf("unreadable disposition = %+v, want unknown/unavailable/unknown", got)
+	}
+}
+
+func TestStatusUnavailableLiveEvidenceOverridesIdleAvailabilityWithoutCloseOut(t *testing.T) {
+	// No CLOSE-OUT documents or roster dispositions: external detector evidence
+	// alone must keep a missing process and a model-limited process unavailable.
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "backend"}, {Name: "frontend"}, {Name: "xo"}}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"backend":  surface.StateShell,   // no live session/process
+		"frontend": surface.StateErrored, // provider/model-limit banner
+		"xo":       surface.StateIdle,
+	}}
+	loop := map[string]loopposture.Evidence{
+		"backend":  {Pane: surface.StateShell, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
+		"frontend": {Pane: surface.StateErrored, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
+		"xo":       {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1},
+	}
+	doc := buildStatusJSONWithDispositions(cfg, "xo", "", snap, loop, statusSeatDispositions(t.TempDir(), cfg))
+	if got := doc.Agents[0]; got.State != "crashed" || got.LoopPosture == "available" {
+		t.Fatalf("no-session backend = %+v, want crashed and not available", got)
+	}
+	if got := doc.Agents[1]; got.State != "errored" || got.LoopPosture == "available" {
+		t.Fatalf("model-limited frontend = %+v, want errored and not available", got)
+	}
+	if got := doc.Agents[2]; got.State != "idle" || got.LoopPosture != "available" {
+		t.Fatalf("healthy xo control = %+v, want idle/available", got)
 	}
 }
 
