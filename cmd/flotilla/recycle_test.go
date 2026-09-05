@@ -334,6 +334,33 @@ func TestFailedRecycleDoesNotOverwriteConcurrentSuccess(t *testing.T) {
 	}
 }
 
+func TestFailedRecycleDoesNotReplacePossibleSuccessOnTransientReadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"SUCCESS","ok":true}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failure := testPlan()
+	failure.token = "FAILED"
+	failure.startedAt = time.Now().UTC().Add(-time.Minute)
+	readErr := errors.New("transient status read failure")
+	writeLastRecycleWithStatusReader("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{}, func(string) (recycleStatusRecord, error) {
+		return recycleStatusRecord{}, readErr
+	})
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("transient read error allowed failure replacement:\n got %s\nwant %s", got, original)
+	}
+}
+
 func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

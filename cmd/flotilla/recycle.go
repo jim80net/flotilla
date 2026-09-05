@@ -1124,6 +1124,14 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 // decision and atomic replacement. The optional barrier is test-only orchestration for
 // proving an overlapping writer cannot publish between that decision and the rename.
 func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), processes ...recycleProcessIdentity) {
+	writeLastRecycleTransaction(agent, p, msg, runErr, wt, afterExistingCheck, readRecycleStatus, processes...)
+}
+
+func writeLastRecycleWithStatusReader(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) {
+	writeLastRecycleTransaction(agent, p, msg, runErr, wt, nil, readStatus, processes...)
+}
+
+func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) {
 	var process recycleProcessIdentity
 	if len(processes) > 0 {
 		process = processes[0]
@@ -1154,7 +1162,11 @@ func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
 	if runErr != nil && !p.startedAt.IsZero() {
-		if existing, readErr := readRecycleStatus(lastRecyclePath(home, agent)); readErr == nil && existing.OK {
+		existing, readErr := readStatus(lastRecyclePath(home, agent))
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return
+		}
+		if readErr == nil && existing.OK {
 			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
 			if parseErr != nil || !existingAt.Before(p.startedAt) {
 				return
