@@ -146,11 +146,20 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 		line, err := b.pending.ReadString('\n')
 		if err != nil {
 			_, _ = b.pending.WriteString(line)
-			// Interactive CLIs commonly render an input prompt without a
-			// trailing newline. Emit its canonical form immediately so stdin
-			// remains usable instead of waiting until the child exits.
-			if prompt := safeOAuthPrompt(b.pending.String()); prompt != "" {
+			// Interactive CLIs commonly render the URL and input prompt without
+			// a trailing newline. Emit only their canonical safe forms now so the
+			// browser flow is usable while the child remains running.
+			pending := b.pending.String()
+			emitted := false
+			if authURL := allowedOAuthURL(pending); authURL != "" {
+				fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+				emitted = true
+			}
+			if prompt := safeOAuthPrompt(pending); prompt != "" {
 				fmt.Fprintln(b.dst, prompt)
+				emitted = true
+			}
+			if emitted {
 				b.pending.Reset()
 			}
 			break
@@ -207,7 +216,7 @@ func allowedOAuthURL(line string) string {
 		// Userinfo, explicit ports, and fragments are neither required nor
 		// safe to relay, so reject the entire URL when any is present.
 		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Opaque != "" || u.User != nil ||
-			u.Hostname() == "" || u.Port() != "" || !allowedOAuthHost(u.Hostname()) ||
+			u.Hostname() == "" || !strings.EqualFold(u.Host, u.Hostname()) || !allowedOAuthHost(u.Hostname()) ||
 			u.Path == "" || !strings.HasPrefix(u.Path, "/") || strings.Contains(candidate, "#") {
 			continue
 		}
@@ -270,7 +279,7 @@ func printAccountRefreshReport(report accountRefreshReport, asJSON bool) error {
 	}
 	fmt.Println()
 	if report.Warning != "" {
-		fmt.Printf("CAPACITY_WARN: %s\n", report.Warning)
+		fmt.Printf("CRED_WARN: %s\n", report.Warning)
 	}
 	return nil
 }

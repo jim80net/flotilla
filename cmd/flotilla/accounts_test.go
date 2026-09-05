@@ -302,10 +302,22 @@ func TestOAuthOutputBrokerEmitsNonNewlinePromptImmediately(t *testing.T) {
 	}
 }
 
+func TestOAuthOutputBrokerEmitsNonNewlineURLImmediately(t *testing.T) {
+	var out bytes.Buffer
+	broker := newOAuthOutputBroker(&out)
+	if _, err := broker.Write([]byte("Open https://claude.ai/oauth/authorize?state=needed")); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "OAuth URL: https://claude.ai/oauth/authorize?state=needed\n" {
+		t.Fatalf("brokered URL = %q", got)
+	}
+}
+
 func TestOAuthOutputBrokerRejectsUserinfoAndUnneededURLComponents(t *testing.T) {
 	for _, input := range []string{
 		"Open https://PROVIDER_SECRET@claude.ai/oauth",
 		"Open https://claude.ai:443/oauth",
+		"Open https://claude.ai:/oauth",
 		"Open https://claude.ai/oauth#PROVIDER_SECRET",
 		"Open https://claude.ai",
 	} {
