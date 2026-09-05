@@ -14,6 +14,9 @@ import (
 
 const rootEnv = "FLOTILLA_ACCOUNTS_ROOT"
 
+// ClaudeConfigEnv selects the isolated Claude Code configuration directory.
+const ClaudeConfigEnv = "CLAUDE_CONFIG_DIR"
+
 // ClaudeConfigSubdir is the per-subscription Claude Code config root (CLAUDE_CONFIG_DIR target).
 const ClaudeConfigSubdir = "claude-config"
 
@@ -92,7 +95,7 @@ func WrapClaudeLaunch(surface, subscriptionID, launch string) (string, error) {
 	if !IsClaudeSurface(surface) || subscriptionID == "" {
 		return launch, nil
 	}
-	if strings.Contains(launch, "CLAUDE_CONFIG_DIR=") {
+	if strings.Contains(launch, ClaudeConfigEnv+"=") {
 		return launch, nil
 	}
 	dir, err := ConfigDir(subscriptionID)
@@ -103,7 +106,7 @@ func WrapClaudeLaunch(surface, subscriptionID, launch string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve config dir: %w", err)
 	}
-	return fmt.Sprintf("export CLAUDE_CONFIG_DIR=%s; %s", shellQuote(abs), launch), nil
+	return fmt.Sprintf("export %s=%s; %s", ClaudeConfigEnv, shellQuote(abs), launch), nil
 }
 
 func shellQuote(s string) string {
