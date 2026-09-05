@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -193,6 +194,32 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+}
+
+func TestRunRecycleRecordsSuccessBeforePaneTransactionUnlock(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	locked := false
+	recorded := false
+	ops.lock = func(string) (func(), error) {
+		locked = true
+		return func() { locked = false }, nil
+	}
+	ops.recordSuccess = func(_ string, _ worktreeCloseNote, process recycleProcessIdentity) {
+		if !locked {
+			t.Fatal("successful recycle status was recorded after pane transaction unlock")
+		}
+		if process != r.process {
+			t.Fatalf("recorded process = %+v, want %+v", process, r.process)
+		}
+		recorded = true
+	}
+	if _, _, err := runRecycle(ops, testPlan()); err != nil {
+		t.Fatal(err)
+	}
+	if !recorded || locked {
+		t.Fatalf("recorded=%t locked-after-return=%t", recorded, locked)
 	}
 }
 
@@ -425,6 +452,54 @@ func TestStaleRetryRefusalDoesNotClobberSuccessfulRecycleStatus(t *testing.T) {
 	}
 	if string(got) != string(original) {
 		t.Fatalf("stale refusal clobbered successful status:\n got %s\nwant %s", got, original)
+	}
+}
+
+func TestFailedRecycleStatusRetainsPriorSuccessForStaleGenerationGate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+	failure := testPlan()
+	failure.token = "FAILED"
+	writeLastRecycle("backend", failure, "", errors.New("later attempt failed"), worktreeCloseNote{})
+
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.OK || len(rec.History) == 0 || rec.FirstSuccess == nil {
+		t.Fatalf("failed current record lost successful audit fields: %+v", rec)
+	}
+	statusJSON, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(statusJSON), `"history"`) || !strings.Contains(string(statusJSON), `"first_success"`) {
+		t.Fatalf("recycle status --json shape dropped audit fields: %s", statusJSON)
+	}
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("history success gate got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
+func TestLegacySuccessfulRecycleWithoutGenerationDoesNotWedgeFutureRecycle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"LEGACY","ok":true}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC()); err != nil || stale {
+		t.Fatalf("legacy pre-generation status stale=%t err=%v, want eligible", stale, err)
 	}
 }
 

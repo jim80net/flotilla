@@ -48,16 +48,18 @@ type recycleProcessIdentity struct {
 }
 
 type recycleStatusRecord struct {
-	Agent            string `json:"agent"`
-	At               string `json:"at"`
-	HandoffPath      string `json:"handoff_path"`
-	Token            string `json:"token"`
-	OK               bool   `json:"ok"`
-	Mode             string `json:"mode,omitempty"`
-	ProcessPID       int    `json:"process_pid,omitempty"`
-	ProcessStartedAt string `json:"process_started_at,omitempty"`
-	Result           string `json:"result,omitempty"`
-	Error            string `json:"error,omitempty"`
+	Agent            string                      `json:"agent"`
+	At               string                      `json:"at"`
+	HandoffPath      string                      `json:"handoff_path"`
+	Token            string                      `json:"token"`
+	OK               bool                        `json:"ok"`
+	Mode             string                      `json:"mode,omitempty"`
+	ProcessPID       int                         `json:"process_pid,omitempty"`
+	ProcessStartedAt string                      `json:"process_started_at,omitempty"`
+	Result           string                      `json:"result,omitempty"`
+	Error            string                      `json:"error,omitempty"`
+	History          []recycleStatusHistoryEntry `json:"history,omitempty"`
+	FirstSuccess     *recycleStatusHistoryEntry  `json:"first_success,omitempty"`
 }
 
 func defaultTimeouts() recycleTimeouts {
@@ -88,6 +90,7 @@ type recycleOps struct {
 	reap          func(processes []deliver.ProcessRef) error                      // bounded TERM → KILL with exit confirmation
 	process       func(target string) (recycleProcessIdentity, error)             // live PID + start time
 	recordRetired func(recycleProcessIdentity)                                    // successful recycle's pre-respawn generation
+	recordSuccess func(string, worktreeCloseNote, recycleProcessIdentity)         // persists success while pane txn is still held
 	handoffTime   func(cwd, path string) (time.Time, error)                       // durable handoff mtime
 	newerSuccess  func(recycleProcessIdentity) (recycleStatusRecord, bool, error) // success for this process generation or after command start
 	lock          func(target string) (release func(), err error)                 // AcquirePaneTxn → Release
@@ -286,6 +289,9 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		if ops.recordRetired != nil {
 			ops.recordRetired(process)
 		}
+		if ops.recordSuccess != nil {
+			ops.recordSuccess(msg, worktreeCloseNote{}, process)
+		}
 		return msg, worktreeCloseNote{}, nil
 	}
 
@@ -398,6 +404,9 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	msg += "; closed gracefully, relaunched fresh, took over)\n"
 	if ops.recordRetired != nil {
 		ops.recordRetired(process)
+	}
+	if ops.recordSuccess != nil {
+		ops.recordSuccess(msg, wtNote, process)
 	}
 	return msg, wtNote, nil
 }
@@ -727,6 +736,7 @@ func cmdRecycle(args []string) error {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	var retiredProcess recycleProcessIdentity
+	var plan recyclePlan
 	ops := recycleOps{
 		resolve:      deliver.Resolve,
 		paneID:       deliver.PaneID,
@@ -754,6 +764,9 @@ func cmdRecycle(args []string) error {
 		readGen:       deliver.ReadRecycleGen,
 		process:       recyclePaneProcessIdentity,
 		recordRetired: func(process recycleProcessIdentity) { retiredProcess = process },
+		recordSuccess: func(msg string, wt worktreeCloseNote, process recycleProcessIdentity) {
+			writeLastRecycle(agentName, plan, msg, nil, wt, process)
+		},
 		handoffTime: func(_ string, path string) (time.Time, error) {
 			info, err := os.Stat(path)
 			if err != nil {
@@ -792,7 +805,6 @@ func cmdRecycle(args []string) error {
 	var msg string
 	var wtNote worktreeCloseNote
 	var runErr error
-	var plan recyclePlan
 	for attempt := 0; attempt < attempts; attempt++ {
 		token, terr := recycleToken()
 		if terr != nil {
@@ -825,7 +837,9 @@ func cmdRecycle(args []string) error {
 			runErr = errors.New("recycle completion: retired process generation was not captured")
 		}
 	}
-	writeLastRecycle(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	if runErr != nil {
+		writeLastRecycle(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	}
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
 		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
@@ -890,33 +904,48 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 	if err != nil {
 		return recycleStatusRecord{}, false, err
 	}
-	if !rec.OK {
-		return rec, false, nil
+	candidates := make([]recycleStatusRecord, 0, len(rec.History)+1)
+	if rec.OK {
+		candidates = append(candidates, rec)
 	}
-	at, err := time.Parse(time.RFC3339Nano, rec.At)
-	if err != nil {
-		return recycleStatusRecord{}, false, fmt.Errorf("parse recycle status time %q: %w", rec.At, err)
+	for i := len(rec.History) - 1; i >= 0; i-- {
+		entry := rec.History[i]
+		if entry.OK {
+			candidates = append(candidates, recycleStatusRecord{
+				Agent: agent, At: entry.At, Token: entry.Token, OK: true, Mode: entry.Mode,
+				ProcessPID: entry.ProcessPID, ProcessStartedAt: entry.ProcessStartedAt,
+			})
+		}
 	}
-	if (rec.ProcessPID == 0) != (rec.ProcessStartedAt == "") {
-		return recycleStatusRecord{}, false, fmt.Errorf("incomplete process generation in recycle status")
-	}
-	if rec.ProcessPID == 0 {
-		return recycleStatusRecord{}, false, fmt.Errorf("successful recycle status lacks process generation; refusing because stale retry and legitimate new generation cannot be distinguished")
-	}
-	if rec.ProcessPID != 0 {
-		startedAt, err := time.Parse(time.RFC3339Nano, rec.ProcessStartedAt)
+	for _, candidate := range candidates {
+		at, err := time.Parse(time.RFC3339Nano, candidate.At)
 		if err != nil {
-			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle process start time %q: %w", rec.ProcessStartedAt, err)
+			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle status time %q: %w", candidate.At, err)
 		}
-		// A full recycle retires this exact process generation, so another command
-		// aimed at it is stale regardless of wall time. A self recycle rotates
-		// context in-place; the unchanged PID must remain eligible for a later
-		// chapter, while at.After(after) below still catches a concurrent success.
-		if rec.Mode != "self" && rec.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
-			return rec, true, nil
+		if (candidate.ProcessPID == 0) != (candidate.ProcessStartedAt == "") {
+			return recycleStatusRecord{}, false, fmt.Errorf("incomplete process generation in recycle status")
+		}
+		if candidate.ProcessPID == 0 {
+			// Records written before generation tracking had neither mode nor
+			// process fields. They cannot safely identify this attempt as stale,
+			// so preserve them as audit evidence without wedging all future work.
+			if candidate.Mode == "" {
+				continue
+			}
+			return recycleStatusRecord{}, false, fmt.Errorf("successful recycle status lacks process generation; refusing because stale retry and legitimate new generation cannot be distinguished")
+		}
+		startedAt, err := time.Parse(time.RFC3339Nano, candidate.ProcessStartedAt)
+		if err != nil {
+			return recycleStatusRecord{}, false, fmt.Errorf("parse recycle process start time %q: %w", candidate.ProcessStartedAt, err)
+		}
+		if candidate.Mode != "self" && candidate.ProcessPID == process.PID && startedAt.Equal(process.StartedAt) {
+			return candidate, true, nil
+		}
+		if at.After(after) {
+			return candidate, true, nil
 		}
 	}
-	return rec, at.After(after), nil
+	return rec, false, nil
 }
 
 func cmdRecycleStatus(args []string) error {
