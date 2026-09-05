@@ -28,6 +28,7 @@ type resumeOps struct {
 	newSession func(session, name, cwd, launch string) (string, error)
 	newWindow  func(session, name, cwd, launch string) (string, error)
 	tag        func(target, key string) error
+	reconcile  func(agent, target, slot, surface string) error
 	// preLaunch (optional) runs immediately before ANY process launch (in-place
 	// respawn or cold-create) and never on a refusal — the seam for pre-launch
 	// environment prep (codex trust seeding). Inside runResume, not cmdResume,
@@ -126,7 +127,7 @@ func cmdResume(args []string) error {
 	}
 
 	session, window := launch.ResumeTarget(recipe, agentName)
-	ops := resumeOps{
+	ops := newResumeOps(resumeOpsLeaves{
 		resolve:    deliver.Resolve,
 		assess:     drv.Assess,
 		respawn:    deliver.RespawnPane,
@@ -136,7 +137,7 @@ func cmdResume(args []string) error {
 		newSession: deliver.NewSession,
 		newWindow:  deliver.NewWindow,
 		tag:        deliver.TagPane,
-	}
+	}, selection.Recipe, agent.Surface, deliver.PaneCommand)
 	// Pre-seed codex directory trust for the desk cwd (worktree-aware) before
 	// any launch branch, so a codex harness never boots into the interactive
 	// first-run trust menu a remote coordinator cannot answer. Wired through the
@@ -209,14 +210,14 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 		}
 		switch {
 		case got == p.key:
-			return resumeSuccess(p, fmt.Sprintf("resumed %s in place → pane %s (was %s, marker confirmed)", p.agent, target, st)), nil
+			return finishResume(ops, p, target, fmt.Sprintf("resumed %s in place → pane %s (was %s, marker confirmed)", p.agent, target, st))
 		case got == "":
 			// The pane resolved by TITLE (an untagged desk — the migration case): the
 			// respawned pane has no marker, so ADOPT it by tagging rather than failing.
 			if err := ops.tag(target, p.key); err != nil {
 				return "", err
 			}
-			return resumeSuccess(p, fmt.Sprintf("resumed %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)", p.agent, target, st, p.key)), nil
+			return finishResume(ops, p, target, fmt.Sprintf("resumed %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)", p.agent, target, st, p.key))
 		default:
 			return "", fmt.Errorf("respawned %q at %s but its @flotilla_agent marker reads %q (expected %q) — re-tag it with: flotilla register %s --pane %s", p.agent, target, got, p.key, p.agent, target)
 		}
@@ -274,9 +275,18 @@ func coldCreateResume(ops resumeOps, p resumePlan, discardedStale string) (strin
 		return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
 	}
 	if discardedStale != "" {
-		return resumeSuccess(p, fmt.Sprintf("resumed %s (migrated, discarded stale %s) → pane %s (tagged @flotilla_agent=%s)", p.agent, discardedStale, newTarget, p.key)), nil
+		return finishResume(ops, p, newTarget, fmt.Sprintf("resumed %s (migrated, discarded stale %s) → pane %s (tagged @flotilla_agent=%s)", p.agent, discardedStale, newTarget, p.key))
 	}
-	return resumeSuccess(p, fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)", p.agent, newTarget, p.key)), nil
+	return finishResume(ops, p, newTarget, fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)", p.agent, newTarget, p.key))
+}
+
+func finishResume(ops resumeOps, p resumePlan, target, message string) (string, error) {
+	if ops.reconcile != nil {
+		if err := ops.reconcile(p.agent, target, p.slot, p.selectedSurface); err != nil {
+			return "", fmt.Errorf("%s launched successfully but active-harness reconciliation failed: %w", p.agent, err)
+		}
+	}
+	return resumeSuccess(p, message), nil
 }
 
 func resumeSuccess(p resumePlan, message string) string {

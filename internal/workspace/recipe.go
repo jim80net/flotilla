@@ -161,6 +161,36 @@ func WriteActiveOverlay(agent string, ov ActiveOverlay) error {
 	return nil
 }
 
+// ReconcileActiveOverlay records the harness observed after a successful relaunch.
+// An explicit primary overlay is valid here: unlike ordinary primary selection, this
+// write preserves a successful observation instead of falling back to roster intent.
+func ReconcileActiveOverlay(agent, slot, surface string) error {
+	if slot == "" || surface == "" {
+		return fmt.Errorf("reconcile active-harness overlay: slot and surface are required")
+	}
+	ov, ok, err := ReadActiveOverlay(agent)
+	if err != nil || !ok {
+		ov = ActiveOverlay{}
+	}
+	ov.Slot = slot
+	ov.Surface = surface
+	return WriteActiveOverlay(agent, ov)
+}
+
+// ClearActiveOverlay restores the documented primary/fail-safe representation:
+// no overlay. It is also used when post-launch observation cannot prove which
+// harness is live.
+func ClearActiveOverlay(agent string) error {
+	dir, err := Dir(agent)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dir, ActiveHarnessFileName)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear the active-harness overlay: %w", err)
+	}
+	return nil
+}
+
 // ResolveHarness resolves the desk's LIVE harness slot: it (1) resolves the recipe
 // chain via ResolveRecipe (flat flotilla-launch.json), (2) reads
 // the active-harness overlay's slot name, and (3)
@@ -246,6 +276,17 @@ func ResolveResumeSelection(agent string, flat *launch.Config, defaultSurface st
 		return ResumeSelection{}, fmt.Errorf("resume %q: active-harness overlay surface %q disagrees with slot %q surface %q", agent, ov.Surface, ov.Slot, selection.Surface)
 	}
 	return selection, nil
+}
+
+// ResolvePrimarySelection resolves the canonical primary slot without consulting the
+// active-harness overlay. Full recycle always relaunches primary; this keeps the command,
+// surface, and post-launch overlay reconciliation derived from one slot definition.
+func ResolvePrimarySelection(agent string, flat *launch.Config, defaultSurface string) (ResumeSelection, error) {
+	chain, err := ResolveRecipe(agent, flat)
+	if err != nil {
+		return ResumeSelection{}, err
+	}
+	return resumeSelectionForSlot(chain, SlotPrimary, defaultSurface, "recycle primary")
 }
 
 func resumeSelectionForSlot(chain launch.Recipe, slotName, defaultSurface, source string) (ResumeSelection, error) {

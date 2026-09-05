@@ -148,6 +148,58 @@ func TestWriteActiveOverlayRoundTrips(t *testing.T) {
 	}
 }
 
+func TestReconcileActiveOverlayPrimaryPersistsObservedSurface(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	if err := WriteActiveOverlay("backend", ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileActiveOverlay("backend", SlotPrimary, "claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	if ov, ok, err := ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("ReadActiveOverlay after primary reconcile = (%+v, %v, %v), want observed primary", ov, ok, err)
+	}
+}
+
+func TestReconcileActiveOverlayFallbackPreservesSwitchMetadata(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	wantReason := "capacity fallback"
+	if err := WriteActiveOverlay("backend", ActiveOverlay{Slot: "fallback-0", Surface: "grok", Reason: wantReason, SwitchToken: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileActiveOverlay("backend", "fallback-1", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	ov, ok, err := ReadActiveOverlay("backend")
+	if err != nil || !ok {
+		t.Fatalf("ReadActiveOverlay = (%+v, %v, %v)", ov, ok, err)
+	}
+	if ov.Slot != "fallback-1" || ov.Surface != "codex" || ov.Reason != wantReason || ov.SwitchToken != "token" {
+		t.Fatalf("reconciled overlay = %+v, want routing fields replaced and switch metadata preserved", ov)
+	}
+}
+
+func TestResolvePrimarySelectionIgnoresFallbackOverlay(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	if err := WriteActiveOverlay("backend", ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
+		t.Fatal(err)
+	}
+	flat := &launch.Config{Agents: map[string]launch.Recipe{
+		"backend": {
+			Launch: "legacy-command", Cwd: "/work/backend",
+			Primary:   &launch.HarnessSlot{Surface: "claude-code", Launch: "claude --primary"},
+			Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok --fallback"}},
+		},
+	}}
+	selection, err := ResolvePrimarySelection("backend", flat, "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Slot != SlotPrimary || selection.Surface != "claude-code" || selection.Recipe.Launch != "claude --primary" {
+		t.Fatalf("primary selection = %+v, want explicit primary independent of overlay", selection)
+	}
+}
+
 // TestResolveHarnessAbsentOverlayIsPrimary: no overlay ⇒ the primary slot, which is the
 // resolved flat recipe with slot name "primary".
 func TestResolveHarnessAbsentOverlayIsPrimary(t *testing.T) {

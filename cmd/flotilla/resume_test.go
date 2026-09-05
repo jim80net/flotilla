@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 func TestParseResumeArgs(t *testing.T) {
@@ -147,6 +150,72 @@ func TestRunResumeUsesSelectedFallbackForInPlaceColdAndForce(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunResumePrimaryClearsOverlayOnlyAfterConfirmedLaunch(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	if err := workspace.WriteActiveOverlay("backend", workspace.ActiveOverlay{Slot: workspace.SlotPrimary, Surface: "claude-code", Reason: "stale"}); err != nil {
+		t.Fatal(err)
+	}
+	plan := resumePlan{
+		agent: "backend", key: "backend", cwd: "/work/backend", launch: "claude",
+		session: "flotilla", window: "backend", slot: workspace.SlotPrimary,
+		selectedSurface: "claude-code", launchSource: "launch.json", selectionSource: "active-harness overlay",
+	}
+	rec := &resumeRec{}
+	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, workspace.SlotPrimary, launch.Recipe{Launch: "claude"}, "claude-code", workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
+	}
+	if _, err := runResume(ops, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.respawned {
+		t.Fatal("resume did not relaunch")
+	}
+	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("overlay after confirmed primary relaunch = (%+v, %v, %v), want observed primary", ov, ok, err)
+	}
+}
+
+func TestRunResumeFallbackOverlayMatchesLiveHarnessAfterConfirmedLaunch(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	plan := resumePlan{
+		agent: "backend", key: "backend", cwd: "/work/backend", launch: "grok",
+		session: "flotilla", window: "backend", slot: "fallback-0",
+		selectedSurface: "grok", launchSource: "launch.json", selectionSource: "active-harness overlay",
+	}
+	rec := &resumeRec{}
+	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, "fallback-0", launch.Recipe{Primary: &launch.HarnessSlot{Surface: "claude-code", Launch: "claude"}, Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok"}}}, "claude-code", workspace.ActiveOverlay{}, func(string) (string, error) { return "grok", nil })
+	}
+	if _, err := runResume(ops, plan); err != nil {
+		t.Fatal(err)
+	}
+	ov, ok, err := workspace.ReadActiveOverlay("backend")
+	if err != nil || !ok {
+		t.Fatalf("ReadActiveOverlay = (%+v, %v, %v)", ov, ok, err)
+	}
+	liveSurface, mapped := surface.SurfaceFromPaneCommand("grok")
+	if !mapped || ov.Surface != liveSurface || ov.Slot != "fallback-0" {
+		t.Fatalf("overlay = %+v, live pane surface = %q; want matching fallback", ov, liveSurface)
+	}
+}
+
+func TestRunResumeFailedLaunchDoesNotReconcileOverlay(t *testing.T) {
+	plan := resumePlan{agent: "backend", key: "backend", slot: workspace.SlotPrimary, selectedSurface: "claude-code"}
+	rec := &resumeRec{}
+	ops := fakeOps(rec, "flotilla:1.0", deliver.ResolveUnique, surface.StateShell, plan.key, false)
+	ops.respawn = func(string, string, string) error { return errors.New("launch failed") }
+	called := false
+	ops.reconcile = func(string, string, string, string) error { called = true; return nil }
+	if _, err := runResume(ops, plan); err == nil {
+		t.Fatal("failed relaunch = nil error")
+	}
+	if called {
+		t.Fatal("overlay reconciled before relaunch confirmation")
 	}
 }
 

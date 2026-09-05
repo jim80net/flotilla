@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // recRec records runRecycle's side effects and drives a phase-aware fake: Assess returns
@@ -170,6 +172,47 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+}
+
+func TestRunRecycleReconcilesStaleOverlayAfterConfirmedRelaunch(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	if err := workspace.WriteActiveOverlay("backend", workspace.ActiveOverlay{Slot: "fallback-0", Surface: "grok"}); err != nil {
+		t.Fatal(err)
+	}
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.reconcile = func(agent, target, slot, selectedSurface string) error {
+		return reconcileRelaunchOverlay(agent, target, workspace.SlotPrimary, launch.Recipe{Launch: "claude"}, "claude-code", workspace.ActiveOverlay{}, func(string) (string, error) { return "claude", nil })
+	}
+	plan := testPlan()
+	plan.slot = workspace.SlotPrimary
+	plan.selectedSurface = "claude-code"
+	if _, _, err := runRecycle(ops, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !r.respawned || !r.stamped {
+		t.Fatal("recycle did not reach confirmed relaunch")
+	}
+	if ov, ok, err := workspace.ReadActiveOverlay("backend"); err != nil || !ok || ov.Slot != workspace.SlotPrimary || ov.Surface != "claude-code" {
+		t.Fatalf("overlay after recycle primary relaunch = (%+v, %v, %v), want observed primary", ov, ok, err)
+	}
+}
+
+func TestRunRecycleMarkerMismatchDoesNotReconcileOverlay(t *testing.T) {
+	r := happyRec()
+	r.markerGot = "another-desk"
+	ops := fakeRecycleOps(r)
+	called := false
+	ops.reconcile = func(string, string, string, string) error { called = true; return nil }
+	plan := testPlan()
+	plan.slot = workspace.SlotPrimary
+	plan.selectedSurface = "claude-code"
+	if _, _, err := runRecycle(ops, plan); err == nil {
+		t.Fatal("marker mismatch = nil error")
+	}
+	if called {
+		t.Fatal("overlay reconciled before relaunched marker confirmation")
 	}
 }
 
