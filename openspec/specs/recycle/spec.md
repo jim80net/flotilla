@@ -157,7 +157,9 @@ own output (a side channel) and NEVER into the desk's composer; the recycle SHAL
 host-local per-desk status record (outcome + the designated handoff path + the recovery command for an
 abort) that survives the process. After delivering the takeover, the recycle SHOULD poll best-effort for
 the desk to begin working (a resumption-confidence signal) and report it, without failing the recycle if
-the signal is slow to appear.
+the signal is slow to appear. The host-local status SHALL expose the typed lifecycle phases
+`handoff-written`, `awaiting-close`, `fallback-respawn`, and `takeover-confirmed` through
+`flotilla recycle status --json`, including while a CLI- or watch-started recycle is in progress.
 
 #### Scenario: Takeover is delivered once on the ready fresh session
 
@@ -165,6 +167,13 @@ the signal is slow to appear.
 - **THEN** the imperative takeover turn is delivered exactly once via confirmed delivery, pointing at the
   designated handoff path; recycle status is reported on the command's own output and a host-local status
   record, never the desk's composer
+
+#### Scenario: CLI and watch callers observe typed recycle progress
+
+- **WHEN** a recycle advances through its durable handoff, close, hard-fallback (when applicable), and
+  confirmed takeover edges
+- **THEN** `flotilla recycle status --json <desk>` reports the latest corresponding typed phase, and the
+  final outcome retains the last phase after the in-progress record is cleared
 
 #### Scenario: A recycled remote desk is told to parlay via message
 

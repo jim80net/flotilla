@@ -45,6 +45,7 @@ type recRec struct {
 	process              recycleProcessIdentity
 	handoffAt            time.Time
 	newerSuccessAtCall   int
+	phases               []recyclePhase
 }
 
 func happyRec() *recRec {
@@ -142,6 +143,10 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			}
 			return recycleStatusRecord{}, false, nil
 		},
+		recordPhase: func(_ recyclePlan, phase recyclePhase) error {
+			r.phases = append(r.phases, phase)
+			return nil
+		},
 		lock:  func(string) (func(), error) { r.lockedFlag = true; return func() {}, nil },
 		sleep: func(time.Duration) {},
 		capturePane: func(string) (string, error) {
@@ -193,6 +198,14 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseTakeoverConfirmed)
+}
+
+func assertRecyclePhases(t *testing.T, got []recyclePhase, want ...recyclePhase) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("recycle phases = %v, want %v", got, want)
 	}
 }
 
@@ -341,6 +354,37 @@ func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
 	}
 	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) || rec.Mode != "full" {
 		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
+	}
+}
+
+func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	plan := testPlan()
+	if err := writeRecyclePhase("backend", plan, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	inProgress, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inProgress.Phase != recyclePhaseAwaitingClose || !inProgress.InProgress || inProgress.Token != plan.token {
+		t.Fatalf("in-progress status = %+v", inProgress)
+	}
+	if err := writeRecyclePhase("backend", plan, recyclePhaseTakeoverConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	writeLastRecycle("backend", plan, "done", nil, worktreeCloseNote{}, process)
+	final, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Phase != recyclePhaseTakeoverConfirmed || final.InProgress || !final.OK {
+		t.Fatalf("final status = %+v", final)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend")); !os.IsNotExist(err) {
+		t.Fatalf("completed phase sidecar still exists: %v", err)
 	}
 }
 
@@ -820,6 +864,7 @@ func TestRunRecycleNoGracefulCloseFallsBackToKill(t *testing.T) {
 	if len(r.delivered) != 2 {
 		t.Errorf("the kill-fallback path still takes over (got %v)", r.delivered)
 	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseFallbackRespawn, recyclePhaseTakeoverConfirmed)
 	_ = msg
 }
 
@@ -1204,6 +1249,7 @@ func TestRunRecycleSelfPath(t *testing.T) {
 	if len(r.delivered) != 2 {
 		t.Errorf("want handoff+takeover delivers, got %v", r.delivered)
 	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseTakeoverConfirmed)
 }
 
 // #437 reopen: own-pane --self must skip phase-0 idle (chicken-egg: session driving recycle
