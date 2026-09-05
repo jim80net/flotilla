@@ -92,6 +92,14 @@ func snapshotPaneReapSet(procRoot string, panePID int) ([]ProcessRef, error) {
 			if _, ok := readPipes[stdoutPipe]; !ok {
 				continue
 			}
+			flags, err := readFDFlags(filepath.Join(procRoot, strconv.Itoa(pid), "fdinfo", "1"))
+			if err != nil {
+				continue
+			}
+			mode := flags & syscall.O_ACCMODE
+			if mode != syscall.O_WRONLY && mode != syscall.O_RDWR {
+				continue
+			}
 		}
 		protected, err := protectedRecycleProcess(procRoot, pid, string(paneCgroup))
 		if err != nil {

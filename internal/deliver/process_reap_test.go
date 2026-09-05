@@ -75,3 +75,49 @@ func TestSnapshotPaneReapSetSelectsPipeWritersAndDescendants(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want pipe writer + descendant %+v", got, want)
 	}
 }
+
+func TestSnapshotPaneReapSetDoesNotSelectSamePipeReader(t *testing.T) {
+	root := t.TempDir()
+	const panePID = 100
+	paneCgroup := "0::/user.slice/tmux.service\n"
+	writeProcFixture(t, root, panePID, 1, 10, "grok\x00", paneCgroup)
+	linkProcFD(t, root, panePID, "3", "pipe:[42]", 0)
+
+	// Linux renders both pipe ends as the same pipe:[inode]. A non-descendant
+	// whose stdout is another read end must not be mistaken for a monitor writer.
+	writeProcFixture(t, root, 205, 1, 25, "python3\x00reader.py\x00", paneCgroup)
+	linkProcFD(t, root, 205, "1", "pipe:[42]", 0)
+
+	got, err := snapshotPaneReapSet(root, panePID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("snapshot = %+v, want no non-descendant pipe reader", got)
+	}
+}
+
+func TestSnapshotPaneReapSetDoesNotSelectPipeWhenDirectionIsUnknown(t *testing.T) {
+	root := t.TempDir()
+	const panePID = 100
+	paneCgroup := "0::/user.slice/tmux.service\n"
+	writeProcFixture(t, root, panePID, 1, 10, "grok\x00", paneCgroup)
+	linkProcFD(t, root, panePID, "3", "pipe:[42]", 0)
+
+	writeProcFixture(t, root, 206, 1, 26, "python3\x00monitor.py\x00", paneCgroup)
+	fdDir := filepath.Join(root, "206", "fd")
+	if err := os.MkdirAll(fdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pipe:[42]", filepath.Join(fdDir, "1")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := snapshotPaneReapSet(root, panePID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("snapshot = %+v, want no pipe match without fd direction", got)
+	}
+}
