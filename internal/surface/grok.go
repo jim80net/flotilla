@@ -98,7 +98,14 @@ func (g grok) Assess(pane string) State {
 	if err != nil {
 		return StateUnknown
 	}
-	return g.classify(captured)
+	state := g.classify(captured)
+	if state == StateAwaitingInput || state == StateAwaitingApproval {
+		return state
+	}
+	if unavailable, _ := deliver.SessionUncooperative(captured); unavailable {
+		return StateErrored
+	}
+	return state
 }
 
 // Rotate resets context by injecting grok's "/new" (Start a new session — confirmed in the

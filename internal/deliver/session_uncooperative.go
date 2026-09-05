@@ -22,6 +22,9 @@ var (
 	sessionReachedLimitRE = regexp.MustCompile(`(?i)you(?:'ve| have)\s+reached your\b.{0,80}\blimit\b`)
 	// sessionUsageLimitRE matches bare "usage limit" / "usage-limit" footers.
 	sessionUsageLimitRE = regexp.MustCompile(`(?i)\busage[-\s]?limit\b`)
+	// sessionProviderStoppedRE covers explicit terminal provider availability
+	// chrome. These are status/footer phrases, not a deployment seat name.
+	sessionProviderStoppedRE = regexp.MustCompile(`(?i)\bprovider(?:\s+is)?[-\s]+stopped\b|\bprovider unavailable\b|\bno models available\b`)
 	// sessionRateLimitRE matches provider rate-limit footers (Claude server-side phrase
 	// is checked separately as a fixed string; this covers grok/aider wording).
 	sessionRateLimitRE = regexp.MustCompile(`(?i)\brate limit(?:ed|s)?\b|\brate-limit(?:ed)?\b`)
@@ -55,6 +58,11 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 			return true, excerptPhrase(tail, loc[0], loc[1])
 		}
 	}
+	for _, loc := range sessionProviderStoppedRE.FindAllStringIndex(lower, -1) {
+		if isProviderStoppedFooterLine(lineContaining(lower, loc[0])) {
+			return true, excerptPhrase(tail, loc[0], loc[1])
+		}
+	}
 	// Rate-limit wording in the live tail (grok STATUS / aider retry chrome).
 	if loc := sessionRateLimitRE.FindStringIndex(lower); loc != nil {
 		// Avoid treating a pure prose sentence without chrome as a dead-end when
@@ -66,6 +74,28 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 		}
 	}
 	return false, ""
+}
+
+func isProviderStoppedFooterLine(line string) bool {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "│┃╭╰─>*❯⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+	loc := sessionProviderStoppedRE.FindStringIndex(line)
+	if loc == nil || loc[0] != 0 {
+		return false
+	}
+	remainder := strings.TrimSpace(line[loc[1]:])
+	remainder = strings.TrimSpace(strings.TrimLeft(remainder, ".:;!—-"))
+	if remainder == "" {
+		return true
+	}
+	// A provider-stop footer may include a short recovery instruction. Reject
+	// ordinary prose merely because its first words quote the provider phrase.
+	for _, action := range []string{"select ", "choose ", "switch ", "try ", "please ", "run ", "use "} {
+		if strings.HasPrefix(remainder, action) {
+			return isThrottleFooterLine(line)
+		}
+	}
+	return false
 }
 
 func excerptPhrase(tail string, start, end int) string {

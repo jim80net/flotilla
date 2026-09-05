@@ -42,6 +42,37 @@ func TestSessionUncooperative_GrokRateLimitFooter(t *testing.T) {
 	}
 }
 
+func TestSessionUncooperative_ProviderStoppedFooter(t *testing.T) {
+	captured := "Provider is stopped. Select another provider to continue.\n❯ \n"
+	hit, phrase := SessionUncooperative(captured)
+	if !hit || !strings.Contains(strings.ToLower(phrase), "provider") {
+		t.Fatalf("provider-stopped footer = (%v, %q), want unavailable hit", hit, phrase)
+	}
+}
+
+func TestSessionUncooperative_ProviderAvailabilityProseNotHit(t *testing.T) {
+	for _, prose := range []string{
+		"There are no models available that support this, so I'll do it manually.",
+		"The provider unavailable situation does not change our conclusion.",
+		"Provider unavailable handling is documented for the recovery review.",
+		"Provider stopped is the state we expect during scheduled maintenance.",
+		"No models available is the phrase this test discusses.",
+	} {
+		if hit, phrase := SessionUncooperative(prose + "\n❯ \n"); hit {
+			t.Fatalf("provider prose %q must not diagnose uncooperative, phrase=%q", prose, phrase)
+		}
+	}
+}
+
+func TestSessionUncooperative_LaterProviderStoppedFooterWinsOverEarlierProse(t *testing.T) {
+	captured := "The provider unavailable situation does not change our conclusion.\n" +
+		"ordinary output\nProvider stopped. Select another provider to continue.\n❯ \n"
+	hit, phrase := SessionUncooperative(captured)
+	if !hit || !strings.HasPrefix(phrase, "Provider stopped") {
+		t.Fatalf("later provider-stop footer = (%t, %q), want footer hit", hit, phrase)
+	}
+}
+
 func TestSessionUncooperative_ProseNotHit(t *testing.T) {
 	// Ordinary conversation mentioning limits must not abort recycle as uncooperative.
 	captured := "We discussed how the API rate limit exceeded our quota in the design doc.\n" +

@@ -117,6 +117,8 @@ func TestClaudeAssessParity(t *testing.T) {
 		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)\n❯ ", nil, StateWorking},
 		{"legacy esc-to-interrupt prose → idle", "node", nil, false, "doing\nesc to interrupt\n❯ ", nil, StateIdle},
 		{"idle composer → idle", "node", nil, false, "❯ \n  ⏵⏵ auto mode on", nil, StateIdle},
+		{"model-limit banner with idle composer → errored", "node", nil, false, "You've reached your model limit for this session.\nYou're out of usage credits.\n❯ ", nil, StateErrored},
+		{"model-limit choice chrome → awaiting-input", "node", nil, false, "You've reached your model limit\n  1. Switch model\n  2. Exit\nEnter to confirm", nil, StateAwaitingInput},
 		{"worktree-exit prompt → awaiting-input", "node", nil, false, "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm", nil, StateAwaitingInput},
 	}
 	for _, tc := range cases {
