@@ -82,7 +82,11 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if plan.Reason == "" || plan.Remote == "" || plan.Ref == "" {
 		return errors.New("settle: --reason, --remote, and --ref must be non-empty")
 	}
-	stateDir := filepath.Dir(plan.RosterPath)
+	rosterPath, err := filepath.Abs(plan.RosterPath)
+	if err != nil {
+		return fmt.Errorf("settle: resolve roster path %s: %w", plan.RosterPath, err)
+	}
+	stateDir := filepath.Dir(rosterPath)
 	backlogPath := filepath.Join(stateDir, "flotilla-"+plan.Actor+"-backlog.md")
 	raw, err := ops.readFile(backlogPath)
 	if err != nil {
@@ -96,7 +100,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return fmt.Errorf("settle: backlog is not drained: %d actionable item(s)", len(status.Unblocked))
 	}
 
-	gitRoot := settleGitRoot(plan.RosterPath)
+	gitRoot := settleGitRoot(rosterPath)
 	files := append([]string{backlogPath}, plan.Files...)
 	for i, path := range files {
 		if strings.TrimSpace(path) == "" {
@@ -209,7 +213,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if err != nil || delta < 0 {
 		return fmt.Errorf("settle: refusing push: captured delta %q is not a non-negative commit count", strings.TrimSpace(deltaRaw))
 	}
-	if (!committed && delta != 0) || (committed && delta == 0) {
+	if committed && delta == 0 {
 		return fmt.Errorf("settle: refusing push: captured delta is %d commit(s), inconsistent with committed=%t", delta, committed)
 	}
 	if _, err := ops.git("push", plan.Remote, sha+":"+plan.Ref); err != nil {

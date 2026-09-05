@@ -196,9 +196,12 @@ func TestRunSettleRefusesFileStagedAfterInitialAllowlistCheck(t *testing.T) {
 		t.Fatalf("error = %v, want commit-edge staged allowlist refusal", err)
 	}
 	for _, call := range h.calls {
-		if len(call) > 0 && (call[0] == "commit" || call[0] == "push") {
+		if len(call) > 0 && (call[0] == "commit-tree" || call[0] == "update-ref" || call[0] == "push") {
 			t.Fatalf("late staged extra reached %s: %v", call[0], h.calls)
 		}
+	}
+	if len(h.touched) != 0 || len(h.audits) != 0 {
+		t.Fatalf("late staged extra wrote settled state: touched=%v audits=%v", h.touched, h.audits)
 	}
 }
 
@@ -228,6 +231,63 @@ func TestRunSettleResolvesRelativeFilesFromRosterGitRoot(t *testing.T) {
 	}
 	if !slices.Contains(readPaths, wantPath) {
 		t.Fatalf("read paths = %q, want git-root-relative file %q", readPaths, wantPath)
+	}
+}
+
+func TestRunSettleResolvesNestedRelativeRosterOnce(t *testing.T) {
+	workspace := t.TempDir()
+	gitRoot := filepath.Join(workspace, "fleet")
+	stateDir := filepath.Join(gitRoot, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backlogPath := filepath.Join(stateDir, "flotilla-backend-backlog.md")
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n- [done] shipped\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	plan := settlePlan{
+		Actor: "backend", Reason: "walk complete", RosterPath: filepath.Join("fleet", "state", "flotilla.json"),
+		Remote: "origin", Ref: defaultSettleRef,
+	}
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	var calls [][]string
+	var touched []string
+	ops := settleOps{
+		readFile: os.ReadFile,
+		git: func(args ...string) (string, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch strings.Join(args, " ") {
+			case "diff --cached --name-only":
+				return "", nil
+			case "rev-parse HEAD":
+				return head + "\n", nil
+			case "ls-remote --exit-code origin " + defaultSettleRef:
+				return head + "\t" + defaultSettleRef + "\n", nil
+			case "rev-list --count " + head + ".." + head:
+				return "0\n", nil
+			default:
+				return "", nil
+			}
+		},
+		now:   time.Now,
+		audit: func(string, settleAudit) error { return nil },
+		touch: func(path string) error {
+			touched = append(touched, path)
+			return nil
+		},
+	}
+	if err := runSettle(plan, ops); err != nil {
+		t.Fatal(err)
+	}
+	wantAdd := []string{"add", "--", backlogPath}
+	if len(calls) == 0 || !reflect.DeepEqual(calls[0], wantAdd) {
+		t.Fatalf("first git call = %v, want single-root resolution %v", calls, wantAdd)
+	}
+	for _, path := range touched {
+		if filepath.Dir(path) != stateDir {
+			t.Fatalf("marker path = %q, want state dir %q", path, stateDir)
+		}
 	}
 }
 
@@ -447,19 +507,27 @@ func TestRunSettleDeltaProofFailureRefusesBeforePush(t *testing.T) {
 }
 
 func TestRunSettleRetryAllowsEarlierUnpushedSettleCommit(t *testing.T) {
-	_, plan, ops := newSettleHarness(t, "## Backlog\n")
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
 	baseGit := ops.git
 	ops.git = func(args ...string) (string, error) {
 		switch strings.Join(args, " ") {
+		case "diff --cached --name-only":
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "", nil
 		case "log -m --format= --name-only aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
 			return "state/flotilla-backend-backlog.md\n", nil
-		case "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567":
-			return "2\n", nil
+		case "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
+			return "1\n", nil
 		}
 		return baseGit(args...)
 	}
 	if err := runSettle(plan, ops); err != nil {
 		t.Fatalf("retry with an earlier local settle commit should publish the captured tip: %v", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && (call[0] == "commit-tree" || call[0] == "update-ref") {
+			t.Fatalf("retry with empty index created a new commit: %v", h.calls)
+		}
 	}
 }
 
