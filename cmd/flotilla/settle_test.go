@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,7 @@ func TestRunSettleCapturesSHAProvesAncestorThenTouchesMarkers(t *testing.T) {
 	}
 	wantCalls := [][]string{
 		{"add", "--", filepath.Join(h.root, "state", "flotilla-backend-backlog.md")},
+		{"diff", "--cached", "--name-only"},
 		{"diff", "--cached", "--name-only"},
 		{"commit", "-m", "settle(backend): walk complete"},
 		{"rev-parse", "HEAD"},
@@ -154,6 +156,60 @@ func TestRunSettleRefusesUnrelatedStagedFileBeforeCommitOrPush(t *testing.T) {
 	}
 	if len(h.touched) != 0 || len(h.audits) != 0 {
 		t.Fatalf("staged extra wrote settled state: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleRefusesFileStagedAfterInitialAllowlistCheck(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	baseGit := ops.git
+	diffCalls := 0
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "diff --cached --name-only" {
+			diffCalls++
+			if diffCalls == 2 {
+				h.calls = append(h.calls, append([]string(nil), args...))
+				return "state/flotilla-backend-backlog.md\nunrelated.txt\n", nil
+			}
+		}
+		return baseGit(args...)
+	}
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "appeared outside the intended settle allowlist") {
+		t.Fatalf("error = %v, want commit-edge staged allowlist refusal", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && (call[0] == "commit" || call[0] == "push") {
+			t.Fatalf("late staged extra reached %s: %v", call[0], h.calls)
+		}
+	}
+}
+
+func TestRunSettleResolvesRelativeFilesFromRosterGitRoot(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	plan.Files = []string{"state/result.md"}
+	wantPath := filepath.Join(h.root, "state", "result.md")
+	baseRead := ops.readFile
+	var readPaths []string
+	ops.readFile = func(path string) ([]byte, error) {
+		readPaths = append(readPaths, path)
+		if path == wantPath {
+			return []byte("result\n"), nil
+		}
+		return baseRead(path)
+	}
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "diff --cached --name-only" {
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "state/flotilla-backend-backlog.md\nstate/result.md\n", nil
+		}
+		return baseGit(args...)
+	}
+	if err := runSettle(plan, ops); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(readPaths, wantPath) {
+		t.Fatalf("read paths = %q, want git-root-relative file %q", readPaths, wantPath)
 	}
 }
 
@@ -318,7 +374,7 @@ func TestRunSettleDeltaProofFailureRefusesBeforePush(t *testing.T) {
 	ops.git = func(args ...string) (string, error) {
 		if strings.Join(args, " ") == "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567" {
 			h.calls = append(h.calls, append([]string(nil), args...))
-			return "2\n", nil
+			return "0\n", nil
 		}
 		return baseGit(args...)
 	}
@@ -333,6 +389,20 @@ func TestRunSettleDeltaProofFailureRefusesBeforePush(t *testing.T) {
 	}
 	if len(h.touched) != 0 || len(h.audits) != 0 {
 		t.Fatalf("delta failure wrote settled state: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleRetryAllowsEarlierUnpushedSettleCommit(t *testing.T) {
+	_, plan, ops := newSettleHarness(t, "## Backlog\n")
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567" {
+			return "2\n", nil
+		}
+		return baseGit(args...)
+	}
+	if err := runSettle(plan, ops); err != nil {
+		t.Fatalf("retry with an earlier local settle commit should publish the captured tip: %v", err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,11 +96,16 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return fmt.Errorf("settle: backlog is not drained: %d actionable item(s)", len(status.Unblocked))
 	}
 
+	gitRoot := settleGitRoot(plan.RosterPath)
 	files := append([]string{backlogPath}, plan.Files...)
-	for _, path := range files {
+	for i, path := range files {
 		if strings.TrimSpace(path) == "" {
 			return errors.New("settle: --file path must be non-empty")
 		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(gitRoot, path)
+		}
+		files[i] = filepath.Clean(path)
 		if _, err := ops.readFile(path); err != nil {
 			return fmt.Errorf("settle: read staged file %s: %w", path, err)
 		}
@@ -112,7 +118,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		return fmt.Errorf("settle: inspect staged files: %w", err)
 	}
 	stagedFiles := nonEmptyLines(staged)
-	intendedFiles, err := settleIndexNames(settleGitRoot(plan.RosterPath), files)
+	intendedFiles, err := settleIndexNames(gitRoot, files)
 	if err != nil {
 		return err
 	}
@@ -121,6 +127,16 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	}
 	committed := len(stagedFiles) != 0
 	if committed {
+		// Re-read the index at the commit edge. An unrelated actor can stage a
+		// file after the first allowlist check; committing that file would make
+		// the captured SHA wider than the declared settle set.
+		staged, err = ops.git("diff", "--cached", "--name-only")
+		if err != nil {
+			return fmt.Errorf("settle: recheck staged files before commit: %w", err)
+		}
+		if extras := valuesOutsideSet(nonEmptyLines(staged), intendedFiles); len(extras) != 0 {
+			return fmt.Errorf("settle: refusing commit: staged files %q appeared outside the intended settle allowlist %q", extras, intendedFiles)
+		}
 		if _, commitErr := ops.git("commit", "-m", "settle("+plan.Actor+"): "+plan.Reason); commitErr != nil {
 			return fmt.Errorf("settle: commit: %w", commitErr)
 		}
@@ -149,12 +165,12 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if err != nil {
 		return fmt.Errorf("settle: count per-push delta: %w", err)
 	}
-	wantDelta := "0"
-	if committed {
-		wantDelta = "1"
+	delta, err := strconv.Atoi(strings.TrimSpace(deltaRaw))
+	if err != nil || delta < 0 {
+		return fmt.Errorf("settle: refusing push: captured delta %q is not a non-negative commit count", strings.TrimSpace(deltaRaw))
 	}
-	if delta := strings.TrimSpace(deltaRaw); delta != wantDelta {
-		return fmt.Errorf("settle: refusing push: captured delta is %s commit(s), want %s for this settle", delta, wantDelta)
+	if (!committed && delta != 0) || (committed && delta == 0) {
+		return fmt.Errorf("settle: refusing push: captured delta is %d commit(s), inconsistent with committed=%t", delta, committed)
 	}
 	if _, err := ops.git("push", plan.Remote, sha+":"+plan.Ref); err != nil {
 		return fmt.Errorf("settle: push captured %s: %w", sha, err)
