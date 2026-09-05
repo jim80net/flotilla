@@ -61,6 +61,15 @@ func TestSessionUncooperative_ProviderAvailabilityProseNotHit(t *testing.T) {
 	}
 }
 
+func TestSessionUncooperative_LaterProviderStoppedFooterWinsOverEarlierProse(t *testing.T) {
+	captured := "The provider unavailable situation does not change our conclusion.\n" +
+		"ordinary output\nProvider stopped. Select another provider to continue.\n❯ \n"
+	hit, phrase := SessionUncooperative(captured)
+	if !hit || !strings.HasPrefix(phrase, "Provider stopped") {
+		t.Fatalf("later provider-stop footer = (%t, %q), want footer hit", hit, phrase)
+	}
+}
+
 func TestSessionUncooperative_ProseNotHit(t *testing.T) {
 	// Ordinary conversation mentioning limits must not abort recycle as uncooperative.
 	captured := "We discussed how the API rate limit exceeded our quota in the design doc.\n" +

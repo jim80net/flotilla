@@ -58,7 +58,7 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 			return true, excerptPhrase(tail, loc[0], loc[1])
 		}
 	}
-	if loc := sessionProviderStoppedRE.FindStringIndex(lower); loc != nil {
+	for _, loc := range sessionProviderStoppedRE.FindAllStringIndex(lower, -1) {
 		if isProviderStoppedFooterLine(lineContaining(lower, loc[0])) {
 			return true, excerptPhrase(tail, loc[0], loc[1])
 		}
