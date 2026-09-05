@@ -79,30 +79,31 @@ func defaultTimeouts() recycleTimeouts {
 // fail-closed decision core is unit-testable without a live tmux server or a real agent.
 type recycleOps struct {
 	resolve       func(want string) (string, deliver.ResolveOutcome, error)
-	paneID        func(target string) (string, error)                             // deliver.PaneID (canonical self-recycle compare)
-	inMode        func(target string) (bool, error)                               // deliver.PaneInMode (copy-mode refuse)
-	assess        func(target string) surface.State                               // driver.Assess
-	composer      func(target string) surface.ComposerDisposition                 // driver.ComposerState (required)
-	absent        func(cwd, path string) (bool, error)                            // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
-	durable       func(cwd, path string, minBytes int) (bool, error)              // deliver.HandoffDurable
-	deliver       func(target, text string) error                                 // confirmed delivery bound to the driver
-	closeFn       func(target string) error                                       // driver.Close
-	remainOnExit  func(target string, on bool) error                              // deliver.SetRemainOnExit (keep the pane on /exit)
-	paneDead      func(target string) (bool, error)                               // deliver.PaneDead (close-confirm: claude-direct)
-	selfHeal      func(target string)                                             // optional (nil unless FLOTILLA_SELF_HEAL)
-	respawn       func(target, cwd, launch string) error                          // deliver.RespawnPane (-k)
-	readMarker    func(target string) (string, error)                             // deliver.ReadMarker
-	stampGen      func(target, token string) error                                // deliver.StampRecycleGen
-	readGen       func(target string) (string, error)                             // deliver.ReadRecycleGen
-	reapReady     func() error                                                    // pidfd open+signal support, checked before hard respawn
-	snapshotReap  func(target string) ([]deliver.ProcessRef, error)               // pre-respawn pane pipe writers + descendants
-	reap          func(processes []deliver.ProcessRef) error                      // bounded TERM → KILL with exit confirmation
-	process       func(target string) (recycleProcessIdentity, error)             // live PID + start time
-	recordRetired func(recycleProcessIdentity)                                    // successful recycle's pre-respawn generation
-	recordPhase   func(recyclePlan, recyclePhase) error                           // durable CLI/watch lifecycle status
-	handoffTime   func(cwd, path string) (time.Time, error)                       // durable handoff mtime
-	newerSuccess  func(recycleProcessIdentity) (recycleStatusRecord, bool, error) // success for this process generation or after command start
-	lock          func(target string) (release func(), err error)                 // AcquirePaneTxn → Release
+	paneID        func(target string) (string, error)                                        // deliver.PaneID (canonical self-recycle compare)
+	inMode        func(target string) (bool, error)                                          // deliver.PaneInMode (copy-mode refuse)
+	assess        func(target string) surface.State                                          // driver.Assess
+	composer      func(target string) surface.ComposerDisposition                            // driver.ComposerState (required)
+	absent        func(cwd, path string) (bool, error)                                       // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
+	durable       func(cwd, path string, minBytes int) (bool, error)                         // deliver.HandoffDurable
+	deliver       func(target, text string) error                                            // confirmed delivery bound to the driver
+	closeFn       func(target string) error                                                  // driver.Close
+	remainOnExit  func(target string, on bool) error                                         // deliver.SetRemainOnExit (keep the pane on /exit)
+	paneDead      func(target string) (bool, error)                                          // deliver.PaneDead (close-confirm: claude-direct)
+	selfHeal      func(target string)                                                        // optional (nil unless FLOTILLA_SELF_HEAL)
+	respawn       func(target, cwd, launch string) error                                     // deliver.RespawnPane (-k)
+	readMarker    func(target string) (string, error)                                        // deliver.ReadMarker
+	stampGen      func(target, token string) error                                           // deliver.StampRecycleGen
+	readGen       func(target string) (string, error)                                        // deliver.ReadRecycleGen
+	reapReady     func() error                                                               // pidfd open+signal support, checked before hard respawn
+	snapshotReap  func(target string) ([]deliver.ProcessRef, error)                          // pre-respawn pane pipe writers + descendants
+	reap          func(processes []deliver.ProcessRef) error                                 // bounded TERM → KILL with exit confirmation
+	process       func(target string) (recycleProcessIdentity, error)                        // live PID + start time
+	recordRetired func(recycleProcessIdentity)                                               // successful recycle's pre-respawn generation
+	recordPhase   func(recyclePlan, recyclePhase) error                                      // durable CLI/watch lifecycle status
+	recordSuccess func(recyclePlan, string, worktreeCloseNote, recycleProcessIdentity) error // terminal success under pane lock
+	handoffTime   func(cwd, path string) (time.Time, error)                                  // durable handoff mtime
+	newerSuccess  func(recycleProcessIdentity) (recycleStatusRecord, bool, error)            // success for this process generation or after command start
+	lock          func(target string) (release func(), err error)                            // AcquirePaneTxn → Release
 	sleep         func(time.Duration)
 	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
 	rotate func(target string) error
@@ -147,6 +148,7 @@ type recyclePlan struct {
 	// without graceful-close/respawn (coordinator self-rotation; never bare /clear).
 	selfPath     bool
 	reapMonitors bool // selected live surface is grok; reap only on its hard-close path
+	startedAt    time.Time
 }
 
 // samePaneAsSelf reports whether the resolved target IS the command's own pane, comparing
@@ -304,6 +306,11 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		if ops.recordRetired != nil {
 			ops.recordRetired(process)
 		}
+		if ops.recordSuccess != nil {
+			if err := ops.recordSuccess(p, msg, worktreeCloseNote{}, process); err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("publish recycle success for %q: %w", p.agent, err)
+			}
+		}
 		return msg, worktreeCloseNote{}, nil
 	}
 	if err := recordRecyclePhase(ops, p, recyclePhaseAwaitingClose); err != nil {
@@ -429,6 +436,11 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	msg += "; closed gracefully, relaunched fresh, took over)\n"
 	if ops.recordRetired != nil {
 		ops.recordRetired(process)
+	}
+	if ops.recordSuccess != nil {
+		if err := ops.recordSuccess(p, msg, wtNote, process); err != nil {
+			return "", wtNote, fmt.Errorf("publish recycle success for %q: %w", p.agent, err)
+		}
 	}
 	return msg, wtNote, nil
 }
@@ -765,6 +777,7 @@ func cmdRecycle(args []string) error {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	var retiredProcess recycleProcessIdentity
+	successRecorded := false
 	ops := recycleOps{
 		resolve:      deliver.Resolve,
 		paneID:       deliver.PaneID,
@@ -793,6 +806,22 @@ func cmdRecycle(args []string) error {
 		process:       recyclePaneProcessIdentity,
 		recordRetired: func(process recycleProcessIdentity) { retiredProcess = process },
 		recordPhase:   func(plan recyclePlan, phase recyclePhase) error { return writeRecyclePhase(agentName, plan, phase) },
+		recordSuccess: func(plan recyclePlan, msg string, wt worktreeCloseNote, process recycleProcessIdentity) error {
+			finalizeRecycleStatus(agentName, plan, msg, nil, wt, process)
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			rec, err := readRecycleStatus(lastRecyclePath(home, agentName))
+			if err != nil {
+				return err
+			}
+			if !rec.OK || rec.Token != plan.token {
+				return fmt.Errorf("terminal record is token %q ok=%t, want token %q ok=true", rec.Token, rec.OK, plan.token)
+			}
+			successRecorded = true
+			return nil
+		},
 		handoffTime: func(_ string, path string) (time.Time, error) {
 			info, err := os.Stat(path)
 			if err != nil {
@@ -847,6 +876,7 @@ func cmdRecycle(args []string) error {
 			timeouts:        defaultTimeouts(),
 			selfPath:        selfPath,
 			reapMonitors:    liveSurf == "grok",
+			startedAt:       commandStarted,
 		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
@@ -868,7 +898,9 @@ func cmdRecycle(args []string) error {
 			runErr = errors.New("recycle completion: retired process generation was not captured")
 		}
 	}
-	finalizeRecycleStatus(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	if !successRecorded {
+		finalizeRecycleStatus(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	}
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
 		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
@@ -944,7 +976,10 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 		return recycleStatusRecord{}, false, fmt.Errorf("incomplete process generation in recycle status")
 	}
 	if rec.ProcessPID == 0 {
-		return recycleStatusRecord{}, false, fmt.Errorf("successful recycle status lacks process generation; refusing because stale retry and legitimate new generation cannot be distinguished")
+		// Pre-generation status records remain usable through their durable wall
+		// clock. A success newer than this command still blocks it; an older
+		// legacy success cannot permanently brick all future recycle attempts.
+		return rec, at.After(after), nil
 	}
 	if rec.ProcessPID != 0 {
 		startedAt, err := time.Parse(time.RFC3339Nano, rec.ProcessStartedAt)
@@ -1069,6 +1104,18 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
+	}
+	if runErr != nil && !p.startedAt.IsZero() {
+		if existing, readErr := readRecycleStatus(lastRecyclePath(home, agent)); readErr == nil && existing.OK {
+			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
+			if parseErr != nil || !existingAt.Before(p.startedAt) {
+				// A successful terminal record not proved older than this
+				// attempt is the admission authority. A failure must not
+				// replace or hide it, even when verification of our own
+				// just-written success encountered a transient read error.
+				return
+			}
+		}
 	}
 	dir := filepath.Join(home, ".flotilla", agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

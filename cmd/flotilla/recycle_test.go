@@ -202,6 +202,31 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseTakeoverConfirmed)
 }
 
+func TestRunRecyclePublishesSuccessBeforePaneLockRelease(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	locked := false
+	released := false
+	ops.lock = func(string) (func(), error) {
+		locked = true
+		return func() { locked = false; released = true }, nil
+	}
+	published := false
+	ops.recordSuccess = func(_ recyclePlan, _ string, _ worktreeCloseNote, _ recycleProcessIdentity) error {
+		if !locked || released {
+			return errors.New("success published after pane lock release")
+		}
+		published = true
+		return nil
+	}
+	if _, _, err := runRecycle(ops, testPlan()); err != nil {
+		t.Fatal(err)
+	}
+	if !published || !released {
+		t.Fatalf("published=%t released=%t", published, released)
+	}
+}
+
 func assertRecyclePhases(t *testing.T, got []recyclePhase, want ...recyclePhase) {
 	t.Helper()
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -317,6 +342,25 @@ func TestSuccessfulRecycleForGenerationRefusesLaterStaleRetry(t *testing.T) {
 	}
 }
 
+func TestSuccessfulRecycleForGenerationUsesWallClockForLegacyStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"LEGACY","ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 30, 0, 0, time.UTC)); err != nil || !stale {
+		t.Fatalf("newer legacy success stale=%t err=%v", stale, err)
+	}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
+		t.Fatalf("older legacy success stale=%t err=%v", stale, err)
+	}
+}
+
 func TestRunRecycleRefusesSuccessfulSameProcessGenerationBeforeDeskTouch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -354,6 +398,27 @@ func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
 	}
 	if rec.ProcessPID != process.PID || rec.ProcessStartedAt != process.StartedAt.Format(time.RFC3339Nano) || rec.Mode != "full" {
 		t.Fatalf("status process generation = pid %d start %q, want %+v", rec.ProcessPID, rec.ProcessStartedAt, process)
+	}
+}
+
+func TestFailedRecycleDoesNotOverwriteConcurrentSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	success := testPlan()
+	success.token = "SUCCESS"
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+
+	failure := testPlan()
+	failure.token = "FAILED"
+	failure.startedAt = time.Now().UTC().Add(-time.Minute)
+	writeLastRecycle("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{})
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Token != success.token || !rec.OK {
+		t.Fatalf("concurrent success was hidden by failure: %+v", rec)
 	}
 }
 

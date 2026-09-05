@@ -153,15 +153,11 @@ func backgroundTaskDetail(line string) bool {
 	prefix := strings.TrimSuffix(line, renderedStatus)
 	name := strings.TrimRight(prefix, " ")
 	separatorWidth := len(prefix) - len(name)
-	if separatorWidth < 2 || len(name) == 0 || len(name) > 32 || strings.ContainsAny(name, " \t") {
-		return false
-	}
-	for _, r := range name {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.' {
-			return false
-		}
-	}
-	return true
+	// Task labels are author/provider text, not identifiers. The surrounding
+	// background-status, confirmation question, and two-action menu provide the
+	// structural proof; restricting labels to a short ASCII slug strands genuine
+	// closes when a harness renders a descriptive or Unicode task name.
+	return separatorWidth >= 2 && strings.TrimSpace(name) != ""
 }
 
 func allASCIIInteger(value string) bool {
