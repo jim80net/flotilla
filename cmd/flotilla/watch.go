@@ -142,6 +142,9 @@ func newWatchPosters(poster watchPoster, operatorDest, alertDest transport.Desti
 // context-exhausted XO is surfaced. The inbound Discord relay is added on top
 // (it needs the gateway + Message Content intent); the clock needs neither.
 func cmdWatch(args []string) error {
+	if len(args) > 0 && args[0] == "identity" {
+		return cmdWatchIdentity(args[1:])
+	}
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the down-alert webhook)")
