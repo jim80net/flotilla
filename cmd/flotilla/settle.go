@@ -127,6 +127,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	}
 	committed := len(stagedFiles) != 0
 	committedSHA := ""
+	parentSHA := ""
 	if committed {
 		// Re-read the index at the commit edge. An unrelated actor can stage a
 		// file after the first allowlist check; committing that file would make
@@ -142,7 +143,7 @@ func runSettle(plan settlePlan, ops settleOps) error {
 		if err != nil {
 			return fmt.Errorf("settle: capture parent HEAD: %w", err)
 		}
-		parentSHA := strings.TrimSpace(parentRaw)
+		parentSHA = strings.TrimSpace(parentRaw)
 		treeRaw, err := ops.git("write-tree")
 		if err != nil {
 			return fmt.Errorf("settle: write immutable index tree: %w", err)
@@ -178,6 +179,9 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if committed && sha != committedSHA {
 		return fmt.Errorf("settle: captured HEAD %s does not match immutable settle commit %s", sha, committedSHA)
 	}
+	if !committed {
+		parentSHA = sha
+	}
 	remoteLine, err := ops.git("ls-remote", "--exit-code", plan.Remote, plan.Ref)
 	if err != nil {
 		return fmt.Errorf("settle: read remote tip for delta proof: %w", err)
@@ -189,6 +193,13 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	remoteTip := remoteFields[0]
 	if _, err := ops.git("merge-base", "--is-ancestor", remoteTip, sha); err != nil {
 		return fmt.Errorf("settle: remote tip %s is not an ancestor of captured %s: %w", remoteTip, sha, err)
+	}
+	riderFilesRaw, err := ops.git("log", "-m", "--format=", "--name-only", remoteTip+".."+parentSHA)
+	if err != nil {
+		return fmt.Errorf("settle: inspect captured parent ancestry: %w", err)
+	}
+	if extras := valuesOutsideSet(nonEmptyLines(riderFilesRaw), intendedFiles); len(extras) != 0 {
+		return fmt.Errorf("settle: refusing push: captured parent ancestry contains files %q outside the intended settle allowlist %q", extras, intendedFiles)
 	}
 	deltaRaw, err := ops.git("rev-list", "--count", remoteTip+".."+sha)
 	if err != nil {

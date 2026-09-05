@@ -101,6 +101,7 @@ func TestRunSettleCapturesSHAProvesAncestorThenTouchesMarkers(t *testing.T) {
 		{"rev-parse", "HEAD"},
 		{"ls-remote", "--exit-code", "origin", defaultSettleRef},
 		{"merge-base", "--is-ancestor", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "0123456789abcdef0123456789abcdef01234567"},
+		{"log", "-m", "--format=", "--name-only", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		{"rev-list", "--count", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567"},
 		{"push", "origin", "0123456789abcdef0123456789abcdef01234567:" + defaultSettleRef},
 		{"fetch", "--quiet", "origin", defaultSettleRef},
@@ -449,13 +450,103 @@ func TestRunSettleRetryAllowsEarlierUnpushedSettleCommit(t *testing.T) {
 	_, plan, ops := newSettleHarness(t, "## Backlog\n")
 	baseGit := ops.git
 	ops.git = func(args ...string) (string, error) {
-		if strings.Join(args, " ") == "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567" {
+		switch strings.Join(args, " ") {
+		case "log -m --format= --name-only aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":
+			return "state/flotilla-backend-backlog.md\n", nil
+		case "rev-list --count aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..0123456789abcdef0123456789abcdef01234567":
 			return "2\n", nil
 		}
 		return baseGit(args...)
 	}
 	if err := runSettle(plan, ops); err != nil {
 		t.Fatalf("retry with an earlier local settle commit should publish the captured tip: %v", err)
+	}
+}
+
+func TestRunSettleRefusesUnrelatedCommitInCapturedParentAncestryBeforePush(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "log -m --format= --name-only aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "state/flotilla-backend-backlog.md\nunrelated.txt\n", nil
+		}
+		return baseGit(args...)
+	}
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "captured parent ancestry contains") {
+		t.Fatalf("error = %v, want captured-parent ancestry refusal", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && call[0] == "push" {
+			t.Fatalf("unrelated parent rider reached push: %v", h.calls)
+		}
+	}
+	if len(h.touched) != 0 || len(h.audits) != 0 {
+		t.Fatalf("unrelated parent rider wrote settled state: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleWithRealHistoryRefusesUnrelatedCommitBeforeCapturedParent(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backlogPath := filepath.Join(stateDir, "flotilla-backend-backlog.md")
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n- [in-flight] work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "--quiet")
+	runGit("add", "--", "state/flotilla-backend-backlog.md")
+	runGit("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "remote baseline")
+	remoteTip := runGit("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("rider\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "--", "unrelated.txt")
+	runGit("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "unrelated rider")
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n- [done] work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_AUTHOR_NAME", "Fixture")
+	t.Setenv("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "Fixture")
+	t.Setenv("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+
+	plan := settlePlan{
+		Actor: "backend", Reason: "walk complete", RosterPath: filepath.Join(stateDir, "flotilla.json"),
+		Remote: "origin", Ref: defaultSettleRef,
+	}
+	ops := realSettleOps(root)
+	realGit := ops.git
+	pushed := false
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "ls-remote --exit-code origin "+defaultSettleRef {
+			return remoteTip + "\t" + defaultSettleRef + "\n", nil
+		}
+		if len(args) > 0 && args[0] == "push" {
+			pushed = true
+			return "", nil
+		}
+		return realGit(args...)
+	}
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "captured parent ancestry contains") {
+		t.Fatalf("error = %v, want captured-parent ancestry refusal", err)
+	}
+	if pushed {
+		t.Fatal("unrelated local commit reached push")
 	}
 }
 
