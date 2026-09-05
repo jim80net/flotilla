@@ -59,6 +59,7 @@ type recycleOps struct {
 	remainOnExit func(target string, on bool) error                 // deliver.SetRemainOnExit (keep the pane on /exit)
 	paneDead     func(target string) (bool, error)                  // deliver.PaneDead (close-confirm: claude-direct)
 	selfHeal     func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
+	reapReady    func() error                                       // pidfd open+signal support, checked before hard respawn
 	snapshotReap func(target string) ([]deliver.ProcessRef, error)  // pre-respawn pane pipe writers + descendants
 	reap         func(processes []deliver.ProcessRef) error         // bounded TERM → KILL with exit confirmation
 	respawn      func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
@@ -264,8 +265,11 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		// while the old pane process still owns their read/parent relationships; respawn destroys
 		// that evidence. --self returned above and can never enter this path.
 		if p.reapMonitors {
-			if ops.snapshotReap == nil || ops.reap == nil {
+			if ops.reapReady == nil || ops.snapshotReap == nil || ops.reap == nil {
 				return "", worktreeCloseNote{}, fmt.Errorf("phase 2: no monitor-reap implementation for %q — ABORT, desk untouched", p.agent)
+			}
+			if err := ops.reapReady(); err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("phase 2: monitor reap is unavailable for %q: %w — ABORT, desk untouched", p.agent, err)
 			}
 			reapSet, err = ops.snapshotReap(target)
 			if err != nil {
@@ -633,6 +637,7 @@ func cmdRecycle(args []string) error {
 		closeFn:      drv.Close,
 		remainOnExit: deliver.SetRemainOnExit,
 		paneDead:     deliver.PaneDead,
+		reapReady:    deliver.ProbeProcessReapSupport,
 		snapshotReap: func(target string) ([]deliver.ProcessRef, error) {
 			pid, err := deliver.PanePID(target)
 			if err != nil {

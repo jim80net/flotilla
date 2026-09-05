@@ -102,6 +102,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			}
 			return true, nil
 		},
+		reapReady:    func() error { return nil },
 		snapshotReap: func(string) ([]deliver.ProcessRef, error) { return nil, nil },
 		reap:         func([]deliver.ProcessRef) error { return nil },
 		respawn:      func(string, string, string) error { r.respawned = true; return nil },
@@ -598,6 +599,10 @@ func TestRunRecycleSelfPathDoesNotSnapshotOrReapMonitors(t *testing.T) {
 	r := happyRec()
 	ops := fakeRecycleOps(r)
 	called := false
+	ops.reapReady = func() error {
+		called = true
+		return nil
+	}
 	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
 		called = true
 		return nil, nil
@@ -703,6 +708,30 @@ func TestRunRecycleNoGracefulCloseSnapshotFailureLeavesPaneUntouched(t *testing.
 	}
 	if r.respawned {
 		t.Fatal("snapshot failure must abort before the hard respawn")
+	}
+}
+
+func TestRunRecycleNoGracefulClosePidfdUnavailableLeavesPaneUntouched(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.reapReady = func() error { return syscall.ENOSYS }
+	snapshotCalled := false
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		snapshotCalled = true
+		return nil, nil
+	}
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, syscall.ENOSYS) || !strings.Contains(err.Error(), "ABORT, desk untouched") {
+		t.Fatalf("err = %v, want pre-respawn pidfd-unavailable abort", err)
+	}
+	if r.respawned {
+		t.Fatal("pidfd-unavailable host must abort before hard respawn")
+	}
+	if snapshotCalled {
+		t.Fatal("pidfd support must be gated before monitor snapshot")
 	}
 }
 

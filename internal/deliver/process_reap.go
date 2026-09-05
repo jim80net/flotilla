@@ -41,6 +41,25 @@ func SnapshotPaneReapSet(panePID int) ([]ProcessRef, error) {
 	return snapshotPaneReapSet("/proc", panePID)
 }
 
+// ProbeProcessReapSupport verifies that the kernel permits both operations used
+// to bind monitor signals to a process identity. Recycle runs this before its
+// irreversible respawn-kill so an unsupported host leaves the pane untouched.
+func ProbeProcessReapSupport() error {
+	pidfd, err := unix.PidfdOpen(os.Getpid(), 0)
+	if err != nil {
+		return fmt.Errorf("pidfd_open: %w", err)
+	}
+	signalErr := unix.PidfdSendSignal(pidfd, 0, nil, 0)
+	closeErr := unix.Close(pidfd)
+	if signalErr != nil {
+		return fmt.Errorf("pidfd_send_signal: %w", signalErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close pidfd: %w", closeErr)
+	}
+	return nil
+}
+
 func snapshotPaneReapSet(procRoot string, panePID int) ([]ProcessRef, error) {
 	if panePID <= 1 {
 		return nil, fmt.Errorf("refusing unsafe pane pid %d", panePID)
