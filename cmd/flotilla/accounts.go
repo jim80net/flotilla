@@ -132,10 +132,7 @@ type oauthOutputBroker struct {
 	mu      sync.Mutex
 	dst     io.Writer
 	pending bytes.Buffer
-	timer   *time.Timer
 }
-
-const oauthOutputQuietPeriod = 50 * time.Millisecond
 
 func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 	return &oauthOutputBroker{dst: dst}
@@ -144,7 +141,6 @@ func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.stopTimerLocked()
 	_, _ = b.pending.Write(p)
 	for {
 		line, err := b.pending.ReadString('\n')
@@ -160,11 +156,13 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 				}
 				fmt.Fprintln(b.dst, prompt)
 				b.pending.Reset()
-			} else if allowedOAuthURL(pending) != "" {
-				// A URL at the end of a Write may be only a prefix of the next
-				// chunk. Wait for a short quiet edge, resetting the timer on each
-				// write, before treating the buffered URL as complete.
-				b.timer = time.AfterFunc(oauthOutputQuietPeriod, b.flushPartialURL)
+			} else if authURL := completeOAuthURL(pending); authURL != "" {
+				// A quiet interval is not a record boundary: io.Copy may pause
+				// between any two legal chunks. The provider's non-empty state
+				// parameter is the bounded protocol signal that the authorization
+				// URL is complete enough to hand to the operator.
+				fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+				b.pending.Reset()
 			}
 			break
 		}
@@ -176,27 +174,9 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 func (b *oauthOutputBroker) Flush() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.stopTimerLocked()
 	if b.pending.Len() != 0 {
 		b.emitSafeLine(b.pending.String())
 		b.pending.Reset()
-	}
-}
-
-func (b *oauthOutputBroker) flushPartialURL() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.stopTimerLocked()
-	if authURL := allowedOAuthURL(b.pending.String()); authURL != "" {
-		fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
-		b.pending.Reset()
-	}
-}
-
-func (b *oauthOutputBroker) stopTimerLocked() {
-	if b.timer != nil {
-		b.timer.Stop()
-		b.timer = nil
 	}
 }
 
@@ -208,6 +188,18 @@ func (b *oauthOutputBroker) emitSafeLine(line string) {
 	if prompt := safeOAuthPrompt(line); prompt != "" {
 		fmt.Fprintln(b.dst, prompt)
 	}
+}
+
+func completeOAuthURL(line string) string {
+	authURL := allowedOAuthURL(line)
+	if authURL == "" {
+		return ""
+	}
+	u, err := url.Parse(authURL)
+	if err != nil || u.Query().Get("state") == "" {
+		return ""
+	}
+	return authURL
 }
 
 func safeOAuthPrompt(line string) string {
