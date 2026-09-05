@@ -137,6 +137,20 @@ func TestRunSettleRefusesUndrainedBacklogBeforeGit(t *testing.T) {
 	}
 }
 
+func TestRunSettleRefusesEmptyRosterBeforePathResolution(t *testing.T) {
+	for _, roster := range []string{"", "   "} {
+		h, plan, ops := newSettleHarness(t, "## Backlog\n")
+		plan.RosterPath = roster
+		err := runSettle(plan, ops)
+		if err == nil || !strings.Contains(err.Error(), "--roster path must be non-empty") {
+			t.Fatalf("roster %q error = %v", roster, err)
+		}
+		if len(h.calls) != 0 || len(h.touched) != 0 || len(h.audits) != 0 {
+			t.Fatalf("empty roster caused side effects: calls=%v touched=%v audits=%v", h.calls, h.touched, h.audits)
+		}
+	}
+}
+
 func TestRunSettleRefusesPathUnsafeActorBeforeSideEffects(t *testing.T) {
 	for _, actor := range []string{"../frontend", "backend/../xo"} {
 		t.Run(actor, func(t *testing.T) {

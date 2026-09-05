@@ -82,6 +82,9 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if plan.Reason == "" || plan.Remote == "" || plan.Ref == "" {
 		return errors.New("settle: --reason, --remote, and --ref must be non-empty")
 	}
+	if strings.TrimSpace(plan.RosterPath) == "" {
+		return errors.New("settle: --roster path must be non-empty")
+	}
 	rosterPath, err := filepath.Abs(plan.RosterPath)
 	if err != nil {
 		return fmt.Errorf("settle: resolve roster path %s: %w", plan.RosterPath, err)
