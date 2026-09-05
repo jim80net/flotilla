@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -101,7 +102,10 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			}
 			return true, nil
 		},
-		respawn: func(string, string, string) error { r.respawned = true; return nil },
+		reapReady:    func() error { return nil },
+		snapshotReap: func(string) ([]deliver.ProcessRef, error) { return nil, nil },
+		reap:         func([]deliver.ProcessRef) error { return nil },
+		respawn:      func(string, string, string) error { r.respawned = true; return nil },
 		readMarker: func(string) (string, error) {
 			if r.markerGot == "" {
 				return "the-key", nil
@@ -490,6 +494,245 @@ func TestRunRecycleNoGracefulCloseFallsBackToKill(t *testing.T) {
 		t.Errorf("the kill-fallback path still takes over (got %v)", r.delivered)
 	}
 	_ = msg
+}
+
+func startRecyclePipeFixture(t *testing.T) (pane, monitor *exec.Cmd) {
+	t.Helper()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is required for the Grok monitor process fixture")
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane = exec.Command(python, "-c", "import time; time.sleep(60)")
+	pane.ExtraFiles = []*os.File{reader}
+	if err := pane.Start(); err != nil {
+		reader.Close()
+		writer.Close()
+		t.Fatal(err)
+	}
+	monitor = exec.Command(python, "-c", "import time; time.sleep(60)")
+	monitor.Stdout = writer
+	if err := monitor.Start(); err != nil {
+		_ = pane.Process.Kill()
+		_, _ = pane.Process.Wait()
+		reader.Close()
+		writer.Close()
+		t.Fatal(err)
+	}
+	reader.Close()
+	writer.Close()
+	t.Cleanup(func() {
+		for _, cmd := range []*exec.Cmd{monitor, pane} {
+			if cmd.Process != nil && cmd.ProcessState == nil {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+			}
+		}
+	})
+	return pane, monitor
+}
+
+func processRunning(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}
+
+func waitRecycleFixtureExit(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("process pid %d did not exit", cmd.Process.Pid)
+	}
+}
+
+func TestRunRecycleNoGracefulCloseReapsPanePipeMonitor(t *testing.T) {
+	pane, monitor := startRecyclePipeFixture(t)
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return deliver.SnapshotPaneReapSet(pane.Process.Pid)
+	}
+	ops.respawn = func(string, string, string) error {
+		r.respawned = true
+		return pane.Process.Kill() // models tmux respawn-pane -k killing only the pane process
+	}
+	ops.reap = deliver.ReapProcesses
+	p := testPlan()
+	p.reapMonitors = true
+	if _, _, err := runRecycle(ops, p); err != nil {
+		t.Fatalf("runRecycle: %v", err)
+	}
+	waitRecycleFixtureExit(t, monitor)
+}
+
+func TestRunRecycleNoGracefulCloseDoesNotReapOtherPanePipeWriter(t *testing.T) {
+	pane, _ := startRecyclePipeFixture(t)
+	otherPane, otherMonitor := startRecyclePipeFixture(t)
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return deliver.SnapshotPaneReapSet(pane.Process.Pid)
+	}
+	ops.respawn = func(string, string, string) error {
+		r.respawned = true
+		return pane.Process.Kill()
+	}
+	ops.reap = deliver.ReapProcesses
+	p := testPlan()
+	p.reapMonitors = true
+	if _, _, err := runRecycle(ops, p); err != nil {
+		t.Fatalf("runRecycle: %v", err)
+	}
+	if !processRunning(otherPane.Process.Pid) || !processRunning(otherMonitor.Process.Pid) {
+		t.Fatal("recycle reaped a process attached to a different pane pipe")
+	}
+}
+
+func TestRunRecycleSelfPathDoesNotSnapshotOrReapMonitors(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	called := false
+	ops.reapReady = func() error {
+		called = true
+		return nil
+	}
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		called = true
+		return nil, nil
+	}
+	ops.reap = func([]deliver.ProcessRef) error {
+		called = true
+		return nil
+	}
+	ops.rotate = func(string) error { return nil }
+	p := testPlan()
+	p.selfPath = true
+	p.reapMonitors = true
+	p.ownPane = "%5"
+	if _, _, err := runRecycle(ops, p); err != nil {
+		t.Fatalf("self-recycle: %v", err)
+	}
+	if called {
+		t.Fatal("--self must not snapshot or reap monitor processes")
+	}
+}
+
+func TestRunRecycleNoGracefulCloseDoesNotCompleteWhileReapFails(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return []deliver.ProcessRef{{PID: 4242, StartTime: 7}}, nil
+	}
+	ops.reap = func([]deliver.ProcessRef) error { return errors.New("monitor still alive") }
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if err == nil || !strings.Contains(err.Error(), "recycle is NOT complete") {
+		t.Fatalf("err = %v, want incomplete recycle after reap failure", err)
+	}
+	if !r.respawned {
+		t.Fatal("reap must run after the hard respawn")
+	}
+	if len(r.delivered) != 1 {
+		t.Fatalf("reap failure must prevent takeover delivery, got %v", r.delivered)
+	}
+}
+
+func TestRunRecycleNoGracefulCloseReapsAfterRespawnFailure(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	respawnErr := errors.New("respawn failed after pane kill")
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return []deliver.ProcessRef{{PID: 4242, StartTime: 7}}, nil
+	}
+	ops.respawn = func(string, string, string) error {
+		r.respawned = true
+		return respawnErr
+	}
+	reaped := false
+	ops.reap = func(got []deliver.ProcessRef) error {
+		reaped = len(got) == 1 && got[0] == (deliver.ProcessRef{PID: 4242, StartTime: 7})
+		return nil
+	}
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, respawnErr) {
+		t.Fatalf("err = %v, want preserved respawn failure", err)
+	}
+	if !reaped {
+		t.Fatal("snapshotted monitors were not reaped after attempted hard respawn")
+	}
+}
+
+func TestRunRecycleNoGracefulClosePreservesRespawnAndReapFailures(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	respawnErr := errors.New("respawn failed after pane kill")
+	reapErr := errors.New("monitor still alive")
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return []deliver.ProcessRef{{PID: 4242, StartTime: 7}}, nil
+	}
+	ops.respawn = func(string, string, string) error { return respawnErr }
+	ops.reap = func([]deliver.ProcessRef) error { return reapErr }
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, respawnErr) || !errors.Is(err, reapErr) {
+		t.Fatalf("err = %v, want both respawn and reap failures", err)
+	}
+}
+
+func TestRunRecycleNoGracefulCloseSnapshotFailureLeavesPaneUntouched(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return nil, errors.New("proc unreadable")
+	}
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if err == nil || !strings.Contains(err.Error(), "snapshot monitor processes") {
+		t.Fatalf("err = %v, want snapshot failure", err)
+	}
+	if r.respawned {
+		t.Fatal("snapshot failure must abort before the hard respawn")
+	}
+}
+
+func TestRunRecycleNoGracefulClosePidfdUnavailableLeavesPaneUntouched(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	ops := fakeRecycleOps(r)
+	ops.reapReady = func() error { return syscall.ENOSYS }
+	snapshotCalled := false
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		snapshotCalled = true
+		return nil, nil
+	}
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, syscall.ENOSYS) || !strings.Contains(err.Error(), "ABORT, desk untouched") {
+		t.Fatalf("err = %v, want pre-respawn pidfd-unavailable abort", err)
+	}
+	if r.respawned {
+		t.Fatal("pidfd-unavailable host must abort before hard respawn")
+	}
+	if snapshotCalled {
+		t.Fatal("pidfd support must be gated before monitor snapshot")
+	}
 }
 
 // --- I3: marker mismatch → abort with the live-fresh-desk recovery copy (4.8) ---

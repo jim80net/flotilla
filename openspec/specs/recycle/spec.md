@@ -211,6 +211,22 @@ the real run re-resolves under the lock).
   the handoff landing at `<cwd>/.flotilla/handoffs/recycle-<token>.md`, and closes via the handoff-gated
   respawn-kill (grok's `Close` returns `ErrNoGracefulClose`) before relaunching fresh
 
+#### Scenario: A grok recycle reaps pane-fed monitor children
+
+- **GIVEN** a grok monitor writes wakeups to a pipe whose read end is held by the closing pane, or is a
+  descendant of that pane process which could survive a foreground-only kill
+- **WHEN** a full recycle takes the handoff-gated `ErrNoGracefulClose` respawn-kill path
+- **THEN** recycle snapshots those processes before the respawn, terminates them after it with bounded
+  TERM-then-KILL escalation, and does not report success until every snapshotted process has exited
+- **AND** processes attached to another pane, systemd units, and `flotilla watch` are not included
+
+#### Scenario: A self recycle preserves pane-fed monitors
+
+- **GIVEN** a grok desk has a live pane-fed monitor
+- **WHEN** `flotilla recycle <desk> --self` rotates the chapter in place
+- **THEN** recycle does not snapshot, signal, or reap the monitor because the grok process and its pipe
+  remain live
+
 #### Scenario: A cross-harness migration sources the takeover path from the FROM harness
 
 - **WHEN** a running desk is migrated Claude Code → Grok by orchestrating a claude handoff turn, a roster
@@ -219,4 +235,3 @@ the real run re-resolves under the lock).
   handoff path (`<cwd>/.claude/handoffs/recycle-<token>.md`), sourced from the claude recycle's status
   record (`~/.flotilla/<agent>/last-recycle.json` `handoff_path`), NOT grok's own `.flotilla/handoffs/`
   path — grok's `TakeoverTurn` is path-parametric, so it consumes the claude-authored handoff verbatim
-

@@ -59,6 +59,9 @@ type recycleOps struct {
 	remainOnExit func(target string, on bool) error                 // deliver.SetRemainOnExit (keep the pane on /exit)
 	paneDead     func(target string) (bool, error)                  // deliver.PaneDead (close-confirm: claude-direct)
 	selfHeal     func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
+	reapReady    func() error                                       // pidfd open+signal support, checked before hard respawn
+	snapshotReap func(target string) ([]deliver.ProcessRef, error)  // pre-respawn pane pipe writers + descendants
+	reap         func(processes []deliver.ProcessRef) error         // bounded TERM → KILL with exit confirmation
 	respawn      func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
 	readMarker   func(target string) (string, error)                // deliver.ReadMarker
 	stampGen     func(target, token string) error                   // deliver.StampRecycleGen
@@ -106,7 +109,8 @@ type recyclePlan struct {
 	timeouts                  recycleTimeouts
 	// selfPath is true for `flotilla recycle --self` (#437): handoff + rotate + takeover
 	// without graceful-close/respawn (coordinator self-rotation; never bare /clear).
-	selfPath bool
+	selfPath     bool
+	reapMonitors bool // selected live surface is grok; reap only on its hard-close path
 }
 
 // samePaneAsSelf reports whether the resolved target IS the command's own pane, comparing
@@ -247,6 +251,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 
 	closeErr := ops.closeFn(target)
 	var wtNote worktreeCloseNote
+	var reapSet []deliver.ProcessRef
 	switch {
 	case closeErr == nil:
 		var closed bool
@@ -256,15 +261,41 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
 		// No graceful close → the handoff-gated hard kill: RespawnPane -k IS the close+relaunch
-		// (safe — the handoff is durable). Skip the close-confirm; the respawn below kills it.
+		// (safe — the handoff is durable). Snapshot pipe-fed monitors and surviving descendants
+		// while the old pane process still owns their read/parent relationships; respawn destroys
+		// that evidence. --self returned above and can never enter this path.
+		if p.reapMonitors {
+			if ops.reapReady == nil || ops.snapshotReap == nil || ops.reap == nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("phase 2: no monitor-reap implementation for %q — ABORT, desk untouched", p.agent)
+			}
+			if err := ops.reapReady(); err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("phase 2: monitor reap is unavailable for %q: %w — ABORT, desk untouched", p.agent, err)
+			}
+			reapSet, err = ops.snapshotReap(target)
+			if err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("phase 2: snapshot monitor processes for %q: %w — ABORT, desk untouched", p.agent, err)
+			}
+		}
 		log.Printf("flotilla: recycle: %q surface has no graceful close — using the handoff-gated kill fallback (respawn-kill)", p.agent)
 	default:
 		return "", worktreeCloseNote{}, fmt.Errorf("phase 2: closing %q failed: %w — ABORT (desk untouched by the relaunch)", p.agent, closeErr)
 	}
 
 	// PHASE 3 — relaunch (reuse the hardened resume primitive; marker survives the pane-id reuse).
-	if err := ops.respawn(target, p.cwd, p.launch); err != nil {
-		return "", wtNote, fmt.Errorf("phase 3: relaunching %q failed: %w (the desk is closed; recover with: flotilla resume %s)", p.agent, err, p.agent)
+	respawnErr := ops.respawn(target, p.cwd, p.launch)
+	var reapErr error
+	if reapSet != nil {
+		reapErr = ops.reap(reapSet)
+	}
+	if respawnErr != nil {
+		err := fmt.Errorf("phase 3: relaunching %q failed: %w (the desk may be closed; recover with: flotilla resume %s)", p.agent, respawnErr, p.agent)
+		if reapErr != nil {
+			err = errors.Join(err, fmt.Errorf("phase 3: could not confirm snapshotted monitor processes exited: %w", reapErr))
+		}
+		return "", wtNote, err
+	}
+	if reapErr != nil {
+		return "", wtNote, fmt.Errorf("phase 3: relaunched %q but could not confirm its snapshotted monitor processes exited: %w — recycle is NOT complete", p.agent, reapErr)
 	}
 	got, err := ops.readMarker(target)
 	if err != nil {
@@ -606,10 +637,19 @@ func cmdRecycle(args []string) error {
 		closeFn:      drv.Close,
 		remainOnExit: deliver.SetRemainOnExit,
 		paneDead:     deliver.PaneDead,
-		respawn:      deliver.RespawnPane,
-		readMarker:   deliver.ReadMarker,
-		stampGen:     deliver.StampRecycleGen,
-		readGen:      deliver.ReadRecycleGen,
+		reapReady:    deliver.ProbeProcessReapSupport,
+		snapshotReap: func(target string) ([]deliver.ProcessRef, error) {
+			pid, err := deliver.PanePID(target)
+			if err != nil {
+				return nil, err
+			}
+			return deliver.SnapshotPaneReapSet(pid)
+		},
+		reap:       deliver.ReapProcesses,
+		respawn:    deliver.RespawnPane,
+		readMarker: deliver.ReadMarker,
+		stampGen:   deliver.StampRecycleGen,
+		readGen:    deliver.ReadRecycleGen,
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {
@@ -653,6 +693,7 @@ func cmdRecycle(args []string) error {
 			minHandoffBytes: defaultMinHandoff,
 			timeouts:        defaultTimeouts(),
 			selfPath:        selfPath,
+			reapMonitors:    liveSurf == "grok",
 		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
