@@ -25,7 +25,7 @@ func writeWatchIdentityProc(t *testing.T, root, pid, command, exe string) {
 func TestCollectWatchIdentityListsWatchAndDeletedDashboardBind(t *testing.T) {
 	root := t.TempDir()
 	writeWatchIdentityProc(t, root, "101", "/opt/flotilla watch --interval 10m", "/opt/flotilla")
-	writeWatchIdentityProc(t, root, "202", "/opt/flotilla dash --bind 127.0.0.1:8799", "/opt/flotilla-old (deleted)")
+	writeWatchIdentityProc(t, root, "202", "/opt/flotilla-6e1c6649 dash --bind 127.0.0.1:8799", "/opt/flotilla-old (deleted)")
 	if err := os.Symlink("socket:[77]", filepath.Join(root, "202", "fd", "9")); err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +70,7 @@ func TestCollectWatchIdentityIgnoresNonFlotillaAndNonListeningSockets(t *testing
 	root := t.TempDir()
 	writeWatchIdentityProc(t, root, "101", "/usr/bin/python worker.py", "/usr/bin/python")
 	writeWatchIdentityProc(t, root, "202", "/opt/flotilla dash --bind 127.0.0.1:8787", "/opt/flotilla")
+	writeWatchIdentityProc(t, root, "303", "/opt/flotillahelper dash --bind 127.0.0.1:8788", "/opt/flotillahelper")
 	if err := os.Symlink("socket:[88]", filepath.Join(root, "202", "fd", "8")); err != nil {
 		t.Fatal(err)
 	}

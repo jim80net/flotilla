@@ -127,7 +127,11 @@ func collectWatchIdentities(procRoot string, inspect watchBinaryInspector) ([]wa
 
 func watchIdentityKind(raw []byte) string {
 	parts := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
-	if len(parts) < 2 || filepath.Base(parts[0]) != "flotilla" {
+	if len(parts) < 2 {
+		return ""
+	}
+	base := filepath.Base(parts[0])
+	if base != "flotilla" && !strings.HasPrefix(base, "flotilla-") {
 		return ""
 	}
 	switch parts[1] {
