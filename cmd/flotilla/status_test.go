@@ -157,6 +157,7 @@ func TestEffectiveSurface(t *testing.T) {
 }
 
 func TestBuildStatusJSON(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	cfg := &roster.Config{Agents: []roster.Agent{
 		{Name: "xo"}, // empty surface ⇒ claude-code; this is the XO ⇒ role hub
 		{Name: "frontend", Surface: "aider"},
@@ -190,7 +191,7 @@ func TestBuildStatusJSON(t *testing.T) {
 	if xo.Name != "xo" || xo.Role != "hub" || xo.Surface != "claude-code" || xo.State != "idle" {
 		t.Errorf("xo item = %+v, want {xo hub claude-code idle}", xo)
 	}
-	// Non-XO desks carry no role; surface comes from the roster.
+	// Non-XO desks carry no role; surface comes from overlay-first configured surface (roster when no overlay).
 	if doc.Agents[1].Role != "" {
 		t.Errorf("non-XO agent should have no role, got %q", doc.Agents[1].Role)
 	}
@@ -211,6 +212,28 @@ func TestBuildStatusJSON(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("marshaled JSON missing %s\n%s", want, raw)
 		}
+	}
+}
+
+func TestBuildStatusJSONOverlayBeatsRoster(t *testing.T) {
+	root := t.TempDir()
+	writeAgentOverlay(t, root, "backend", `{"slot":"fallback-0","surface":"codex"}`)
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo", Surface: "grok"},
+		{Name: "backend", Surface: "grok"},
+		{Name: "frontend", Surface: "grok"},
+	}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"xo":       surface.StateIdle,
+		"backend":  surface.StateIdle,
+		"frontend": surface.StateIdle,
+	}}
+	doc := buildStatusJSON(cfg, "xo", "2026-09-05T23:17:33Z", snap, nil, statusSeatDispositions(t.TempDir(), cfg))
+	if doc.Agents[1].Name != "backend" || doc.Agents[1].Surface != "codex" {
+		t.Fatalf("backend status surface = %+v, want overlay codex not roster grok", doc.Agents[1])
+	}
+	if doc.Agents[2].Surface != "grok" {
+		t.Fatalf("frontend with no overlay = %q, want roster grok", doc.Agents[2].Surface)
 	}
 }
 

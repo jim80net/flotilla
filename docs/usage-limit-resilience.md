@@ -85,8 +85,11 @@ provider is not under active poison cooldown, watch dispatches
 ## Ledger / turn-final provenance
 
 After a switch, `~/.flotilla/<agent>/active-harness.json` names the live slot and
-`last-switch.json` records the transition. Turn-finals authored during a downgrade
-window should note the active tier so reviewers know which model produced the work.
+`last-switch.json` records the transition. Status, send, watch assessment, and dash
+routing read that overlay surface before the roster primary, so a generic `node`
+pane is classified and delivered through the overlay harness. Turn-finals authored
+during a downgrade window should note the active tier so reviewers know which model
+produced the work.
 
 ## Related
 

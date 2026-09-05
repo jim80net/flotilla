@@ -27,6 +27,16 @@ const (
 	sendRetryMaxAttempts = 3
 )
 
+// resolveSendLiveDriver picks the CLI-send driver. The active-harness overlay is
+// the configured surface fed to ResolveLiveDriver, so a generic runtime pane
+// (node/python) falls back to the overlay harness, not the stale roster primary.
+func resolveSendLiveDriver(cfg *roster.Config, agentName, pane, liveCommand string) (surface.Driver, string, error) {
+	drv, live, _, err := surface.ResolveLiveDriver(agentSurface(cfg, agentName), pane, func(string) (string, error) {
+		return liveCommand, nil
+	})
+	return drv, live, err
+}
+
 func deliverSendOnce(drv surface.Driver, pane, message string) error {
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
 	if surface.SelfHealEnabled() {

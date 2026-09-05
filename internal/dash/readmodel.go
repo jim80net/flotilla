@@ -28,6 +28,7 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // defaultHeartbeat is the freshness-threshold fallback when the roster declares
@@ -209,7 +210,7 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		displayPosture := loopposture.OperatorDisplay(rawPosture)
 		item := AgentItem{
 			Name:        a.Name,
-			Surface:     effectiveSurface(a.Surface),
+			Surface:     effectiveSurface(workspace.EffectiveSurface(a.Name, a.Surface)),
 			State:       deskStateLabel(in.Snap, a.Name),
 			LoopPosture: string(displayPosture),
 			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),

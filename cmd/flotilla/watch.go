@@ -2638,13 +2638,11 @@ func mirrorRelayToLedger(cfg *roster.Config, j watch.Job) {
 // never make a live desk unroutable. An unknown name falls back to "" so surface.Get
 // resolves the default rather than erroring on a non-roster name.
 func agentSurface(cfg *roster.Config, name string) string {
-	if ov, ok, err := workspace.ReadActiveOverlay(name); err == nil && ok && ov.Surface != "" {
-		return ov.Surface
-	}
+	rosterSurface := ""
 	if a, err := cfg.Agent(name); err == nil {
-		return a.Surface
+		rosterSurface = a.Surface
 	}
-	return ""
+	return workspace.EffectiveSurface(name, rosterSurface)
 }
 
 // resolveWatchLiveDriver is the single pane-first driver resolver for watch

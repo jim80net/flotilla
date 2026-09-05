@@ -121,6 +121,16 @@ func ReadActiveOverlay(agent string) (ActiveOverlay, bool, error) {
 	return ov, true, nil
 }
 
+// EffectiveSurface is the overlay-first configured harness name for status,
+// assessment, and delivery. A present overlay Surface wins; a missing or torn
+// overlay is fail-SAFE and returns rosterSurface so a live desk stays routable.
+func EffectiveSurface(agent, rosterSurface string) string {
+	if ov, ok, err := ReadActiveOverlay(agent); err == nil && ok && ov.Surface != "" {
+		return ov.Surface
+	}
+	return rosterSurface
+}
+
 // WriteActiveOverlay atomically writes an agent's active-harness overlay
 // (temp-file + rename within the workspace dir, mirroring the recycle status record's
 // atomic-rename — a partial write must never be read as a torn overlay). It creates the

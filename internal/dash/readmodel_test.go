@@ -3,6 +3,7 @@ package dash
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 func TestReferenceIntervalCeiling(t *testing.T) {
@@ -106,6 +108,7 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 // present (generated_at, xo, agents[name,role,surface,state]) plus the freshness
 // + xo_liveness additions, for a fresh snapshot.
 func TestBuildBoard_Fresh(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	cfg := &roster.Config{Agents: []roster.Agent{
 		{Name: "xo"}, // empty surface ⇒ claude-code; the XO ⇒ role hub
 		{Name: "frontend", Surface: "aider"},
@@ -171,6 +174,36 @@ func TestBuildBoard_Fresh(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("board JSON missing %s\n%s", want, raw)
 		}
+	}
+}
+
+func TestBuildBoardOverlayBeatsRoster(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	dir := filepath.Join(root, "backend")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, workspace.ActiveHarnessFileName), []byte(`{"slot":"fallback-0","surface":"codex"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo", Surface: "grok"},
+		{Name: "backend", Surface: "grok"},
+		{Name: "frontend", Surface: "grok"},
+	}}
+	doc := BuildBoard(BoardInputs{
+		Cfg: cfg, XO: "xo", GeneratedAt: "2026-09-05T23:17:33Z",
+		Snap: watch.Snapshot{DeskStates: map[string]surface.State{
+			"xo": surface.StateIdle, "backend": surface.StateIdle, "frontend": surface.StateIdle,
+		}},
+		SnapOK: true, Threshold: time.Hour,
+	})
+	if doc.Agents[1].Name != "backend" || doc.Agents[1].Surface != "codex" {
+		t.Fatalf("backend board surface = %+v, want overlay codex", doc.Agents[1])
+	}
+	if doc.Agents[2].Surface != "grok" {
+		t.Fatalf("frontend board surface = %q, want roster grok", doc.Agents[2].Surface)
 	}
 }
 

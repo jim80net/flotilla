@@ -148,7 +148,7 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 		}
 		item := statusItem{
 			Name:        a.Name,
-			Surface:     effectiveSurface(a.Surface),
+			Surface:     effectiveSurface(agentSurface(cfg, a.Name)),
 			State:       state,
 			LoopPosture: string(displayPosture),
 			QueueState:  queueState,
@@ -179,8 +179,9 @@ func summarizeStatusItems(items []statusItem) utilization.Summary {
 	return utilization.Build(agents)
 }
 
-// effectiveSurface resolves an agent's surface name for display: an empty roster
-// surface means the default driver, which the docs name "claude-code".
+// effectiveSurface resolves an agent's surface name for display: empty means
+// the default driver, which the docs name "claude-code". Callers pass the
+// overlay-first configured surface (agentSurface), not the raw roster field.
 func effectiveSurface(s string) string {
 	if s == "" {
 		return "claude-code"

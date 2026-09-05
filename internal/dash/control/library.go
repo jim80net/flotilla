@@ -14,6 +14,7 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // dashProvenance is the CoS ledger "from" marker for a dash-issued action, so a
@@ -260,9 +261,10 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	if err != nil {
 		return RouteResult{}, ErrUnknownTarget
 	}
-	drv, ok := c.getDriver(agent.Surface)
+	surf := workspace.EffectiveSurface(agentName, agent.Surface)
+	drv, ok := c.getDriver(surf)
 	if !ok {
-		return RouteResult{}, fmt.Errorf("agent %q: unknown surface %q", agentName, agent.Surface)
+		return RouteResult{}, fmt.Errorf("agent %q: unknown surface %q", agentName, surf)
 	}
 	release, err := c.acquireTxn(pane)
 	if err != nil {

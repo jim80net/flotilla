@@ -26,6 +26,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // GoalScope is a node's altitude in the hierarchy — the column it renders in (fleet → project →
@@ -1469,7 +1470,7 @@ func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
 	}
 	m := make(map[string]string, len(cfg.Agents))
 	for _, a := range cfg.Agents {
-		if surf := strings.TrimSpace(a.Surface); surf != "" {
+		if surf := strings.TrimSpace(workspace.EffectiveSurface(a.Name, a.Surface)); surf != "" {
 			m[strings.ToLower(a.Name)] = surf
 		}
 	}

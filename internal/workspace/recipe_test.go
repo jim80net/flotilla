@@ -111,6 +111,29 @@ func TestReadActiveOverlayAbsentIsNone(t *testing.T) {
 	}
 }
 
+func TestEffectiveSurfaceOverlayBeatsRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{"slot":"fallback-0","surface":"codex"}`)
+	if got := EffectiveSurface("backend", "grok"); got != "codex" {
+		t.Fatalf("EffectiveSurface(overlay codex, roster grok) = %q, want codex", got)
+	}
+}
+
+func TestEffectiveSurfaceFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(no overlay) = %q, want roster grok", got)
+	}
+}
+
+func TestEffectiveSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{not json`)
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(torn overlay) = %q, want roster grok", got)
+	}
+}
+
 func TestReadActiveOverlayPresent(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())
 	writeOverlay(t, "data", `{"slot":"fallback-0","surface":"grok","provider":"xai"}`)
