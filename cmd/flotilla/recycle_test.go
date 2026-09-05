@@ -46,6 +46,7 @@ type recRec struct {
 	process              recycleProcessIdentity
 	handoffAt            time.Time
 	newerSuccessAtCall   int
+	phases               []recyclePhase
 }
 
 func happyRec() *recRec {
@@ -143,6 +144,10 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			}
 			return recycleStatusRecord{}, false, nil
 		},
+		recordPhase: func(_ recyclePlan, phase recyclePhase) error {
+			r.phases = append(r.phases, phase)
+			return nil
+		},
 		lock:  func(string) (func(), error) { r.lockedFlag = true; return func() {}, nil },
 		sleep: func(time.Duration) {},
 		capturePane: func(string) (string, error) {
@@ -195,6 +200,14 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
 	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseTakeoverConfirmed)
+}
+
+func assertRecyclePhases(t *testing.T, got []recyclePhase, want ...recyclePhase) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("recycle phases = %v, want %v", got, want)
+	}
 }
 
 func TestRunRecycleRecordsSuccessBeforePaneTransactionUnlock(t *testing.T) {
@@ -206,7 +219,7 @@ func TestRunRecycleRecordsSuccessBeforePaneTransactionUnlock(t *testing.T) {
 		locked = true
 		return func() { locked = false }, nil
 	}
-	ops.recordSuccess = func(_ string, _ worktreeCloseNote, process recycleProcessIdentity) {
+	ops.recordSuccess = func(_ recyclePlan, _ string, _ worktreeCloseNote, process recycleProcessIdentity) error {
 		if !locked {
 			t.Fatal("successful recycle status was recorded after pane transaction unlock")
 		}
@@ -214,12 +227,257 @@ func TestRunRecycleRecordsSuccessBeforePaneTransactionUnlock(t *testing.T) {
 			t.Fatalf("recorded process = %+v, want %+v", process, r.process)
 		}
 		recorded = true
+		return nil
 	}
 	if _, _, err := runRecycle(ops, testPlan()); err != nil {
 		t.Fatal(err)
 	}
 	if !recorded || locked {
 		t.Fatalf("recorded=%t locked-after-return=%t", recorded, locked)
+	}
+}
+
+func TestRunRecyclePublishesSuccessBeforePaneLockRelease(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	locked := false
+	released := false
+	ops.lock = func(string) (func(), error) {
+		locked = true
+		return func() { locked = false; released = true }, nil
+	}
+	published := false
+	ops.recordSuccess = func(_ recyclePlan, _ string, _ worktreeCloseNote, _ recycleProcessIdentity) error {
+		if !locked || released {
+			return errors.New("success published after pane lock release")
+		}
+		published = true
+		return nil
+	}
+	if _, _, err := runRecycle(ops, testPlan()); err != nil {
+		t.Fatal(err)
+	}
+	if !published || !released {
+		t.Fatalf("published=%t released=%t", published, released)
+	}
+}
+
+func TestSuccessfulRecycleForGenerationUsesWallClockForLegacyStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"LEGACY","ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 422, StartedAt: time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 5, 30, 0, 0, time.UTC)); err != nil || !stale {
+		t.Fatalf("newer legacy success stale=%t err=%v", stale, err)
+	}
+	if _, stale, err := successfulRecycleForGeneration("backend", process, time.Date(2026, 8, 21, 6, 1, 0, 0, time.UTC)); err != nil || stale {
+		t.Fatalf("older legacy success stale=%t err=%v", stale, err)
+	}
+}
+
+func TestFailedRecycleDoesNotOverwriteConcurrentSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	failure := testPlan()
+	failure.token = "FAILED"
+	failure.startedAt = time.Now().UTC().Add(-time.Minute)
+	failureChecked := make(chan struct{})
+	releaseFailure := make(chan struct{})
+	failureDone := make(chan struct{})
+	go func() {
+		defer close(failureDone)
+		writeLastRecycleWithBarrier("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{}, func() {
+			close(failureChecked)
+			<-releaseFailure
+		})
+	}()
+	<-failureChecked
+
+	success := testPlan()
+	success.token = "SUCCESS"
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	successChecked := make(chan struct{})
+	successStarted := make(chan struct{})
+	successDone := make(chan struct{})
+	go func() {
+		defer close(successDone)
+		close(successStarted)
+		writeLastRecycleWithBarrier("backend", success, "done", nil, worktreeCloseNote{}, func() {
+			close(successChecked)
+		}, process)
+	}()
+	<-successStarted
+	select {
+	case <-successChecked:
+		close(releaseFailure)
+		<-failureDone
+		<-successDone
+		t.Fatal("success writer passed the existing-record check while failure writer held the transaction")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFailure)
+	<-failureDone
+	<-successDone
+
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Token != success.token || !rec.OK {
+		t.Fatalf("concurrent success was hidden by failure: %+v", rec)
+	}
+}
+
+func TestFailedRecycleDoesNotReplacePossibleSuccessOnTransientReadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := lastRecyclePath(home, "backend")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"agent":"backend","at":"2026-08-21T05:31:00Z","handoff_path":"/tmp/handoff","token":"SUCCESS","ok":true}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failure := testPlan()
+	failure.token = "FAILED"
+	failure.startedAt = time.Now().UTC().Add(-time.Minute)
+	readErr := errors.New("transient status read failure")
+	writeLastRecycleWithStatusReader("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{}, func(string) (recycleStatusRecord, error) {
+		return recycleStatusRecord{}, readErr
+	})
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("transient read error allowed failure replacement:\n got %s\nwant %s", got, original)
+	}
+}
+
+func TestFinalizeRecycleStatusKeepsPhaseWhenStatusWriteFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	plan := testPlan()
+	plan.token = "FAILED"
+	plan.startedAt = time.Now().UTC().Add(-time.Minute)
+	if err := writeRecyclePhase("backend", plan, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	runErr := errors.New("late abandoned attempt")
+	finalizeRecycleStatusWithWriter("backend", plan, runErr, func() bool {
+		return writeLastRecycleWithStatusReader("backend", plan, "", runErr, worktreeCloseNote{}, func(string) (recycleStatusRecord, error) {
+			return recycleStatusRecord{}, errors.New("transient status read failure")
+		})
+	})
+	if _, err := os.Stat(recyclePhasePath(home, "backend", plan.token)); err != nil {
+		t.Fatalf("phase sidecar removed without a terminal status: %v", err)
+	}
+}
+
+func TestRecycleStatusReportsDurableTypedPhaseAndFinalOutcomeAbsorbsIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	plan := testPlan()
+	if err := writeRecyclePhase("backend", plan, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	inProgress, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inProgress.Phase != recyclePhaseAwaitingClose || !inProgress.InProgress || inProgress.Token != plan.token {
+		t.Fatalf("in-progress status = %+v", inProgress)
+	}
+	if err := writeRecyclePhase("backend", plan, recyclePhaseTakeoverConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	finalizeRecycleStatus("backend", plan, "done", nil, worktreeCloseNote{}, process)
+	final, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Phase != recyclePhaseTakeoverConfirmed || final.InProgress || !final.OK {
+		t.Fatalf("final status = %+v", final)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", plan.token)); !os.IsNotExist(err) {
+		t.Fatalf("completed phase sidecar still exists: %v", err)
+	}
+}
+
+func TestStaleRecycleTerminalRemovesOnlyItsPhaseAndPreservesSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	success := testPlan()
+	success.token = "SUCCESS"
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+
+	stale := testPlan()
+	stale.token = "STALE"
+	if err := writeRecyclePhase("backend", stale, recyclePhaseHandoffWritten); err != nil {
+		t.Fatal(err)
+	}
+	newer := testPlan()
+	newer.token = "NEWER"
+	if err := writeRecyclePhase("backend", newer, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	finalizeRecycleStatus("backend", stale, "", fmt.Errorf("wrapped: %w", errRecycleStaleRetry), worktreeCloseNote{})
+
+	if _, err := os.Stat(recyclePhasePath(home, "backend", stale.token)); !os.IsNotExist(err) {
+		t.Fatalf("stale terminal phase still exists: %v", err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", newer.token)); err != nil {
+		t.Fatalf("newer token phase was removed: %v", err)
+	}
+	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Token != success.token || !rec.OK {
+		t.Fatalf("successful record was masked or replaced: %+v", rec)
+	}
+	if err := os.Remove(recyclePhasePath(home, "backend", newer.token)); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := latestRecycleStatus(home, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if visible.Token != success.token || visible.InProgress {
+		t.Fatalf("exited stale attempt masked the successful status: %+v", visible)
+	}
+}
+
+func TestPostHandoffBusyRetryFinalizesAbandonedTokenBeforeNextAttempt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	first := testPlan()
+	first.token = "FIRST"
+	if err := writeRecyclePhase("backend", first, recyclePhaseHandoffWritten); err != nil {
+		t.Fatal(err)
+	}
+	second := testPlan()
+	second.token = "SECOND"
+	if err := writeRecyclePhase("backend", second, recyclePhaseAwaitingClose); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizeRecycleRetry("backend", first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", first.token)); !os.IsNotExist(err) {
+		t.Fatalf("abandoned retry phase still exists: %v", err)
+	}
+	if _, err := os.Stat(recyclePhasePath(home, "backend", second.token)); err != nil {
+		t.Fatalf("next attempt phase was removed: %v", err)
 	}
 }
 
@@ -960,6 +1218,7 @@ func TestRunRecycleNoGracefulCloseFallsBackToKill(t *testing.T) {
 	if len(r.delivered) != 2 {
 		t.Errorf("the kill-fallback path still takes over (got %v)", r.delivered)
 	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseAwaitingClose, recyclePhaseFallbackRespawn, recyclePhaseTakeoverConfirmed)
 	_ = msg
 }
 
@@ -1344,6 +1603,7 @@ func TestRunRecycleSelfPath(t *testing.T) {
 	if len(r.delivered) != 2 {
 		t.Errorf("want handoff+takeover delivers, got %v", r.delivered)
 	}
+	assertRecyclePhases(t, r.phases, recyclePhaseHandoffWritten, recyclePhaseTakeoverConfirmed)
 }
 
 // #437 reopen: own-pane --self must skip phase-0 idle (chicken-egg: session driving recycle

@@ -61,7 +61,18 @@ type recycleStatusRecord struct {
 	Error            string                      `json:"error,omitempty"`
 	History          []recycleStatusHistoryEntry `json:"history,omitempty"`
 	FirstSuccess     *recycleStatusHistoryEntry  `json:"first_success,omitempty"`
+	Phase            recyclePhase                `json:"phase,omitempty"`
+	InProgress       bool                        `json:"in_progress,omitempty"`
 }
+
+type recyclePhase string
+
+const (
+	recyclePhaseHandoffWritten    recyclePhase = "handoff-written"
+	recyclePhaseAwaitingClose     recyclePhase = "awaiting-close"
+	recyclePhaseFallbackRespawn   recyclePhase = "fallback-respawn"
+	recyclePhaseTakeoverConfirmed recyclePhase = "takeover-confirmed"
+)
 
 func defaultTimeouts() recycleTimeouts {
 	return recycleTimeouts{handoff: defaultHandoffTO, close_: defaultCloseTO, boot: defaultBootTO, takeover: defaultTakeoverTO}
@@ -71,30 +82,31 @@ func defaultTimeouts() recycleTimeouts {
 // fail-closed decision core is unit-testable without a live tmux server or a real agent.
 type recycleOps struct {
 	resolve       func(want string) (string, deliver.ResolveOutcome, error)
-	paneID        func(target string) (string, error)                             // deliver.PaneID (canonical self-recycle compare)
-	inMode        func(target string) (bool, error)                               // deliver.PaneInMode (copy-mode refuse)
-	assess        func(target string) surface.State                               // driver.Assess
-	composer      func(target string) surface.ComposerDisposition                 // driver.ComposerState (required)
-	absent        func(cwd, path string) (bool, error)                            // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
-	durable       func(cwd, path string, minBytes int) (bool, error)              // deliver.HandoffDurable
-	deliver       func(target, text string) error                                 // confirmed delivery bound to the driver
-	closeFn       func(target string) error                                       // driver.Close
-	remainOnExit  func(target string, on bool) error                              // deliver.SetRemainOnExit (keep the pane on /exit)
-	paneDead      func(target string) (bool, error)                               // deliver.PaneDead (close-confirm: claude-direct)
-	selfHeal      func(target string)                                             // optional (nil unless FLOTILLA_SELF_HEAL)
-	respawn       func(target, cwd, launch string) error                          // deliver.RespawnPane (-k)
-	readMarker    func(target string) (string, error)                             // deliver.ReadMarker
-	stampGen      func(target, token string) error                                // deliver.StampRecycleGen
-	readGen       func(target string) (string, error)                             // deliver.ReadRecycleGen
-	reapReady     func() error                                                    // pidfd open+signal support, checked before hard respawn
-	snapshotReap  func(target string) ([]deliver.ProcessRef, error)               // pre-respawn pane pipe writers + descendants
-	reap          func(processes []deliver.ProcessRef) error                      // bounded TERM → KILL with exit confirmation
-	process       func(target string) (recycleProcessIdentity, error)             // live PID + start time
-	recordRetired func(recycleProcessIdentity)                                    // successful recycle's pre-respawn generation
-	recordSuccess func(string, worktreeCloseNote, recycleProcessIdentity)         // persists success while pane txn is still held
-	handoffTime   func(cwd, path string) (time.Time, error)                       // durable handoff mtime
-	newerSuccess  func(recycleProcessIdentity) (recycleStatusRecord, bool, error) // success for this process generation or after command start
-	lock          func(target string) (release func(), err error)                 // AcquirePaneTxn → Release
+	paneID        func(target string) (string, error)                                        // deliver.PaneID (canonical self-recycle compare)
+	inMode        func(target string) (bool, error)                                          // deliver.PaneInMode (copy-mode refuse)
+	assess        func(target string) surface.State                                          // driver.Assess
+	composer      func(target string) surface.ComposerDisposition                            // driver.ComposerState (required)
+	absent        func(cwd, path string) (bool, error)                                       // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
+	durable       func(cwd, path string, minBytes int) (bool, error)                         // deliver.HandoffDurable
+	deliver       func(target, text string) error                                            // confirmed delivery bound to the driver
+	closeFn       func(target string) error                                                  // driver.Close
+	remainOnExit  func(target string, on bool) error                                         // deliver.SetRemainOnExit (keep the pane on /exit)
+	paneDead      func(target string) (bool, error)                                          // deliver.PaneDead (close-confirm: claude-direct)
+	selfHeal      func(target string)                                                        // optional (nil unless FLOTILLA_SELF_HEAL)
+	respawn       func(target, cwd, launch string) error                                     // deliver.RespawnPane (-k)
+	readMarker    func(target string) (string, error)                                        // deliver.ReadMarker
+	stampGen      func(target, token string) error                                           // deliver.StampRecycleGen
+	readGen       func(target string) (string, error)                                        // deliver.ReadRecycleGen
+	reapReady     func() error                                                               // pidfd open+signal support, checked before hard respawn
+	snapshotReap  func(target string) ([]deliver.ProcessRef, error)                          // pre-respawn pane pipe writers + descendants
+	reap          func(processes []deliver.ProcessRef) error                                 // bounded TERM → KILL with exit confirmation
+	process       func(target string) (recycleProcessIdentity, error)                        // live PID + start time
+	recordRetired func(recycleProcessIdentity)                                               // successful recycle's pre-respawn generation
+	recordPhase   func(recyclePlan, recyclePhase) error                                      // durable CLI/watch lifecycle status
+	recordSuccess func(recyclePlan, string, worktreeCloseNote, recycleProcessIdentity) error // terminal success under pane lock
+	handoffTime   func(cwd, path string) (time.Time, error)                                  // durable handoff mtime
+	newerSuccess  func(recycleProcessIdentity) (recycleStatusRecord, bool, error)            // success for this process generation or after command start
+	lock          func(target string) (release func(), err error)                            // AcquirePaneTxn → Release
 	sleep         func(time.Duration)
 	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
 	rotate func(target string) error
@@ -139,6 +151,7 @@ type recyclePlan struct {
 	// without graceful-close/respawn (coordinator self-rotation; never bare /clear).
 	selfPath     bool
 	reapMonitors bool // selected live surface is grok; reap only on its hard-close path
+	startedAt    time.Time
 }
 
 // samePaneAsSelf reports whether the resolved target IS the command's own pane, comparing
@@ -252,6 +265,9 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	if !process.StartedAt.Before(handoffAt) {
 		return "", worktreeCloseNote{}, fmt.Errorf("recycle preflight for %q: live PID %d started at %s and does not predate handoff %s at %s — refusing stale/cross-generation handoff; desk untouched", p.agent, process.PID, process.StartedAt.UTC().Format(time.RFC3339Nano), p.designatedPath, handoffAt.UTC().Format(time.RFC3339Nano))
 	}
+	if err := recordRecyclePhase(ops, p, recyclePhaseHandoffWritten); err != nil {
+		return "", worktreeCloseNote{}, fmt.Errorf("record recycle phase %q for %q: %w — desk untouched", recyclePhaseHandoffWritten, p.agent, err)
+	}
 
 	// ACQUIRE the pane-txn lock for the irreversible span (Phases 2→4); released on return.
 	release, err := ops.lock(target)
@@ -286,14 +302,22 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		if err := ops.deliver(target, p.takeoverText); err != nil {
 			return "", worktreeCloseNote{}, fmt.Errorf("self-recycle: delivering takeover to %q failed: %w (handoff durable at %s)", p.agent, err, p.designatedPath)
 		}
+		if err := recordRecyclePhase(ops, p, recyclePhaseTakeoverConfirmed); err != nil {
+			return "", worktreeCloseNote{}, fmt.Errorf("record recycle phase %q for %q: %w", recyclePhaseTakeoverConfirmed, p.agent, err)
+		}
 		msg := fmt.Sprintf("self-recycled %s → pane %s (handoff %s; rotated in place, took over — no process kill, no model/surface change; for cutover run full recycle from another pane)\n", p.agent, target, p.designatedPath)
 		if ops.recordRetired != nil {
 			ops.recordRetired(process)
 		}
 		if ops.recordSuccess != nil {
-			ops.recordSuccess(msg, worktreeCloseNote{}, process)
+			if err := ops.recordSuccess(p, msg, worktreeCloseNote{}, process); err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("publish recycle success for %q: %w", p.agent, err)
+			}
 		}
 		return msg, worktreeCloseNote{}, nil
+	}
+	if err := recordRecyclePhase(ops, p, recyclePhaseAwaitingClose); err != nil {
+		return "", worktreeCloseNote{}, fmt.Errorf("record recycle phase %q for %q: %w — desk untouched", recyclePhaseAwaitingClose, p.agent, err)
 	}
 
 	// PHASE 2 — graceful close (the one irreversible step; the handoff is durable by here).
@@ -323,6 +347,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	closeErr := ops.closeFn(target)
 	var wtNote worktreeCloseNote
 	var reapSet []deliver.ProcessRef
+	fallbackRespawn := false
 	switch {
 	case closeErr == nil:
 		var closed bool
@@ -331,6 +356,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 			return "", wtNote, fmt.Errorf("phase 2: the graceful close of %q did not confirm the process exited within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.timeouts.close_, p.agent)
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
+		fallbackRespawn = true
 		// No graceful close → the handoff-gated hard kill: RespawnPane -k IS the close+relaunch
 		// (safe — the handoff is durable). Snapshot pipe-fed monitors and surviving descendants
 		// while the old pane process still owns their read/parent relationships; respawn destroys
@@ -353,6 +379,11 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 
 	// PHASE 3 — relaunch (reuse the hardened resume primitive; marker survives the pane-id reuse).
+	if fallbackRespawn {
+		if err := recordRecyclePhase(ops, p, recyclePhaseFallbackRespawn); err != nil {
+			return "", wtNote, fmt.Errorf("record recycle phase %q for %q: %w — hard respawn not attempted", recyclePhaseFallbackRespawn, p.agent, err)
+		}
+	}
 	respawnErr := ops.respawn(target, p.cwd, p.launch)
 	var reapErr error
 	if reapSet != nil {
@@ -393,6 +424,9 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	if err := ops.deliver(target, p.takeoverText); err != nil {
 		return "", wtNote, fmt.Errorf("phase 4: delivering the takeover turn to %q failed: %w (the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over')", p.agent, err, p.agent, p.designatedPath)
 	}
+	if err := recordRecyclePhase(ops, p, recyclePhaseTakeoverConfirmed); err != nil {
+		return "", wtNote, fmt.Errorf("record recycle phase %q for %q: %w", recyclePhaseTakeoverConfirmed, p.agent, err)
+	}
 	// Best-effort resumption-confidence signal — success = the desk RESUMED, not just that the
 	// turn was typed. Its absence does NOT fail the recycle (the takeover was delivered-confirmed).
 	if !pollWorking(ops, target, p.timeouts.takeover) {
@@ -407,9 +441,18 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		ops.recordRetired(process)
 	}
 	if ops.recordSuccess != nil {
-		ops.recordSuccess(msg, wtNote, process)
+		if err := ops.recordSuccess(p, msg, wtNote, process); err != nil {
+			return "", wtNote, fmt.Errorf("publish recycle success for %q: %w", p.agent, err)
+		}
 	}
 	return msg, wtNote, nil
+}
+
+func recordRecyclePhase(ops recycleOps, p recyclePlan, phase recyclePhase) error {
+	if ops.recordPhase == nil {
+		return nil
+	}
+	return ops.recordPhase(p, phase)
 }
 
 var errRecycleStaleRetry = errors.New("stale recycle retry")
@@ -738,6 +781,7 @@ func cmdRecycle(args []string) error {
 	}
 	var retiredProcess recycleProcessIdentity
 	var plan recyclePlan
+	successRecorded := false
 	ops := recycleOps{
 		resolve:      deliver.Resolve,
 		paneID:       deliver.PaneID,
@@ -765,8 +809,22 @@ func cmdRecycle(args []string) error {
 		readGen:       deliver.ReadRecycleGen,
 		process:       recyclePaneProcessIdentity,
 		recordRetired: func(process recycleProcessIdentity) { retiredProcess = process },
-		recordSuccess: func(msg string, wt worktreeCloseNote, process recycleProcessIdentity) {
-			writeLastRecycle(agentName, plan, msg, nil, wt, process)
+		recordPhase:   func(plan recyclePlan, phase recyclePhase) error { return writeRecyclePhase(agentName, plan, phase) },
+		recordSuccess: func(plan recyclePlan, msg string, wt worktreeCloseNote, process recycleProcessIdentity) error {
+			finalizeRecycleStatus(agentName, plan, msg, nil, wt, process)
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			rec, err := readRecycleStatus(lastRecyclePath(home, agentName))
+			if err != nil {
+				return err
+			}
+			if !rec.OK || rec.Token != plan.token {
+				return fmt.Errorf("terminal record is token %q ok=%t, want token %q ok=true", rec.Token, rec.OK, plan.token)
+			}
+			successRecorded = true
+			return nil
 		},
 		handoffTime: func(_ string, path string) (time.Time, error) {
 			info, err := os.Stat(path)
@@ -821,12 +879,17 @@ func cmdRecycle(args []string) error {
 			timeouts:        defaultTimeouts(),
 			selfPath:        selfPath,
 			reapMonitors:    liveSurf == "grok",
+			startedAt:       commandStarted,
 		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
 			break
 		}
 		if attempt+1 < attempts && isRetryableBusy(runErr) {
+			if err := finalizeRecycleRetry(agentName, plan); err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("finalize recycle retry token %s: %w", plan.token, err))
+				break
+			}
 			log.Printf("flotilla: recycle: busy-desk abort for %q (attempt %d/%d) — retrying after settle wait (#436)", agentName, attempt+1, attempts)
 			time.Sleep(2 * time.Second)
 			continue
@@ -838,8 +901,8 @@ func cmdRecycle(args []string) error {
 			runErr = errors.New("recycle completion: retired process generation was not captured")
 		}
 	}
-	if runErr != nil {
-		writeLastRecycle(agentName, plan, msg, runErr, wtNote, retiredProcess)
+	if !successRecorded {
+		finalizeRecycleStatus(agentName, plan, msg, runErr, wtNote, retiredProcess)
 	}
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
@@ -935,9 +998,12 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 		}
 		if candidate.ProcessPID == 0 {
 			// Records written before generation tracking had neither mode nor
-			// process fields. They cannot safely identify this attempt as stale,
-			// so preserve them as audit evidence without wedging all future work.
+			// process fields. Their durable wall clock can still block a command
+			// that was already running, without wedging later generations.
 			if candidate.Mode == "" {
+				if at.After(after) {
+					return candidate, true, nil
+				}
 				continue
 			}
 			return recycleStatusRecord{}, false, fmt.Errorf("successful recycle status lacks process generation; refusing because stale retry and legitimate new generation cannot be distinguished")
@@ -969,7 +1035,7 @@ func cmdRecycleStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	rec, err := readRecycleStatus(lastRecyclePath(home, fs.Args()[0]))
+	rec, err := latestRecycleStatus(home, fs.Args()[0])
 	if err != nil {
 		return fmt.Errorf("recycle status for %q: %w", fs.Args()[0], err)
 	}
@@ -981,8 +1047,53 @@ func cmdRecycleStatus(args []string) error {
 		fmt.Println(string(data))
 		return nil
 	}
-	fmt.Printf("%s ok=%t at=%s token=%s handoff=%s\n", rec.Agent, rec.OK, rec.At, rec.Token, rec.HandoffPath)
+	fmt.Printf("%s ok=%t in_progress=%t phase=%s at=%s token=%s handoff=%s\n", rec.Agent, rec.OK, rec.InProgress, rec.Phase, rec.At, rec.Token, rec.HandoffPath)
 	return nil
+}
+
+func recyclePhasePath(home, agent, token string) string {
+	return filepath.Join(home, ".flotilla", agent, "recycle-phase-"+token+".json")
+}
+
+func writeRecyclePhase(agent string, p recyclePlan, phase recyclePhase) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	rec := recycleStatusRecord{
+		Agent: agent, At: time.Now().UTC().Format(time.RFC3339Nano), HandoffPath: p.designatedPath,
+		Token: p.token, Mode: "full", Phase: phase, InProgress: phase != recyclePhaseTakeoverConfirmed,
+	}
+	if p.selfPath {
+		rec.Mode = "self"
+	}
+	return writeJSONAtomic(recyclePhasePath(home, agent, p.token), rec)
+}
+
+func latestRecycleStatus(home, agent string) (recycleStatusRecord, error) {
+	last, lastErr := readRecycleStatus(lastRecyclePath(home, agent))
+	phasePaths, phaseGlobErr := filepath.Glob(filepath.Join(home, ".flotilla", agent, "recycle-phase-*.json"))
+	if phaseGlobErr != nil {
+		return recycleStatusRecord{}, phaseGlobErr
+	}
+	for _, phasePath := range phasePaths {
+		phase, phaseErr := readRecycleStatus(phasePath)
+		if phaseErr != nil {
+			return recycleStatusRecord{}, phaseErr
+		}
+		if lastErr != nil || recycleStatusTime(phase).After(recycleStatusTime(last)) {
+			last, lastErr = phase, nil
+		}
+	}
+	if lastErr == nil {
+		return last, nil
+	}
+	return recycleStatusRecord{}, lastErr
+}
+
+func recycleStatusTime(rec recycleStatusRecord) time.Time {
+	at, _ := time.Parse(time.RFC3339Nano, rec.At)
+	return at
 }
 
 // printRecyclePlan shows the resolved plan for --dry-run (no acting, no lock).
@@ -1005,40 +1116,63 @@ func printRecyclePlan(p recyclePlan, r launch.Recipe, reapSupportErr error) {
 // writeLastRecycle records the outcome to ~/.flotilla/<agent>/last-recycle.json ATOMICALLY
 // (write-temp + rename), so the outcome survives the process / a relay outage and a back-to-
 // back recycle never reads a torn file. Best-effort: a write failure is logged, never fatal.
-func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
+func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, nil, processes...)
+}
+
+// writeLastRecycleWithBarrier holds one cross-process lock across the existing-record
+// decision and atomic replacement. The optional barrier is test-only orchestration for
+// proving an overlapping writer cannot publish between that decision and the rename.
+func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleTransaction(agent, p, msg, runErr, wt, afterExistingCheck, readRecycleStatus, processes...)
+}
+
+func writeLastRecycleWithStatusReader(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) bool {
+	return writeLastRecycleTransaction(agent, p, msg, runErr, wt, nil, readStatus, processes...)
+}
+
+func writeLastRecycleTransaction(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), readStatus func(string) (recycleStatusRecord, error), processes ...recycleProcessIdentity) bool {
 	var process recycleProcessIdentity
 	if len(processes) > 0 {
 		process = processes[0]
 	}
-	writeLastRecycleRecord(agent, p, msg, runErr, wt, process, nil)
-}
-
-func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, process recycleProcessIdentity, afterRead func()) {
 	// The successful record is the exactly-once admission authority. A stale retry
 	// must never replace it with its own refusal record.
 	if errors.Is(runErr, errRecycleStaleRetry) {
-		return
+		return false
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return false
 	}
 	dir := filepath.Join(home, ".flotilla", agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
-		return
+		return false
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, "last-recycle.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		log.Printf("flotilla: recycle: could not open the status lock: %v", err)
-		return
+		return false
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		log.Printf("flotilla: recycle: could not lock the status record: %v", err)
-		return
+		return false
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
+	if runErr != nil && !p.startedAt.IsZero() {
+		existing, readErr := readStatus(lastRecyclePath(home, agent))
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return false
+		}
+		if readErr == nil && existing.OK {
+			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
+			if parseErr != nil || !existingAt.Before(p.startedAt) {
+				return false
+			}
+		}
+	}
 	at := time.Now().UTC()
 	rec := map[string]any{
 		"agent":        agent,
@@ -1047,6 +1181,10 @@ func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr erro
 		"token":        p.token,
 		"ok":           runErr == nil,
 		"result":       strings.TrimSpace(msg),
+	}
+	phasePath := recyclePhasePath(home, agent, p.token)
+	if phaseRec, phaseErr := readRecycleStatus(phasePath); phaseErr == nil && phaseRec.Token == p.token {
+		rec["phase"] = phaseRec.Phase
 	}
 	if p.selfPath {
 		rec["mode"] = "self"
@@ -1065,8 +1203,8 @@ func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr erro
 	}
 	final := filepath.Join(dir, "last-recycle.json")
 	audit := priorRecycleStatusAudit(final)
-	if afterRead != nil {
-		afterRead()
+	if afterExistingCheck != nil {
+		afterExistingCheck()
 	}
 	if len(audit.History) > 0 {
 		rec["history"] = audit.History
@@ -1086,33 +1224,71 @@ func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr erro
 	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
-		return
+		return false
 	}
 	tmp, err := os.CreateTemp(dir, "last-recycle-*.json.tmp")
 	if err != nil {
 		log.Printf("flotilla: recycle: could not write the status record: %v", err)
-		return
+		return false
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return
+		return false
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return
+		return false
 	}
 	if err := os.Rename(tmpName, final); err != nil {
 		os.Remove(tmpName)
 		log.Printf("flotilla: recycle: could not finalize the status record: %v", err)
-		return
+		return false
 	}
 	if runErr == nil {
 		if err := recordSuccessfulRecycleCooldown(dir, p.token, at); err != nil {
 			log.Printf("flotilla: recycle: could not record chapter-end cooldown: %v", err)
 		}
 	}
+	return true
+}
+
+// writeLastRecycleRecord preserves the GHI test seam while delegating to the
+// transaction that owns the status lock and atomic replacement.
+func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, process recycleProcessIdentity, afterRead func()) {
+	writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, afterRead, process)
+}
+
+// finalizeRecycleStatus closes the lifecycle of exactly one recycle token.
+func finalizeRecycleStatus(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
+	finalizeRecycleStatusWithWriter(agent, p, runErr, func() bool {
+		return writeLastRecycle(agent, p, msg, runErr, wt, processes...)
+	})
+}
+
+func finalizeRecycleStatusWithWriter(agent string, p recyclePlan, runErr error, writeStatus func() bool) {
+	if !writeStatus() && !errors.Is(runErr, errRecycleStaleRetry) {
+		return
+	}
+	if err := clearRecyclePhase(agent, p.token); err != nil {
+		log.Printf("flotilla: recycle: could not clear terminal phase record: %v", err)
+	}
+}
+
+func finalizeRecycleRetry(agent string, p recyclePlan) error {
+	return clearRecyclePhase(agent, p.token)
+}
+
+func clearRecyclePhase(agent, token string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(recyclePhasePath(home, agent, token)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // parseRecycleArgs resolves the agent, roster path, launch path, and flags, accepting
