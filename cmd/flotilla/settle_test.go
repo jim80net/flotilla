@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -113,6 +114,88 @@ func TestRunSettleRefusesUndrainedBacklogBeforeGit(t *testing.T) {
 	}
 	if len(h.calls) != 0 || len(h.touched) != 0 || len(h.audits) != 0 {
 		t.Fatalf("side effects before gate: calls=%v touched=%v audits=%v", h.calls, h.touched, h.audits)
+	}
+}
+
+func TestRunSettleRefusesPathUnsafeActorBeforeSideEffects(t *testing.T) {
+	for _, actor := range []string{"../frontend", "backend/../xo"} {
+		t.Run(actor, func(t *testing.T) {
+			h, plan, ops := newSettleHarness(t, "## Backlog\n")
+			plan.Actor = actor
+			err := runSettle(plan, ops)
+			if err == nil || !strings.Contains(err.Error(), "invalid --from") {
+				t.Fatalf("error = %v, want invalid --from", err)
+			}
+			if len(h.calls) != 0 || len(h.touched) != 0 || len(h.audits) != 0 {
+				t.Fatalf("invalid actor caused side effects: calls=%v touched=%v audits=%v", h.calls, h.touched, h.audits)
+			}
+		})
+	}
+}
+
+func TestRunSettleRefusesUnrelatedStagedFileBeforeCommitOrPush(t *testing.T) {
+	h, plan, ops := newSettleHarness(t, "## Backlog\n")
+	baseGit := ops.git
+	ops.git = func(args ...string) (string, error) {
+		if strings.Join(args, " ") == "diff --cached --name-only" {
+			h.calls = append(h.calls, append([]string(nil), args...))
+			return "state/flotilla-backend-backlog.md\nunrelated.txt\n", nil
+		}
+		return baseGit(args...)
+	}
+	err := runSettle(plan, ops)
+	if err == nil || !strings.Contains(err.Error(), "do not exactly match") {
+		t.Fatalf("error = %v, want exact staged-set refusal", err)
+	}
+	for _, call := range h.calls {
+		if len(call) > 0 && (call[0] == "commit" || call[0] == "push") {
+			t.Fatalf("staged extra reached %s: %v", call[0], h.calls)
+		}
+	}
+	if len(h.touched) != 0 || len(h.audits) != 0 {
+		t.Fatalf("staged extra wrote settled state: touched=%v audits=%v", h.touched, h.audits)
+	}
+}
+
+func TestRunSettleWithRealIndexRefusesPlantedUnrelatedStagedFile(t *testing.T) {
+	root := t.TempDir()
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backlogPath := filepath.Join(stateDir, "flotilla-backend-backlog.md")
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unrelatedPath := filepath.Join(root, "unrelated.txt")
+	if err := os.WriteFile(unrelatedPath, []byte("must not be committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "--quiet"}, {"add", "--", "unrelated.txt"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	t.Setenv("HOME", t.TempDir())
+	plan := settlePlan{
+		Actor: "backend", Reason: "walk complete", RosterPath: filepath.Join(stateDir, "flotilla.json"),
+		Remote: "origin", Ref: defaultSettleRef,
+	}
+	err := runSettle(plan, realSettleOps(root))
+	if err == nil || !strings.Contains(err.Error(), "do not exactly match") {
+		t.Fatalf("error = %v, want exact staged-set refusal", err)
+	}
+	head := exec.Command("git", "rev-parse", "--verify", "HEAD")
+	head.Dir = root
+	if err := head.Run(); err == nil {
+		t.Fatal("settle committed the planted unrelated staged file")
+	}
+	for _, suffix := range []string{"alive", "settled"} {
+		if _, err := os.Stat(filepath.Join(stateDir, "flotilla-backend-"+suffix)); !os.IsNotExist(err) {
+			t.Fatalf("settle wrote %s marker after staged-set refusal: %v", suffix, err)
+		}
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/sessionmirror"
 )
 
 const defaultSettleRef = "refs/heads/backup/main-rolling"
@@ -74,8 +75,8 @@ func settleGitRoot(rosterPath string) string {
 }
 
 func runSettle(plan settlePlan, ops settleOps) error {
-	if plan.Actor == "" {
-		return errors.New("settle: --from is required (or set $FLOTILLA_SELF)")
+	if err := sessionmirror.ValidateAgentName(plan.Actor); err != nil {
+		return fmt.Errorf("settle: invalid --from: %w", err)
 	}
 	if plan.Reason == "" || plan.Remote == "" || plan.Ref == "" {
 		return errors.New("settle: --reason, --remote, and --ref must be non-empty")
@@ -110,7 +111,15 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	if err != nil {
 		return fmt.Errorf("settle: inspect staged files: %w", err)
 	}
-	committed := strings.TrimSpace(staged) != ""
+	stagedFiles := nonEmptyLines(staged)
+	intendedFiles, err := settleIndexNames(settleGitRoot(plan.RosterPath), files)
+	if err != nil {
+		return err
+	}
+	if !equalStringSets(stagedFiles, intendedFiles) {
+		return fmt.Errorf("settle: refusing commit: staged files %q do not exactly match intended settle files %q", stagedFiles, intendedFiles)
+	}
+	committed := len(stagedFiles) != 0
 	if committed {
 		if _, commitErr := ops.git("commit", "-m", "settle("+plan.Actor+"): "+plan.Reason); commitErr != nil {
 			return fmt.Errorf("settle: commit: %w", commitErr)
@@ -170,6 +179,52 @@ func runSettle(plan settlePlan, ops settleOps) error {
 	}
 	fmt.Printf("settled actor=%s sha=%s backup=%s/%s\n", plan.Actor, sha, plan.Remote, plan.Ref)
 	return nil
+}
+
+func nonEmptyLines(raw string) []string {
+	var lines []string
+	for _, line := range strings.Split(raw, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, filepath.ToSlash(filepath.Clean(line)))
+		}
+	}
+	return lines
+}
+
+func settleIndexNames(gitRoot string, files []string) ([]string, error) {
+	names := make([]string, 0, len(files))
+	for _, path := range files {
+		name := path
+		if filepath.IsAbs(path) {
+			var err error
+			name, err = filepath.Rel(gitRoot, path)
+			if err != nil {
+				return nil, fmt.Errorf("settle: resolve staged file %s: %w", path, err)
+			}
+		}
+		names = append(names, filepath.ToSlash(filepath.Clean(name)))
+	}
+	return names, nil
+}
+
+func equalStringSets(got, want []string) bool {
+	gotSet := make(map[string]struct{}, len(got))
+	wantSet := make(map[string]struct{}, len(want))
+	for _, value := range got {
+		gotSet[value] = struct{}{}
+	}
+	for _, value := range want {
+		wantSet[value] = struct{}{}
+	}
+	if len(gotSet) != len(wantSet) {
+		return false
+	}
+	for value := range wantSet {
+		if _, ok := gotSet[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func realSettleOps(gitRoot string) settleOps {
