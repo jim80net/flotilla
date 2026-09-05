@@ -259,6 +259,7 @@ func TestBacklogLivenessWedgeStillFiresWhenNeverSettling(t *testing.T) {
 	// refactor that ties evalLiveness to XOSettled would blind the watchdog; this catches it.
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.HeartbeatOwedWork = func() bool { return len(cfg.BacklogGate().Unblocked) > 0 }
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
 	f.signal = "h0"
