@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -917,6 +918,13 @@ func successfulRecycleForGeneration(agent string, process recycleProcessIdentity
 			})
 		}
 	}
+	if rec.FirstSuccess != nil && rec.FirstSuccess.OK {
+		entry := rec.FirstSuccess
+		candidates = append(candidates, recycleStatusRecord{
+			Agent: agent, At: entry.At, Token: entry.Token, OK: true, Mode: entry.Mode,
+			ProcessPID: entry.ProcessPID, ProcessStartedAt: entry.ProcessStartedAt,
+		})
+	}
 	for _, candidate := range candidates {
 		at, err := time.Parse(time.RFC3339Nano, candidate.At)
 		if err != nil {
@@ -1002,6 +1010,10 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	if len(processes) > 0 {
 		process = processes[0]
 	}
+	writeLastRecycleRecord(agent, p, msg, runErr, wt, process, nil)
+}
+
+func writeLastRecycleRecord(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, process recycleProcessIdentity, afterRead func()) {
 	// The successful record is the exactly-once admission authority. A stale retry
 	// must never replace it with its own refusal record.
 	if errors.Is(runErr, errRecycleStaleRetry) {
@@ -1016,6 +1028,17 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
 		return
 	}
+	lock, err := os.OpenFile(filepath.Join(dir, "last-recycle.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		log.Printf("flotilla: recycle: could not open the status lock: %v", err)
+		return
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		log.Printf("flotilla: recycle: could not lock the status record: %v", err)
+		return
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
 	at := time.Now().UTC()
 	rec := map[string]any{
 		"agent":        agent,
@@ -1042,11 +1065,20 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	}
 	final := filepath.Join(dir, "last-recycle.json")
 	audit := priorRecycleStatusAudit(final)
+	if afterRead != nil {
+		afterRead()
+	}
 	if len(audit.History) > 0 {
 		rec["history"] = audit.History
 	}
 	if audit.FirstSuccess == nil && runErr == nil {
-		entry := recycleStatusHistoryEntry{At: at.Format(time.RFC3339Nano), Token: p.token, OK: true}
+		entry := recycleStatusHistoryEntry{
+			At: at.Format(time.RFC3339Nano), Token: p.token, OK: true,
+			Mode: rec["mode"].(string), ProcessPID: process.PID,
+		}
+		if !process.StartedAt.IsZero() {
+			entry.ProcessStartedAt = process.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
 		audit.FirstSuccess = &entry
 	}
 	if audit.FirstSuccess != nil {

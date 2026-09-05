@@ -486,6 +486,71 @@ func TestFailedRecycleStatusRetainsPriorSuccessForStaleGenerationGate(t *testing
 	}
 }
 
+func TestOverlappingFailureWriterSerializesBehindSuccessfulStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	failure := testPlan()
+	failure.token = "FAILED"
+
+	successRead := make(chan struct{})
+	releaseSuccess := make(chan struct{})
+	successDone := make(chan struct{})
+	go func() {
+		defer close(successDone)
+		writeLastRecycleRecord("backend", success, "done", nil, worktreeCloseNote{}, process, func() {
+			close(successRead)
+			<-releaseSuccess
+		})
+	}()
+	<-successRead
+
+	failureStarted := make(chan struct{})
+	failureRead := make(chan struct{})
+	failureDone := make(chan struct{})
+	go func() {
+		defer close(failureDone)
+		close(failureStarted)
+		writeLastRecycleRecord("backend", failure, "", errors.New("overlapping failure"), worktreeCloseNote{}, recycleProcessIdentity{}, func() {
+			close(failureRead)
+		})
+	}()
+	<-failureStarted
+	select {
+	case <-failureRead:
+		t.Fatal("failure writer crossed the successful writer's status lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseSuccess)
+	<-successDone
+	<-failureDone
+
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("serialized overlap lost success authority: got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
+func TestFirstSuccessStillRefusesRetiredGenerationAfterHistoryWindow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	success := testPlan()
+	success.token = "SUCCESS"
+	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
+	for i := 0; i < maxRecycleStatusHistory+1; i++ {
+		failure := testPlan()
+		failure.token = fmt.Sprintf("failure-%02d", i)
+		writeLastRecycle("backend", failure, "", errors.New("later failure"), worktreeCloseNote{})
+	}
+	got, stale, err := successfulRecycleForGeneration("backend", process, time.Now().UTC().Add(time.Hour))
+	if err != nil || !stale || got.Token != "SUCCESS" {
+		t.Fatalf("aged success authority got=%+v stale=%t err=%v", got, stale, err)
+	}
+}
+
 func TestLegacySuccessfulRecycleWithoutGenerationDoesNotWedgeFutureRecycle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
