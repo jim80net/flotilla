@@ -188,6 +188,7 @@ usage:
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force] [--scheduled-e2e]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed
+  flotilla recycle status --json <agent>                  read the durable last recycle generation
   flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force] [--scheduled-e2e]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
   flotilla workspace init <agent> --repo <abs-path>   provision a desk git worktree + ~/.flotilla/<agent>/ host (seeds doctrine into the worktree)
   flotilla workspace path <agent>                     print an agent's workspace directory

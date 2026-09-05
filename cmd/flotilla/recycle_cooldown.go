@@ -24,9 +24,12 @@ type chapterEndRecycleCooldown struct {
 }
 
 type recycleStatusHistoryEntry struct {
-	At    string `json:"at,omitempty"`
-	Token string `json:"token,omitempty"`
-	OK    bool   `json:"ok"`
+	At               string `json:"at,omitempty"`
+	Token            string `json:"token,omitempty"`
+	OK               bool   `json:"ok"`
+	Mode             string `json:"mode,omitempty"`
+	ProcessPID       int    `json:"process_pid,omitempty"`
+	ProcessStartedAt string `json:"process_started_at,omitempty"`
 }
 
 type recycleStatusAudit struct {
@@ -103,6 +106,9 @@ func priorRecycleStatusAudit(path string) recycleStatusAudit {
 		At           string                      `json:"at"`
 		Token        string                      `json:"token"`
 		OK           bool                        `json:"ok"`
+		Mode         string                      `json:"mode"`
+		ProcessPID   int                         `json:"process_pid"`
+		ProcessStart string                      `json:"process_started_at"`
 		History      []recycleStatusHistoryEntry `json:"history"`
 		FirstSuccess *recycleStatusHistoryEntry  `json:"first_success"`
 	}
@@ -114,7 +120,10 @@ func priorRecycleStatusAudit(path string) recycleStatusAudit {
 	// otherwise migration could permanently promote a later current token.
 	allRecords := append([]recycleStatusHistoryEntry(nil), previous.History...)
 	if previous.Token != "" {
-		allRecords = append(allRecords, recycleStatusHistoryEntry{At: previous.At, Token: previous.Token, OK: previous.OK})
+		allRecords = append(allRecords, recycleStatusHistoryEntry{
+			At: previous.At, Token: previous.Token, OK: previous.OK, Mode: previous.Mode,
+			ProcessPID: previous.ProcessPID, ProcessStartedAt: previous.ProcessStart,
+		})
 	}
 	firstSuccess := previous.FirstSuccess
 	if firstSuccess == nil {
