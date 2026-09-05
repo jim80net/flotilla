@@ -173,6 +173,9 @@ func TestBuildStatusJSON(t *testing.T) {
 	if doc.GeneratedAt != "2026-06-17T17:00:00Z" {
 		t.Errorf("generated_at = %q", doc.GeneratedAt)
 	}
+	if doc.GeneratedAtScope != "detector_snapshot_only" {
+		t.Errorf("generated_at_scope = %q", doc.GeneratedAtScope)
+	}
 	if doc.XO != "xo" {
 		t.Errorf("xo = %q, want xo", doc.XO)
 	}

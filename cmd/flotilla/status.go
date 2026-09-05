@@ -93,11 +93,12 @@ func cmdStatus(args []string) error {
 // against a demo roster rather than hand-authored data. #524 adds loop_posture
 // beside pane state; older consumers ignore unknown fields.
 type statusDoc struct {
-	GeneratedAt string                 `json:"generated_at"`
-	XO          string                 `json:"xo,omitempty"`
-	Utilization utilization.Summary    `json:"utilization"`
-	Quality     harnessquality.Summary `json:"harness_quality"`
-	Agents      []statusItem           `json:"agents"`
+	GeneratedAt      string                 `json:"generated_at"`
+	GeneratedAtScope string                 `json:"generated_at_scope"`
+	XO               string                 `json:"xo,omitempty"`
+	Utilization      utilization.Summary    `json:"utilization"`
+	Quality          harnessquality.Summary `json:"harness_quality"`
+	Agents           []statusItem           `json:"agents"`
 }
 
 func writeQualitySummary(out io.Writer, summary harnessquality.Summary) {
@@ -129,7 +130,7 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 }
 
 func buildStatusJSONWithDispositions(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, dispositions map[string]statusSeatDisposition) statusDoc {
-	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
+	doc := statusDoc{GeneratedAt: generatedAt, GeneratedAtScope: "detector_snapshot_only", XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	for _, a := range cfg.Agents {
 		evidence, evidenceOK := loopByAgent[a.Name]
 		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
@@ -200,7 +201,7 @@ func writeStatusWithDispositions(out io.Writer, cfg *roster.Config, xo, snapshot
 	// not a live probe. Always surface that (or its absence).
 	if snapOK {
 		if age, ok := fileAge(snapshotPath, now); ok {
-			fmt.Fprintf(out, "flotilla status — states as of %s ago (%s)\n", humanizeAge(age), snapshotPath)
+			fmt.Fprintf(out, "flotilla status — pane states as of %s ago (snapshot); administrative dispositions read now (%s)\n", humanizeAge(age), snapshotPath)
 		} else {
 			fmt.Fprintf(out, "flotilla status (%s)\n", snapshotPath)
 		}

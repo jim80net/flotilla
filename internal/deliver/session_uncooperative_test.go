@@ -50,6 +50,17 @@ func TestSessionUncooperative_ProviderStoppedFooter(t *testing.T) {
 	}
 }
 
+func TestSessionUncooperative_ProviderAvailabilityProseNotHit(t *testing.T) {
+	for _, prose := range []string{
+		"There are no models available that support this, so I'll do it manually.",
+		"The provider unavailable situation does not change our conclusion.",
+	} {
+		if hit, phrase := SessionUncooperative(prose + "\n❯ \n"); hit {
+			t.Fatalf("provider prose %q must not diagnose uncooperative, phrase=%q", prose, phrase)
+		}
+	}
+}
+
 func TestSessionUncooperative_ProseNotHit(t *testing.T) {
 	// Ordinary conversation mentioning limits must not abort recycle as uncooperative.
 	captured := "We discussed how the API rate limit exceeded our quota in the design doc.\n" +

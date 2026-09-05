@@ -121,3 +121,27 @@ func TestLoadFleetStatusBlock_UnavailableOnBadRoster(t *testing.T) {
 		t.Fatalf("got %q", msg)
 	}
 }
+
+func TestLoadFleetStatusBlockAppliesCurrentCloseOutDisposition(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	rosterBody := `{"xo_agent":"xo","agents":[{"name":"xo"},{"name":"backend","closed_out":true}]}`
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}}
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "flotilla-detector-state.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block, err := loadFleetStatusBlock(rosterPath, "xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(block, "working: backend") || !strings.Contains(block, "0 of 1 seat working") {
+		t.Fatalf("current close-out disposition not applied to notification:\n%s", block)
+	}
+}

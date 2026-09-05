@@ -53,8 +53,13 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 	// Prose false-positive guard: ordinary conversation that mentions "rate limit"
 	// in scrollback history is excluded by TailRegion; still require non-prose
 	// credit/limit patterns first (most load-bearing for #558).
-	for _, re := range []*regexp.Regexp{sessionUsageCreditRE, sessionReachedLimitRE, sessionUsageLimitRE, sessionProviderStoppedRE} {
+	for _, re := range []*regexp.Regexp{sessionUsageCreditRE, sessionReachedLimitRE, sessionUsageLimitRE} {
 		if loc := re.FindStringIndex(lower); loc != nil {
+			return true, excerptPhrase(tail, loc[0], loc[1])
+		}
+	}
+	if loc := sessionProviderStoppedRE.FindStringIndex(lower); loc != nil {
+		if isProviderStoppedFooterLine(lineContaining(lower, loc[0])) {
 			return true, excerptPhrase(tail, loc[0], loc[1])
 		}
 	}
@@ -69,6 +74,13 @@ func SessionUncooperative(captured string) (hit bool, phrase string) {
 		}
 	}
 	return false, ""
+}
+
+func isProviderStoppedFooterLine(line string) bool {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "│┃╭╰─>*❯⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+	loc := sessionProviderStoppedRE.FindStringIndex(line)
+	return loc != nil && loc[0] == 0 && isThrottleFooterLine(line)
 }
 
 func excerptPhrase(tail string, start, end int) string {
