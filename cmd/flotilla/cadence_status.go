@@ -287,7 +287,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 			return cadenceStatusDoc{}, fmt.Errorf("cadence status: resolve artifact for %q: %w", member.Coordinator, err)
 		}
 		if prior := artifactOwners[identity]; prior != "" {
-			return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
+			return cadenceStatusDoc{}, fmt.Errorf("cadence status: artifact owners %q and %q resolve to the same artifact %q", prior, member.Coordinator, identity)
 		}
 		artifactOwners[identity] = member.Coordinator
 		artifact, info, err := inspectCadenceArtifact(member.Coordinator, artifactPath, started)
@@ -297,7 +297,7 @@ func buildCadenceStatus(manifest cadenceManifest, cfg *roster.Config, rosterDir 
 		if info != nil {
 			for _, prior := range existingArtifacts {
 				if os.SameFile(prior.info, info) {
-					return cadenceStatusDoc{}, fmt.Errorf("cadence status: coordinators %q and %q resolve to the same artifact file %q and %q", prior.owner, member.Coordinator, prior.path, artifactPath)
+					return cadenceStatusDoc{}, fmt.Errorf("cadence status: artifact owners %q and %q resolve to the same artifact file %q and %q", prior.owner, member.Coordinator, prior.path, artifactPath)
 				}
 			}
 			existingArtifacts = append(existingArtifacts, existingArtifact{owner: member.Coordinator, path: artifactPath, info: info})

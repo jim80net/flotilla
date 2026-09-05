@@ -193,6 +193,18 @@ func TestCadenceStatusRejectsStaleArtifact(t *testing.T) {
 	}
 }
 
+func TestCadenceStatusSynthesisCollisionUsesCoordinatorNeutralWording(t *testing.T) {
+	manifest, cfg, rosterDir, started := cadenceFixture(t)
+	manifest.PackagePath = filepath.Join(cfg.Agents[1].WorktreePath, filepath.FromSlash(manifest.Members[0].ArtifactPath))
+	_, err := buildCadenceStatus(manifest, cfg, rosterDir, started.Add(10*time.Minute))
+	if err == nil || !strings.Contains(err.Error(), `artifact owners "synthesis package" and "backend"`) {
+		t.Fatalf("collision error = %v, want coordinator-neutral owners", err)
+	}
+	if strings.Contains(err.Error(), "coordinators") {
+		t.Fatalf("collision mislabels synthesis package as coordinator: %v", err)
+	}
+}
+
 func TestCadenceStatusRejectsSharedArtifactIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
