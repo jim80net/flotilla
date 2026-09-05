@@ -846,6 +846,56 @@ func cmdWatch(args []string) error {
 			log.Printf("flotilla watch: adaptive-interval OFF — fixed tick %s", interval)
 		}
 		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
+		codexSeats := make([]string, 0, len(desks))
+		for _, agent := range desks {
+			if agentSurface(cfg, agent) == "codex" {
+				codexSeats = append(codexSeats, agent)
+			}
+		}
+		pressureMonitor, err := watch.NewCodexPressureMonitor(watch.CodexPressureConfig{
+			Seats:  codexSeats,
+			Ledger: filepath.Join(rosterDir, "telemetry", "codex-throughput-events.json"),
+			Resolve: func(agent string) (string, error) {
+				return deliver.ResolvePane(agentTitle(cfg, agent))
+			},
+			Capture: func(pane string) (string, bool, error) {
+				inMode, err := deliver.PaneInMode(pane)
+				if err != nil || inMode {
+					return "", inMode, err
+				}
+				screen, err := deliver.CapturePane(pane)
+				if err != nil {
+					return "", false, err
+				}
+				inMode, err = deliver.PaneInMode(pane)
+				return screen, inMode, err
+			},
+			InMode: deliver.PaneInMode,
+			Assess: func(pane string) surface.State {
+				drv, ok := surface.Get("codex")
+				if !ok {
+					return surface.StateUnknown
+				}
+				dead, err := deliver.PaneDead(pane)
+				if err != nil || dead {
+					return surface.StateShell
+				}
+				return drv.Assess(pane)
+			},
+			Lock: func(pane string) (func(), error) {
+				txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+				if err != nil {
+					return nil, err
+				}
+				return txn.Release, nil
+			},
+			Navigate: deliver.SendMenuNavigation,
+			Enter:    deliver.SendEnter,
+			Logf:     log.Printf,
+		})
+		if err != nil {
+			return fmt.Errorf("flotilla watch: initialize Codex throughput-pressure monitor: %w", err)
+		}
 		xoRotate, err := roster.ResolveXORotate(cfg.XORotate, os.Getenv("FLOTILLA_XO_ROTATE"))
 		if err != nil {
 			return fmt.Errorf("flotilla watch: invalid xo_rotate policy (roster xo_rotate / FLOTILLA_XO_ROTATE): %w", err)
@@ -948,22 +998,23 @@ func cmdWatch(args []string) error {
 					}
 					return deskStateLabels()
 				}),
-			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
-			Awaiting:            awaiting.Present,
-			SettleConsume:       settleConsume,
-			DeskSettleConsume:   deskSettled.Consume,
-			Alert:               alert,
-			MaxMissedAcks:       *maxMissed,
-			MaxQuietIntervals:   *maxQuiet,
-			LivenessPingMode:    cfg.LivenessPingMode,
-			MaxSelfContinuation: *maxSelfCont,
-			BacklogGate:         backlogGate,
-			BacklogStuckCap:     *backlogStuckCap,
-			WakeAgent:           synthWakeAgent,
-			SynthParents:        synthParents,
-			SynthRead:           synthRead,
-			SynthOperation:      synthOperation,
-			SynthEveryTicks:     synthEveryTicks,
+			ThroughputPressureOnTick: pressureMonitor.Tick,
+			MirrorDispatch:           func(run func()) { go run() }, // mirror I/O off the tick goroutine
+			Awaiting:                 awaiting.Present,
+			SettleConsume:            settleConsume,
+			DeskSettleConsume:        deskSettled.Consume,
+			Alert:                    alert,
+			MaxMissedAcks:            *maxMissed,
+			MaxQuietIntervals:        *maxQuiet,
+			LivenessPingMode:         cfg.LivenessPingMode,
+			MaxSelfContinuation:      *maxSelfCont,
+			BacklogGate:              backlogGate,
+			BacklogStuckCap:          *backlogStuckCap,
+			WakeAgent:                synthWakeAgent,
+			SynthParents:             synthParents,
+			SynthRead:                synthRead,
+			SynthOperation:           synthOperation,
+			SynthEveryTicks:          synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:   deskHeartbeatEnabled,
