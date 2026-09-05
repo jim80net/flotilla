@@ -151,18 +151,20 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 			// browser flow is usable while the child remains running.
 			pending := b.pending.String()
 			if prompt := safeOAuthPrompt(pending); prompt != "" {
-				if authURL := allowedOAuthURL(pending); authURL != "" {
+				authURL := completeOAuthURL(pending)
+				if authURL != "" {
 					fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
 				}
 				fmt.Fprintln(b.dst, prompt)
 				b.pending.Reset()
-			} else if authURL := completeOAuthURL(pending); authURL != "" {
-				// A quiet interval is not a record boundary: io.Copy may pause
-				// between any two legal chunks. The provider's non-empty state
-				// parameter is the bounded protocol signal that the authorization
-				// URL is complete enough to hand to the operator.
-				fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
-				b.pending.Reset()
+				if authURL == "" {
+					// The prompt is a complete record, but a URL token ending the
+					// current bytes may still be split. Retain only that safe token;
+					// later writes can complete it without replaying the prompt.
+					if candidate := allowedOAuthURL(pending); candidate != "" {
+						_, _ = b.pending.WriteString(candidate)
+					}
+				}
 			}
 			break
 		}
@@ -195,8 +197,11 @@ func completeOAuthURL(line string) string {
 	if authURL == "" {
 		return ""
 	}
-	u, err := url.Parse(authURL)
-	if err != nil || u.Query().Get("state") == "" {
+	// A syntactically valid URL (including a non-empty state query) can still
+	// be a prefix of the next io.Copy chunk. It is complete here only when the
+	// current record contains bytes after it; newline and EOF are handled by
+	// emitSafeLine and Flush respectively.
+	if strings.HasSuffix(strings.TrimSpace(stripANSI(line)), authURL) {
 		return ""
 	}
 	return authURL
