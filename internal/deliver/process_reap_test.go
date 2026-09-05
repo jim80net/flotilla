@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -58,6 +59,8 @@ func TestSnapshotPaneReapSetSelectsPipeWritersAndDescendants(t *testing.T) {
 	linkProcFD(t, root, 200, "1", "pipe:[42]", 1)
 	writeProcFixture(t, root, 201, panePID, 21, "python3\x00helper.py\x00", paneCgroup)
 	linkProcFD(t, root, 201, "1", "/dev/null", 1)
+	writeProcFixture(t, root, 207, 1, 27, "python3\x00duplex-monitor.py\x00", paneCgroup)
+	linkProcFD(t, root, 207, "1", "pipe:[42]", syscall.O_RDWR)
 
 	writeProcFixture(t, root, 202, 1, 22, "python3\x00other.py\x00", paneCgroup)
 	linkProcFD(t, root, 202, "1", "pipe:[99]", 1)
@@ -70,9 +73,26 @@ func TestSnapshotPaneReapSetSelectsPipeWritersAndDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []ProcessRef{{PID: 200, StartTime: 20}, {PID: 201, StartTime: 21}}
+	want := []ProcessRef{{PID: 200, StartTime: 20}, {PID: 201, StartTime: 21}, {PID: 207, StartTime: 27}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("snapshot = %+v, want pipe writer + descendant %+v", got, want)
+	}
+}
+
+func TestSnapshotPaneReapSetFailsClosedOnUnreadableProcessStat(t *testing.T) {
+	root := t.TempDir()
+	const panePID = 100
+	paneCgroup := "0::/user.slice/tmux.service\n"
+	writeProcFixture(t, root, panePID, 1, 10, "grok\x00", paneCgroup)
+	linkProcFD(t, root, panePID, "3", "pipe:[42]", 0)
+	writeProcFixture(t, root, 208, 1, 28, "python3\x00monitor.py\x00", paneCgroup)
+	if err := os.WriteFile(filepath.Join(root, "208", "stat"), []byte("malformed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := snapshotPaneReapSet(root, panePID)
+	if err == nil || !strings.Contains(err.Error(), "read process 208 stat") {
+		t.Fatalf("err = %v, want process stat failure", err)
 	}
 }
 

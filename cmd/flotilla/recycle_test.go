@@ -525,7 +525,7 @@ func startRecyclePipeFixture(t *testing.T) (pane, monitor *exec.Cmd) {
 	writer.Close()
 	t.Cleanup(func() {
 		for _, cmd := range []*exec.Cmd{monitor, pane} {
-			if cmd.Process != nil {
+			if cmd.Process != nil && cmd.ProcessState == nil {
 				_ = cmd.Process.Kill()
 				_, _ = cmd.Process.Wait()
 			}
@@ -638,6 +638,53 @@ func TestRunRecycleNoGracefulCloseDoesNotCompleteWhileReapFails(t *testing.T) {
 	}
 	if len(r.delivered) != 1 {
 		t.Fatalf("reap failure must prevent takeover delivery, got %v", r.delivered)
+	}
+}
+
+func TestRunRecycleNoGracefulCloseReapsAfterRespawnFailure(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	respawnErr := errors.New("respawn failed after pane kill")
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return []deliver.ProcessRef{{PID: 4242, StartTime: 7}}, nil
+	}
+	ops.respawn = func(string, string, string) error {
+		r.respawned = true
+		return respawnErr
+	}
+	reaped := false
+	ops.reap = func(got []deliver.ProcessRef) error {
+		reaped = len(got) == 1 && got[0] == (deliver.ProcessRef{PID: 4242, StartTime: 7})
+		return nil
+	}
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, respawnErr) {
+		t.Fatalf("err = %v, want preserved respawn failure", err)
+	}
+	if !reaped {
+		t.Fatal("snapshotted monitors were not reaped after attempted hard respawn")
+	}
+}
+
+func TestRunRecycleNoGracefulClosePreservesRespawnAndReapFailures(t *testing.T) {
+	r := happyRec()
+	r.closeErr = surface.ErrNoGracefulClose
+	respawnErr := errors.New("respawn failed after pane kill")
+	reapErr := errors.New("monitor still alive")
+	ops := fakeRecycleOps(r)
+	ops.snapshotReap = func(string) ([]deliver.ProcessRef, error) {
+		return []deliver.ProcessRef{{PID: 4242, StartTime: 7}}, nil
+	}
+	ops.respawn = func(string, string, string) error { return respawnErr }
+	ops.reap = func([]deliver.ProcessRef) error { return reapErr }
+	p := testPlan()
+	p.reapMonitors = true
+	_, _, err := runRecycle(ops, p)
+	if !errors.Is(err, respawnErr) || !errors.Is(err, reapErr) {
+		t.Fatalf("err = %v, want both respawn and reap failures", err)
 	}
 }
 

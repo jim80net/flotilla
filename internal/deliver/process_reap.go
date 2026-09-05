@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -66,9 +68,13 @@ func snapshotPaneReapSet(procRoot string, panePID int) ([]ProcessRef, error) {
 			continue
 		}
 		stat, err := readProcStat(procRoot, pid)
-		if err == nil {
-			stats[pid] = stat
+		if errors.Is(err, os.ErrNotExist) {
+			continue
 		}
+		if err != nil {
+			return nil, fmt.Errorf("read process %d stat: %w", pid, err)
+		}
+		stats[pid] = stat
 	}
 
 	descendant := make(map[int]bool)
@@ -248,16 +254,35 @@ func ReapProcesses(refs []ProcessRef) error {
 func signalProcessRefs(refs []ProcessRef, signal syscall.Signal) error {
 	var result error
 	for _, ref := range refs {
+		if ref.PID <= 1 {
+			result = errors.Join(result, fmt.Errorf("open process %d identity: unsafe process pid", ref.PID))
+			continue
+		}
+		pidfd, err := unix.PidfdOpen(ref.PID, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			continue
+		}
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("open process %d identity: %w", ref.PID, err))
+			continue
+		}
 		alive, err := processRefAlive("/proc", ref)
 		if err != nil {
+			_ = unix.Close(pidfd)
 			result = errors.Join(result, fmt.Errorf("verify process %d: %w", ref.PID, err))
 			continue
 		}
 		if !alive {
+			_ = unix.Close(pidfd)
 			continue
 		}
-		if err := syscall.Kill(ref.PID, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
+		err = unix.PidfdSendSignal(pidfd, unix.Signal(signal), nil, 0)
+		closeErr := unix.Close(pidfd)
+		if err != nil && !errors.Is(err, syscall.ESRCH) {
 			result = errors.Join(result, fmt.Errorf("signal process %d: %w", ref.PID, err))
+		}
+		if closeErr != nil {
+			result = errors.Join(result, fmt.Errorf("close process %d identity: %w", ref.PID, closeErr))
 		}
 	}
 	return result

@@ -278,13 +278,20 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 
 	// PHASE 3 — relaunch (reuse the hardened resume primitive; marker survives the pane-id reuse).
-	if err := ops.respawn(target, p.cwd, p.launch); err != nil {
-		return "", wtNote, fmt.Errorf("phase 3: relaunching %q failed: %w (the desk is closed; recover with: flotilla resume %s)", p.agent, err, p.agent)
-	}
+	respawnErr := ops.respawn(target, p.cwd, p.launch)
+	var reapErr error
 	if reapSet != nil {
-		if err := ops.reap(reapSet); err != nil {
-			return "", wtNote, fmt.Errorf("phase 3: relaunched %q but could not confirm its snapshotted monitor processes exited: %w — recycle is NOT complete", p.agent, err)
+		reapErr = ops.reap(reapSet)
+	}
+	if respawnErr != nil {
+		err := fmt.Errorf("phase 3: relaunching %q failed: %w (the desk may be closed; recover with: flotilla resume %s)", p.agent, respawnErr, p.agent)
+		if reapErr != nil {
+			err = errors.Join(err, fmt.Errorf("phase 3: could not confirm snapshotted monitor processes exited: %w", reapErr))
 		}
+		return "", wtNote, err
+	}
+	if reapErr != nil {
+		return "", wtNote, fmt.Errorf("phase 3: relaunched %q but could not confirm its snapshotted monitor processes exited: %w — recycle is NOT complete", p.agent, reapErr)
 	}
 	got, err := ops.readMarker(target)
 	if err != nil {
