@@ -302,14 +302,33 @@ func TestOAuthOutputBrokerEmitsNonNewlinePromptImmediately(t *testing.T) {
 	}
 }
 
-func TestOAuthOutputBrokerEmitsNonNewlineURLImmediately(t *testing.T) {
+func TestOAuthOutputBrokerEmitsNonNewlineURLAfterQuietEdge(t *testing.T) {
 	var out bytes.Buffer
 	broker := newOAuthOutputBroker(&out)
 	if _, err := broker.Write([]byte("Open https://claude.ai/oauth/authorize?state=needed")); err != nil {
 		t.Fatal(err)
 	}
+	broker.flushPartialURL()
 	if got := out.String(); got != "OAuth URL: https://claude.ai/oauth/authorize?state=needed\n" {
 		t.Fatalf("brokered URL = %q", got)
+	}
+}
+
+func TestOAuthOutputBrokerBuffersSplitNonNewlineURLUntilComplete(t *testing.T) {
+	var out bytes.Buffer
+	broker := newOAuthOutputBroker(&out)
+	if _, err := broker.Write([]byte("Open https://claude.ai/oauth")); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "" {
+		t.Fatalf("partial URL emitted early: %q", got)
+	}
+	if _, err := broker.Write([]byte("/authorize?state=needed")); err != nil {
+		t.Fatal(err)
+	}
+	broker.flushPartialURL()
+	if got := out.String(); got != "OAuth URL: https://claude.ai/oauth/authorize?state=needed\n" {
+		t.Fatalf("split URL = %q, want complete URL exactly once", got)
 	}
 }
 

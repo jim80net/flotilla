@@ -132,7 +132,10 @@ type oauthOutputBroker struct {
 	mu      sync.Mutex
 	dst     io.Writer
 	pending bytes.Buffer
+	timer   *time.Timer
 }
+
+const oauthOutputQuietPeriod = 50 * time.Millisecond
 
 func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 	return &oauthOutputBroker{dst: dst}
@@ -141,6 +144,7 @@ func newOAuthOutputBroker(dst io.Writer) *oauthOutputBroker {
 func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.stopTimerLocked()
 	_, _ = b.pending.Write(p)
 	for {
 		line, err := b.pending.ReadString('\n')
@@ -150,17 +154,17 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 			// a trailing newline. Emit only their canonical safe forms now so the
 			// browser flow is usable while the child remains running.
 			pending := b.pending.String()
-			emitted := false
-			if authURL := allowedOAuthURL(pending); authURL != "" {
-				fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
-				emitted = true
-			}
 			if prompt := safeOAuthPrompt(pending); prompt != "" {
+				if authURL := allowedOAuthURL(pending); authURL != "" {
+					fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+				}
 				fmt.Fprintln(b.dst, prompt)
-				emitted = true
-			}
-			if emitted {
 				b.pending.Reset()
+			} else if allowedOAuthURL(pending) != "" {
+				// A URL at the end of a Write may be only a prefix of the next
+				// chunk. Wait for a short quiet edge, resetting the timer on each
+				// write, before treating the buffered URL as complete.
+				b.timer = time.AfterFunc(oauthOutputQuietPeriod, b.flushPartialURL)
 			}
 			break
 		}
@@ -172,9 +176,27 @@ func (b *oauthOutputBroker) Write(p []byte) (int, error) {
 func (b *oauthOutputBroker) Flush() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.stopTimerLocked()
 	if b.pending.Len() != 0 {
 		b.emitSafeLine(b.pending.String())
 		b.pending.Reset()
+	}
+}
+
+func (b *oauthOutputBroker) flushPartialURL() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.stopTimerLocked()
+	if authURL := allowedOAuthURL(b.pending.String()); authURL != "" {
+		fmt.Fprintf(b.dst, "OAuth URL: %s\n", authURL)
+		b.pending.Reset()
+	}
+}
+
+func (b *oauthOutputBroker) stopTimerLocked() {
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
 	}
 }
 
