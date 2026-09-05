@@ -123,6 +123,12 @@ type DetectorConfig struct {
 	SignalHash func() (string, bool)
 	// AckAge returns the wall-clock age of the XO's last liveness ack.
 	AckAge func() time.Duration
+	// HeartbeatOwedWork reports positive, unblocked work owed by the primary XO. The
+	// heartbeat watchdog may call an idle XO wedged only when this predicate is true;
+	// a stale ack by itself is not a failure after a completed, cleanly idle chapter.
+	// It is sampled before tickLocked so implementations may inspect durable queue state
+	// without doing file I/O under the detector mutex. nil means no positive evidence.
+	HeartbeatOwedWork func() bool
 	// Wake enqueues a primary-layer wake of the given kind with human-readable reasons; the
 	// caller composes the prompt (and appends the ack instruction — L1).
 	Wake func(kind WakeKind, reasons []string)
@@ -979,7 +985,8 @@ func (d *Detector) Tick() {
 	// consults only already-computed evidence and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingLeaderExhausted, pendingAutoRevert, pendingTurnEnds := d.tickLocked(warrant)
+	heartbeatOwed := d.cfg.HeartbeatOwedWork != nil && d.cfg.HeartbeatOwedWork()
+	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingLeaderExhausted, pendingAutoRevert, pendingTurnEnds := d.tickLocked(warrant, heartbeatOwed)
 	d.ingestActivity(pendingTurnEnds)
 	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams)
 	d.runLeaderExhaustion(pendingLeaderExhausted)
@@ -1282,7 +1289,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]deskHeartbeatEvidence) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeams []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingLeaderExhausted []RateLimitAutoSwitchCandidate, pendingAutoRevert []string, pendingTurnEnds []string) {
+func (d *Detector) tickLocked(warrant map[string]deskHeartbeatEvidence, heartbeatOwed bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeams []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingLeaderExhausted []RateLimitAutoSwitchCandidate, pendingAutoRevert []string, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -1382,7 +1389,7 @@ func (d *Detector) tickLocked(warrant map[string]deskHeartbeatEvidence) (pending
 	if d.cold {
 		d.cold = false
 		d.snap = cur
-		d.evalLiveness(cur) // still cover liveness from tick one
+		d.evalLiveness(cur, heartbeatOwed) // still cover liveness from tick one
 		wake(WakeMaterial, []string{"change-detector started — reassess the fleet"})
 		d.quietFSM.OnColdStart()
 		return // durable save happens in Tick AFTER the tail enqueues this wake (at-least-once)
@@ -1472,7 +1479,7 @@ func (d *Detector) tickLocked(warrant map[string]deskHeartbeatEvidence) (pending
 	// 3. Liveness — independent of the diff (H3): crash (shell-debounced) +
 	//    wall-clock ack age. Kept in-memory + ack-file so a snapshot outage can
 	//    never blind the watchdog.
-	d.evalLiveness(cur)
+	d.evalLiveness(cur, heartbeatOwed)
 
 	// 4. External material change (every desk EXCEPT the XO — H2). It re-engages a
 	//    settled XO and resets the self-continuation cap.
@@ -2100,21 +2107,22 @@ func (d *Detector) debounce(name string, raw surface.State) surface.State {
 	return surface.StateUnknown
 }
 
-// evalLiveness drives the watchdog from the two cadence-independent signals
-// (C1): a shell-debounced crash (immediate) and a wall-clock ack age over the
-// mode-derived window while the XO is not a shell. The watchdog (maxMissed=1)
-// debounces the alert and clears it on recovery.
-func (d *Detector) evalLiveness(cur Snapshot) {
+// evalLiveness drives the watchdog from a shell-debounced crash (immediate) or
+// the joined heartbeat-wedge predicate: positive unblocked work is owed, the XO
+// is live-idle, and its ack age exceeds the mode-derived window. A completed idle
+// chapter therefore stays healthy even after its final ack ages. The watchdog
+// (maxMissed=1) debounces the alert and clears it on recovery.
+func (d *Detector) evalLiveness(cur Snapshot, heartbeatOwed bool) {
 	shellStreak := d.shellStreak[d.cfg.XOAgent]
 	crashed := shellStreak >= shellDebounce
 	switch {
 	case crashed:
 		d.wd.Observe(false, true)
-	case shellStreak == 0 && d.cfg.AckAge() > d.alertWindow:
-		// Wedged: alive (no shell suspicion) but not acking within the window. The
-		// `shellStreak == 0` guard means a tick where a shell is suspected but not
-		// yet confirmed does NOT fire the "wedged" message — the next tick confirms
-		// the crash and the (debounced) alert carries the accurate crash wording.
+	case heartbeatOwed && cur.DeskStates[d.cfg.XOAgent] == surface.StateIdle && shellStreak == 0 && d.cfg.AckAge() > d.alertWindow:
+		// Wedged: positively owed work is waiting on a live, available XO which is
+		// not acking. The `shellStreak == 0` guard means a tick where a shell is
+		// suspected but not yet confirmed does NOT fire the "wedged" message — the
+		// next tick confirms the crash and carries the accurate crash wording.
 		d.wd.Observe(false, false)
 	default:
 		d.wd.Observe(true, false) // healthy (or shell pending) → clear any down state
