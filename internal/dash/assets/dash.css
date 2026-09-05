@@ -1139,6 +1139,70 @@ code {
 .tab-parade:hover,
 .tab-nav:hover { color: var(--ink-2); }
 
+/* Authorization Domains I1a inspection — evidence-first, deliberately inert. */
+.auth-domains-wrap {
+  max-width: 1320px; margin: 0 auto; padding: 1.1rem 1.25rem 2rem;
+  display: grid; gap: 1rem;
+}
+.auth-domains-hero {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 1.1rem 1.25rem;
+}
+.auth-domains-hero h2 { margin: .15rem 0 .2rem; font-size: 1.35rem; }
+.auth-domains-hero p { margin: 0; color: var(--ink-2); font-size: .78rem; line-height: 1.5; }
+.auth-domains-kicker, .auth-domains-card-label, .auth-context-label {
+  color: var(--ink-3); font: 600 .58rem/1.2 var(--display); letter-spacing: .1em; text-transform: uppercase;
+}
+.auth-domains-mode {
+  flex: none; border: 1px solid var(--err); border-radius: 999px; padding: .42rem .7rem;
+  color: var(--err); background: color-mix(in srgb, var(--err) 8%, var(--surface));
+  font: 700 .68rem/1 var(--display); letter-spacing: .08em;
+}
+.auth-domains-error {
+  padding: .7rem .85rem; border: 1px solid var(--err); border-radius: var(--r-sm);
+  color: var(--err); background: color-mix(in srgb, var(--err) 7%, var(--surface)); font-size: .76rem;
+}
+.auth-domains-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
+.auth-domains-card { padding: .9rem; }
+.auth-domains-card > strong { display: block; margin: .3rem 0 .65rem; font: 650 1rem/1.2 var(--display); text-transform: uppercase; }
+.auth-state-observed { color: var(--amber); }
+.auth-state-failure { color: var(--err); }
+.auth-domains-facts { margin: 0; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: .25rem .5rem; font-size: .64rem; }
+.auth-domains-facts dt { color: var(--ink-3); }
+.auth-domains-facts dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.auth-context-records { padding: .8rem; display: grid; gap: .65rem; }
+.auth-context-record { border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: .7rem; background: var(--raised); }
+.auth-context-head { display: flex; justify-content: space-between; gap: .75rem; align-items: baseline; }
+.auth-context-outcome { color: var(--ink-3); font-size: .66rem; }
+.auth-context-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-top: .55rem; }
+.auth-context-side { border-left: 3px solid var(--amber); padding: .45rem .55rem; background: var(--surface); }
+.auth-context-side.resolved { border-left-color: var(--cyan); }
+.auth-context-side p, .auth-context-source { margin: .25rem 0 0; color: var(--ink-2); font-size: .68rem; line-height: 1.4; overflow-wrap: anywhere; }
+.auth-context-source { color: var(--ink-3); }
+.auth-coverage-table-wrap { overflow-x: auto; }
+.auth-coverage-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .7rem; }
+.auth-coverage-table th, .auth-coverage-table td { padding: .58rem .7rem; border-top: 1px solid var(--line-soft); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.auth-coverage-table th { color: var(--ink-3); font: 600 .58rem/1.2 var(--display); letter-spacing: .07em; text-transform: uppercase; }
+.auth-coverage-table td:first-child strong, .auth-coverage-table td span { display: block; }
+.auth-coverage-meta { margin-top: .16rem; color: var(--ink-3); font-size: .6rem; }
+.auth-coverage-failure { margin-top: .25rem; color: var(--err); font: 700 .57rem/1.2 var(--display); letter-spacing: .06em; }
+.auth-coverage-reason { margin-top: .3rem; color: var(--err); font-size: .62rem; }
+.auth-coverage-table tr.coverage-failure { background: color-mix(in srgb, var(--err) 5%, transparent); }
+.auth-coverage-empty { color: var(--err); }
+.auth-domains-boundary { padding: .9rem 1rem; border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+.auth-domains-boundary > strong { color: var(--err); font: 700 .75rem/1 var(--display); letter-spacing: .08em; }
+.auth-domains-boundary p { margin: .4rem 0 0; color: var(--ink-2); font-size: .7rem; }
+@media (max-width: 900px) {
+  .auth-domains-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .auth-domains-wrap { padding: .75rem .7rem 1.5rem; }
+  .auth-domains-hero { align-items: flex-start; flex-direction: column; }
+  .auth-domains-summary, .auth-context-pair { grid-template-columns: 1fr; }
+  .auth-domains-mode { white-space: nowrap; }
+  .auth-coverage-table { min-width: 700px; }
+}
+
 /* ── unseen-content dot (item 9) ────────────────────────────────────────────
    A small indicator dot that appears on a tab when the operator has new content
    they haven't viewed since their last visit. Cleared on tab open. The dot is

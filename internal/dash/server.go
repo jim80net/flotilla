@@ -28,26 +28,32 @@ import (
 // (cmd/flotilla/dash.go) resolves these (default paths mirroring `status`) and
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
-	RosterPath              string // path to the roster file
-	OrgFile                 string // optional org-truth path (--org-file / FLOTILLA_ORG_FILE); empty = default discovery
-	SnapshotPath            string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
-	AckPath                 string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
-	LedgerPath              string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
-	BacklogPath             string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
-	DriveBacklogPath        string // active drive backlog for Goals work-item resolution (--backlog-file / FLOTILLA_BACKLOG_FILE; default BacklogPath)
-	GoalsPath               string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
-	GoalsYAMLPath           string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
-	SessionMirrorDir        string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
-	QualityPath             string // harness quality event ledger (default <roster-dir>/harness-quality.jsonl)
-	ParadesPath             string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
-	ResearchPath            string // operator research markdown library (default <roster-dir>/research)
-	ResearchAnnotationsPath string // host-private research annotation store (default <roster-dir>/research-annotations)
-	DoneLogPath             string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
-	Bind                    string // listen address (default 127.0.0.1:8787)
-	Repo                    string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
-	SecretsPath             string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
-	GoalsLayout             string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
-	BuildRevision           string // real VCS build revision injected by cmd/flotilla; invalid or absent = "unavailable"
+	RosterPath               string // path to the roster file
+	OrgFile                  string // optional org-truth path (--org-file / FLOTILLA_ORG_FILE); empty = default discovery
+	SnapshotPath             string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
+	AckPath                  string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
+	LedgerPath               string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
+	BacklogPath              string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	DriveBacklogPath         string // active drive backlog for Goals work-item resolution (--backlog-file / FLOTILLA_BACKLOG_FILE; default BacklogPath)
+	GoalsPath                string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
+	GoalsYAMLPath            string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
+	SessionMirrorDir         string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	QualityPath              string // harness quality event ledger (default <roster-dir>/harness-quality.jsonl)
+	ParadesPath              string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
+	ResearchPath             string // operator research markdown library (default <roster-dir>/research)
+	ResearchAnnotationsPath  string // host-private research annotation store (default <roster-dir>/research-annotations)
+	AuthDomainsContractPath  string // approved D1 contract artifacts (default <roster-dir>/auth-domains-contract)
+	AuthDomainsStatePath     string // inert I1a shadow evidence (default <roster-dir>/auth-domains-shadow)
+	AuthDomainsPolicyPath    string // shadow immutable generation store (default <auth-state>/policy)
+	AuthDomainsReplayPath    string // neutral replay export (default <auth-state>/neutral-replay.json)
+	AuthDomainsAuditPath     string // WAL verification health (default <auth-state>/audit-health.json)
+	AuthDomainsLifecyclePath string // synthetic probe run (default <auth-state>/lifecycle-receipt.json)
+	DoneLogPath              string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
+	Bind                     string // listen address (default 127.0.0.1:8787)
+	Repo                     string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath              string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	GoalsLayout              string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
+	BuildRevision            string // real VCS build revision injected by cmd/flotilla; invalid or absent = "unavailable"
 
 	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
 	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
@@ -244,6 +250,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
 	s.mux.HandleFunc("/api/goals/meta", s.handleGoalsMeta)
+	s.mux.HandleFunc("GET /api/auth-domains/status", s.handleAuthDomainsStatus)
 	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
 	s.mux.HandleFunc("/api/parades", s.handleParades)
 	s.mux.HandleFunc("GET /api/parades/conversations/meta", s.handleParadeConversationMeta)
@@ -828,6 +835,24 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.ResearchAnnotationsPath == "" {
 		cfg.ResearchAnnotationsPath = filepath.Join(dir, "research-annotations")
+	}
+	if cfg.AuthDomainsContractPath == "" {
+		cfg.AuthDomainsContractPath = filepath.Join(dir, "auth-domains-contract")
+	}
+	if cfg.AuthDomainsStatePath == "" {
+		cfg.AuthDomainsStatePath = filepath.Join(dir, "auth-domains-shadow")
+	}
+	if cfg.AuthDomainsPolicyPath == "" {
+		cfg.AuthDomainsPolicyPath = filepath.Join(cfg.AuthDomainsStatePath, "policy")
+	}
+	if cfg.AuthDomainsReplayPath == "" {
+		cfg.AuthDomainsReplayPath = filepath.Join(cfg.AuthDomainsStatePath, "neutral-replay.json")
+	}
+	if cfg.AuthDomainsAuditPath == "" {
+		cfg.AuthDomainsAuditPath = filepath.Join(cfg.AuthDomainsStatePath, "audit-health.json")
+	}
+	if cfg.AuthDomainsLifecyclePath == "" {
+		cfg.AuthDomainsLifecyclePath = filepath.Join(cfg.AuthDomainsStatePath, "lifecycle-receipt.json")
 	}
 	if cfg.DoneLogPath == "" {
 		cfg.DoneLogPath = filepath.Join(dir, "goals-done.jsonl") // #418 done-history, roster-adjacent

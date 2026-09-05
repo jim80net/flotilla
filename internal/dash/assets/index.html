@@ -48,6 +48,7 @@
         <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations<span class="unseen-dot" id="dot-conversations" aria-label="New content in Conversations" aria-hidden="true"></span></button>
         <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals<span class="unseen-dot" id="dot-goals" aria-label="New content in Goals" aria-hidden="true"></span></button>
         <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues<span class="unseen-dot" id="dot-issues" aria-label="New content in Issues" aria-hidden="true"></span></button>
+        <button id="tab-auth-domains" class="tab" data-view="auth-domains" role="tab" aria-selected="false" aria-controls="view-auth-domains">Auth domains</button>
       </span>
       <!-- Parade opens the standalone parade page at /parade — a link, not an SPA
            panel toggle, so it is NOT a role="tab" child of the tablist. -->
@@ -335,10 +336,77 @@
     </section>
   </main>
 
+  <main id="view-auth-domains" class="view auth-domains-wrap hidden" role="tabpanel" aria-labelledby="tab-auth-domains">
+    <section class="panel auth-domains-hero" aria-labelledby="auth-domains-title">
+      <div>
+        <span class="auth-domains-kicker">Authorization Domains I1a inspection</span>
+        <h2 id="auth-domains-title">Shadow evidence</h2>
+        <p>Read-only simulator and evidence status. A passing result does not authorize or materialize a production effect.</p>
+      </div>
+      <strong id="auth-domains-mode" class="auth-domains-mode">SHADOW · NOT ENFORCING</strong>
+    </section>
+
+    <div id="auth-domains-error" class="auth-domains-error" role="status" aria-live="polite" hidden></div>
+
+    <section class="auth-domains-summary" aria-label="Shadow evidence summary">
+      <article class="panel auth-domains-card">
+        <span class="auth-domains-card-label">Shadow generation</span>
+        <strong id="auth-generation-state">Unknown</strong>
+        <dl id="auth-generation-provenance" class="auth-domains-facts"></dl>
+      </article>
+      <article class="panel auth-domains-card">
+        <span class="auth-domains-card-label">Simulator / replay</span>
+        <strong id="auth-replay-state">Unknown</strong>
+        <dl id="auth-replay-provenance" class="auth-domains-facts"></dl>
+      </article>
+      <article class="panel auth-domains-card">
+        <span class="auth-domains-card-label">Audit / WAL health</span>
+        <strong id="auth-audit-state">Unknown</strong>
+        <dl id="auth-audit-provenance" class="auth-domains-facts"></dl>
+      </article>
+      <article class="panel auth-domains-card">
+        <span class="auth-domains-card-label">Lifecycle / isolation</span>
+        <strong id="auth-lifecycle-state">Unproved</strong>
+        <dl id="auth-lifecycle-provenance" class="auth-domains-facts"></dl>
+      </article>
+    </section>
+
+    <section class="panel auth-domains-contexts" aria-labelledby="auth-context-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="auth-context-title">DomainContext replay</h2>
+          <p class="panel-desc">Caller-claimed context and server-resolved context remain distinct.</p>
+        </div>
+      </div>
+      <div id="auth-context-records" class="auth-context-records"></div>
+    </section>
+
+    <section class="panel auth-domains-coverage" aria-labelledby="auth-coverage-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="auth-coverage-title">PEP and bypass coverage</h2>
+          <p id="auth-coverage-summary" class="panel-desc">Coverage unknown. Unknown or untraced critical seams are failures.</p>
+        </div>
+      </div>
+      <div class="auth-coverage-table-wrap">
+        <table class="auth-coverage-table">
+          <thead><tr><th>Path / owner</th><th>State</th><th>Trace</th><th>Known bypass or gap</th></tr></thead>
+          <tbody id="auth-coverage-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel auth-domains-boundary" aria-label="Authorization boundary">
+      <strong>NOT ENFORCING</strong>
+      <p>No mutation controls, grant apply/revoke actions, credential locators, or production effects are present. The initial shadow action registry is exactly <code>read</code>.</p>
+      <p id="auth-contract-provenance" class="muted"></p>
+    </section>
+  </main>
+
   <footer class="foot">
     <strong id="fleet-utilization" class="fleet-utilization">Fleet utilization unavailable</strong>
     <strong id="harness-quality" class="harness-quality">Harness quality awaiting events</strong>
-    <span class="muted">Conversations &amp; Goals are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
+    <span class="muted">Conversations, Goals &amp; Auth Domains status are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
     <details class="perf-diagnostics">
       <summary>Startup diagnostics</summary>
       <span id="perf-status" class="muted">No local startup sample yet</span>
@@ -355,5 +423,6 @@
   <script src="/static/work-context.js"></script>
   <script src="/static/tracker.js"></script>
   <script src="/static/control.js"></script>
+  <script src="/static/auth-domains.js"></script>
 </body>
 </html>

@@ -51,6 +51,12 @@ func cmdDash(args []string) error {
 	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "DEPRECATED — the Goals map is mind-map-only; any value is redirected to the mind map")
 	paradesDir := fs.String("parades-dir", os.Getenv("FLOTILLA_DASH_PARADES_DIR"), "parade archive dir the /parade page reads (default <roster-dir>/parades)")
 	researchDir := fs.String("research-dir", os.Getenv("FLOTILLA_DASH_RESEARCH_DIR"), "research markdown dir the /research page reads (default <roster-dir>/research)")
+	authDomainsContractDir := fs.String("auth-domains-contract-dir", os.Getenv("FLOTILLA_AUTH_DOMAINS_CONTRACT_DIR"), "approved Authorization Domains D1 contract dir (default <roster-dir>/auth-domains-contract)")
+	authDomainsStateDir := fs.String("auth-domains-state-dir", os.Getenv("FLOTILLA_AUTH_DOMAINS_STATE_DIR"), "inert Authorization Domains I1a shadow evidence dir (default <roster-dir>/auth-domains-shadow)")
+	authDomainsPolicyDir := fs.String("auth-domains-policy-dir", os.Getenv("FLOTILLA_AUTH_DOMAINS_POLICY_DIR"), "shadow immutable generation store (default <auth-domains-state-dir>/policy)")
+	authDomainsReplayFile := fs.String("auth-domains-replay-file", os.Getenv("FLOTILLA_AUTH_DOMAINS_REPLAY_FILE"), "neutral replay export (default <auth-domains-state-dir>/neutral-replay.json)")
+	authDomainsAuditFile := fs.String("auth-domains-audit-health-file", os.Getenv("FLOTILLA_AUTH_DOMAINS_AUDIT_HEALTH_FILE"), "shadow WAL verification health (default <auth-domains-state-dir>/audit-health.json)")
+	authDomainsLifecycleFile := fs.String("auth-domains-lifecycle-file", os.Getenv("FLOTILLA_AUTH_DOMAINS_LIFECYCLE_FILE"), "synthetic lifecycle probe run (default <auth-domains-state-dir>/lifecycle-receipt.json)")
 	doneLogPath := fs.String("done-log", os.Getenv("FLOTILLA_DASH_DONE_LOG"), "goals done-history JSONL the server appends + the Realized window reads (default <roster-dir>/goals-done.jsonl)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -97,25 +103,31 @@ func cmdDash(args []string) error {
 	// constructs the gh-backed tracker when a repo is pinned (fail-closed on a
 	// malformed repo).
 	srv, err := dash.NewServer(dash.Config{
-		RosterPath:            *rosterPath,
-		OrgFile:               *orgFile,
-		SnapshotPath:          *snapshotPath,
-		AckPath:               *ackPath,
-		BacklogPath:           *trackerPath,
-		DriveBacklogPath:      *backlogPath,
-		GoalsPath:             *goalsPath,
-		ParadesPath:           *paradesDir,
-		ResearchPath:          *researchDir,
-		DoneLogPath:           *doneLogPath,
-		Bind:                  *bind,
-		Repo:                  pinnedRepo,
-		SecretsPath:           *secretsPath,
-		GoalsLayout:           *goalsLayout,
-		BuildRevision:         dashBuildRevision(),
-		DisableAuthentication: dashEnvTruthy("DISABLE_AUTHENTICATION"),
-		AllowedOrigins:        dashEnvList("FLOTILLA_DASH_ALLOWED_ORIGINS"),
-		Transport:             tr,
-		WebTransport:          webTr,
+		RosterPath:               *rosterPath,
+		OrgFile:                  *orgFile,
+		SnapshotPath:             *snapshotPath,
+		AckPath:                  *ackPath,
+		BacklogPath:              *trackerPath,
+		DriveBacklogPath:         *backlogPath,
+		GoalsPath:                *goalsPath,
+		ParadesPath:              *paradesDir,
+		ResearchPath:             *researchDir,
+		AuthDomainsContractPath:  *authDomainsContractDir,
+		AuthDomainsStatePath:     *authDomainsStateDir,
+		AuthDomainsPolicyPath:    *authDomainsPolicyDir,
+		AuthDomainsReplayPath:    *authDomainsReplayFile,
+		AuthDomainsAuditPath:     *authDomainsAuditFile,
+		AuthDomainsLifecyclePath: *authDomainsLifecycleFile,
+		DoneLogPath:              *doneLogPath,
+		Bind:                     *bind,
+		Repo:                     pinnedRepo,
+		SecretsPath:              *secretsPath,
+		GoalsLayout:              *goalsLayout,
+		BuildRevision:            dashBuildRevision(),
+		DisableAuthentication:    dashEnvTruthy("DISABLE_AUTHENTICATION"),
+		AllowedOrigins:           dashEnvList("FLOTILLA_DASH_ALLOWED_ORIGINS"),
+		Transport:                tr,
+		WebTransport:             webTr,
 	})
 	if err != nil {
 		return err

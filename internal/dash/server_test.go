@@ -1773,6 +1773,24 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.ResearchAnnotationsPath != filepath.Join(dir, "research-annotations") {
 		t.Errorf("research annotations path = %q (should default to <roster-dir>/research-annotations)", cfg.ResearchAnnotationsPath)
 	}
+	if cfg.AuthDomainsContractPath != filepath.Join(dir, "auth-domains-contract") {
+		t.Errorf("auth domains contract path = %q", cfg.AuthDomainsContractPath)
+	}
+	if cfg.AuthDomainsStatePath != filepath.Join(dir, "auth-domains-shadow") {
+		t.Errorf("auth domains state path = %q", cfg.AuthDomainsStatePath)
+	}
+	if cfg.AuthDomainsPolicyPath != filepath.Join(dir, "auth-domains-shadow", "policy") {
+		t.Errorf("auth domains policy path = %q", cfg.AuthDomainsPolicyPath)
+	}
+	if cfg.AuthDomainsReplayPath != filepath.Join(dir, "auth-domains-shadow", "neutral-replay.json") {
+		t.Errorf("auth domains replay path = %q", cfg.AuthDomainsReplayPath)
+	}
+	if cfg.AuthDomainsAuditPath != filepath.Join(dir, "auth-domains-shadow", "audit-health.json") {
+		t.Errorf("auth domains audit path = %q", cfg.AuthDomainsAuditPath)
+	}
+	if cfg.AuthDomainsLifecyclePath != filepath.Join(dir, "auth-domains-shadow", "lifecycle-receipt.json") {
+		t.Errorf("auth domains lifecycle path = %q", cfg.AuthDomainsLifecyclePath)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
 	}
