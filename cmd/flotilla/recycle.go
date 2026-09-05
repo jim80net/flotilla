@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -1092,6 +1093,13 @@ func printRecyclePlan(p recyclePlan, r launch.Recipe, reapSupportErr error) {
 // (write-temp + rename), so the outcome survives the process / a relay outage and a back-to-
 // back recycle never reads a torn file. Best-effort: a write failure is logged, never fatal.
 func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, processes ...recycleProcessIdentity) {
+	writeLastRecycleWithBarrier(agent, p, msg, runErr, wt, nil, processes...)
+}
+
+// writeLastRecycleWithBarrier holds one cross-process lock across the existing-record
+// decision and atomic replacement. The optional barrier is test-only orchestration for
+// proving an overlapping writer cannot publish between that decision and the rename.
+func writeLastRecycleWithBarrier(agent string, p recyclePlan, msg string, runErr error, wt worktreeCloseNote, afterExistingCheck func(), processes ...recycleProcessIdentity) {
 	var process recycleProcessIdentity
 	if len(processes) > 0 {
 		process = processes[0]
@@ -1105,6 +1113,22 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	if err != nil {
 		return
 	}
+	dir := filepath.Join(home, ".flotilla", agent)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
+		return
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "last-recycle.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		log.Printf("flotilla: recycle: could not open the status lock: %v", err)
+		return
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		log.Printf("flotilla: recycle: could not lock the status record: %v", err)
+		return
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
 	if runErr != nil && !p.startedAt.IsZero() {
 		if existing, readErr := readRecycleStatus(lastRecyclePath(home, agent)); readErr == nil && existing.OK {
 			existingAt, parseErr := time.Parse(time.RFC3339Nano, existing.At)
@@ -1117,10 +1141,8 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 			}
 		}
 	}
-	dir := filepath.Join(home, ".flotilla", agent)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		log.Printf("flotilla: recycle: could not create %s for the status record: %v", dir, err)
-		return
+	if afterExistingCheck != nil {
+		afterExistingCheck()
 	}
 	at := time.Now().UTC()
 	rec := map[string]any{

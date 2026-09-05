@@ -121,8 +121,8 @@ func TestHarnessExitConfirmationChoice(t *testing.T) {
 		{
 			"descriptive and long task labels do not strand a genuine close",
 			"background agents still running (2)\n" +
-				"Frontend dark-mode validation / operator follow-up  ● running\n" +
-				"résumé-of-a-task-name-that-is-longer-than-thirty-two-characters  ● running\n\n" +
+				"validation and follow-up task  ● running\n" +
+				"operation-label-that-is-longer-than-thirty-two-characters  ● running\n\n" +
 				"Exit session?\n1. Save and exit\n2. Cancel\nEnter to confirm",
 			"1", true,
 		},

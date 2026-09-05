@@ -404,15 +404,47 @@ func TestWriteSuccessfulRecycleStatusCarriesProcessGeneration(t *testing.T) {
 func TestFailedRecycleDoesNotOverwriteConcurrentSuccess(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	success := testPlan()
-	success.token = "SUCCESS"
-	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
-	writeLastRecycle("backend", success, "done", nil, worktreeCloseNote{}, process)
-
 	failure := testPlan()
 	failure.token = "FAILED"
 	failure.startedAt = time.Now().UTC().Add(-time.Minute)
-	writeLastRecycle("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{})
+	failureChecked := make(chan struct{})
+	releaseFailure := make(chan struct{})
+	failureDone := make(chan struct{})
+	go func() {
+		defer close(failureDone)
+		writeLastRecycleWithBarrier("backend", failure, "", errors.New("late abandoned attempt"), worktreeCloseNote{}, func() {
+			close(failureChecked)
+			<-releaseFailure
+		})
+	}()
+	<-failureChecked
+
+	success := testPlan()
+	success.token = "SUCCESS"
+	process := recycleProcessIdentity{PID: 421, StartedAt: time.Date(2026, 8, 21, 5, 30, 30, 0, time.UTC)}
+	successChecked := make(chan struct{})
+	successStarted := make(chan struct{})
+	successDone := make(chan struct{})
+	go func() {
+		defer close(successDone)
+		close(successStarted)
+		writeLastRecycleWithBarrier("backend", success, "done", nil, worktreeCloseNote{}, func() {
+			close(successChecked)
+		}, process)
+	}()
+	<-successStarted
+	select {
+	case <-successChecked:
+		close(releaseFailure)
+		<-failureDone
+		<-successDone
+		t.Fatal("success writer passed the existing-record check while failure writer held the transaction")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFailure)
+	<-failureDone
+	<-successDone
+
 	rec, err := readRecycleStatus(lastRecyclePath(home, "backend"))
 	if err != nil {
 		t.Fatal(err)
