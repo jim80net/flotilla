@@ -3,6 +3,8 @@ package dash
 import (
 	"strings"
 	"testing"
+
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 // --- ParseGoalsFile: structural validation (fail-closed) ---
@@ -839,6 +841,24 @@ func TestBuildGoals_V1ScopesDisplayAsV2(t *testing.T) {
 	}
 	if got := indexByID(doc.Goals)["mid"].Scope; got != "desk" {
 		t.Errorf("project → desk, got %q", got)
+	}
+}
+
+func TestAgentSurfacesFromRosterCaseCollisionUsesRosterOrder(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "Backend", Surface: "grok"},
+		{Name: "backend", Surface: "codex"},
+		{Name: "frontend", Surface: "grok"},
+	}}
+	for i := 0; i < 32; i++ {
+		got := agentSurfacesFromRoster(cfg)
+		if got["backend"] != "codex" {
+			t.Fatalf("iteration %d: case collision = %q, want last roster entry codex", i, got["backend"])
+		}
+		if got["frontend"] != "grok" {
+			t.Fatalf("iteration %d: frontend = %q, want grok", i, got["frontend"])
+		}
 	}
 }
 

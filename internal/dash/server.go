@@ -22,6 +22,7 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // Config holds the resolved inputs for a dash server. The command layer
@@ -326,6 +327,7 @@ func (s *Server) loadBoard() BoardDoc {
 	rosterDir := filepath.Dir(s.cfg.RosterPath)
 	in.LoopByAgent = loadBoardLoopEvidence(s.roster, s.xo, rosterDir, snap, snapOK, snapFresh)
 	in.LastActions = s.loadWorkingActions(snap)
+	in.Surfaces = loadAgentSurfaces(s.roster)
 	doc := BuildBoard(in)
 	doc.Quality = harnessquality.LoadSummary(rosterDir, now)
 	return doc
@@ -362,6 +364,23 @@ func (s *Server) loadWorkingActions(snap watch.Snapshot) map[string]AgentAction 
 // board's loop_posture matches `flotilla status --json` byte-for-byte on inputs.
 func loadBoardLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snapshot, snapOK, snapFresh bool) map[string]loopposture.Evidence {
 	return loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
+}
+
+// loadAgentSurfaces resolves overlay-first configured surfaces in the HTTP
+// layer so BuildBoard stays pure (no overlay file I/O).
+func loadAgentSurfaces(cfg *roster.Config) map[string]string {
+	return workspace.EffectiveSurfaces(namedRosterSurfaces(cfg))
+}
+
+func namedRosterSurfaces(cfg *roster.Config) []workspace.NamedSurface {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]workspace.NamedSurface, len(cfg.Agents))
+	for i, a := range cfg.Agents {
+		out[i] = workspace.NamedSurface{Name: a.Name, RosterSurface: a.Surface}
+	}
+	return out
 }
 
 // loadHistoryPage reads a bounded, optionally desk-scoped ledger window. Only

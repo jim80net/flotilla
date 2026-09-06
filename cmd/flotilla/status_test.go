@@ -168,7 +168,7 @@ func TestBuildStatusJSON(t *testing.T) {
 		"data":     surface.StateWorking,
 	}}
 
-	doc := buildStatusJSON(cfg, "xo", "2026-06-17T17:00:00Z", snap, nil, statusSeatDispositions(t.TempDir(), cfg))
+	doc := buildStatusJSON(cfg, "xo", "2026-06-17T17:00:00Z", snap, nil, statusSeatDispositions(t.TempDir(), cfg), nil)
 
 	if doc.GeneratedAt != "2026-06-17T17:00:00Z" {
 		t.Errorf("generated_at = %q", doc.GeneratedAt)
@@ -190,7 +190,7 @@ func TestBuildStatusJSON(t *testing.T) {
 	if xo.Name != "xo" || xo.Role != "hub" || xo.Surface != "claude-code" || xo.State != "idle" {
 		t.Errorf("xo item = %+v, want {xo hub claude-code idle}", xo)
 	}
-	// Non-XO desks carry no role; surface comes from the roster.
+	// Non-XO desks carry no role; surface comes from overlay-first configured surface (roster when no overlay).
 	if doc.Agents[1].Role != "" {
 		t.Errorf("non-XO agent should have no role, got %q", doc.Agents[1].Role)
 	}
@@ -214,9 +214,30 @@ func TestBuildStatusJSON(t *testing.T) {
 	}
 }
 
+func TestBuildStatusJSONOverlayBeatsRoster(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo", Surface: "grok"},
+		{Name: "backend", Surface: "grok"},
+		{Name: "frontend", Surface: "grok"},
+	}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"xo":       surface.StateIdle,
+		"backend":  surface.StateIdle,
+		"frontend": surface.StateIdle,
+	}}
+	surfaces := map[string]string{"backend": "codex"}
+	doc := buildStatusJSON(cfg, "xo", "2026-09-05T23:17:33Z", snap, nil, statusSeatDispositions(t.TempDir(), cfg), surfaces)
+	if doc.Agents[1].Name != "backend" || doc.Agents[1].Surface != "codex" {
+		t.Fatalf("backend status surface = %+v, want overlay codex not roster grok", doc.Agents[1])
+	}
+	if doc.Agents[2].Surface != "grok" {
+		t.Fatalf("frontend with no overlay = %q, want roster grok", doc.Agents[2].Surface)
+	}
+}
+
 func TestBuildStatusJSONOmitsGeneratedAtScopeWithoutSnapshot(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "xo"}, {Name: "backend"}, {Name: "frontend"}}}
-	doc := buildStatusJSON(cfg, "xo", "", watch.Snapshot{}, nil, statusSeatDispositions(t.TempDir(), cfg))
+	doc := buildStatusJSON(cfg, "xo", "", watch.Snapshot{}, nil, statusSeatDispositions(t.TempDir(), cfg), nil)
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +279,7 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 			Settled: false, BacklogKnown: true, AwaitingAuthN: 1, Park: loopposture.ParkStrict,
 		},
 	}
-	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop, statusSeatDispositions(t.TempDir(), cfg))
+	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop, statusSeatDispositions(t.TempDir(), cfg), nil)
 	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 || doc.Utilization.AwaitingAuthority != 1 {
 		t.Fatalf("utilization queue split = %+v", doc.Utilization)
 	}
@@ -322,7 +343,7 @@ func TestStatusCloseOutDispositionTriState(t *testing.T) {
 		loop[agent.Name] = loopposture.Evidence{Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1}
 	}
 	dispositions := statusSeatDispositions(rosterDir, cfg)
-	doc := buildStatusJSON(cfg, "xo", "", snap, loop, dispositions)
+	doc := buildStatusJSON(cfg, "xo", "", snap, loop, dispositions, nil)
 	for _, index := range []int{0, 1} {
 		if got := doc.Agents[index]; got.State != "closed-out" || got.LoopPosture != "unavailable" || got.QueueState != utilization.QueueUnknown {
 			t.Errorf("proven closed seat %q = %+v, want closed-out/unavailable/unknown", got.Name, got)
@@ -357,7 +378,7 @@ func TestStatusCloseOutDispositionTriState(t *testing.T) {
 	unreadableCfg := &roster.Config{Agents: []roster.Agent{{Name: "backend"}}}
 	unreadableSnap := watch.Snapshot{DeskStates: map[string]surface.State{"backend": surface.StateIdle}}
 	unreadableLoop := map[string]loopposture.Evidence{"backend": {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1}}
-	unreadableDoc := buildStatusJSON(unreadableCfg, "backend", "", unreadableSnap, unreadableLoop, statusSeatDispositions(unreadableDir, unreadableCfg))
+	unreadableDoc := buildStatusJSON(unreadableCfg, "backend", "", unreadableSnap, unreadableLoop, statusSeatDispositions(unreadableDir, unreadableCfg), nil)
 	if got := unreadableDoc.Agents[0]; got.State != "unknown" || got.LoopPosture != "unavailable" || got.QueueState != utilization.QueueUnknown {
 		t.Fatalf("unreadable disposition = %+v, want unknown/unavailable/unknown", got)
 	}
@@ -377,7 +398,7 @@ func TestStatusUnavailableLiveEvidenceOverridesIdleAvailabilityWithoutCloseOut(t
 		"frontend": {Pane: surface.StateErrored, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
 		"xo":       {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, UnblockedN: 1},
 	}
-	doc := buildStatusJSON(cfg, "xo", "", snap, loop, statusSeatDispositions(t.TempDir(), cfg))
+	doc := buildStatusJSON(cfg, "xo", "", snap, loop, statusSeatDispositions(t.TempDir(), cfg), nil)
 	if got := doc.Agents[0]; got.State != "crashed" || got.LoopPosture == "available" {
 		t.Fatalf("no-session backend = %+v, want crashed and not available", got)
 	}
@@ -426,7 +447,7 @@ func TestStatusUsageVisibilityAndHonestAbsence(t *testing.T) {
 			"alpha": {RemainingPercent: 8, Window: "weekly", ObservedAt: now.Add(-time.Hour), StaleAfter: now.Add(-time.Minute)},
 		},
 	}
-	doc := buildStatusJSON(cfg, "alpha", now.Format(time.RFC3339), snap, nil, statusSeatDispositions(t.TempDir(), cfg))
+	doc := buildStatusJSON(cfg, "alpha", now.Format(time.RFC3339), snap, nil, statusSeatDispositions(t.TempDir(), cfg), nil)
 	if doc.Agents[0].Usage == nil || doc.Agents[0].Usage.RemainingPercent != 8 {
 		t.Fatalf("alpha JSON usage = %+v", doc.Agents[0].Usage)
 	}

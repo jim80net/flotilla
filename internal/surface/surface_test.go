@@ -23,6 +23,18 @@ func TestRegistryDefaultAndUnknown(t *testing.T) {
 	}
 }
 
+func TestRegisteredEmptyAndUnknown(t *testing.T) {
+	if Registered("") {
+		t.Error(`Registered("") = true, want false (empty is not a driver name)`)
+	}
+	if Registered("not-a-driver") {
+		t.Error(`Registered("not-a-driver") = true, want false`)
+	}
+	if !Registered("grok") || !Registered("codex") {
+		t.Fatal("Registered(grok/codex) = false, want true")
+	}
+}
+
 func TestMixedHarnessFleetRoutesPerDriver(t *testing.T) {
 	// The inter-harness guarantee (pillar B): a roster mixing harnesses resolves EACH
 	// agent's surface to ITS OWN driver, so send/inject/Assess route per-driver across a

@@ -103,6 +103,25 @@ func TestAgentSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
 	}
 }
 
+func TestGenericNodeAssessUsesOverlayNotRoster(t *testing.T) {
+	root := t.TempDir()
+	writeAgentOverlay(t, root, "backend", `{"slot":"fallback-0","surface":"codex"}`)
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "backend", Surface: "grok"}}}
+	if got := agentSurface(cfg, "backend"); got != "codex" {
+		t.Fatalf("agentSurface = %q, want overlay codex", got)
+	}
+	var assessed string
+	got := assessWatchResolvedPane(cfg, "backend", "%42", func(string) (string, error) {
+		return "node", nil
+	}, func(drv surface.Driver, pane string) surface.State {
+		assessed = drv.Name()
+		return surface.StateIdle
+	})
+	if got != surface.StateIdle || assessed != "codex" {
+		t.Fatalf("assess generic node: state=%v driver=%q, want idle/codex (not roster grok)", got, assessed)
+	}
+}
+
 func TestResolveWatchLiveDriverAllConfiguredToLiveDirections(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	surfaces := []struct{ surface, command string }{

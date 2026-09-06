@@ -8,6 +8,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/accounts"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 // LaunchFileName is the legacy per-workspace launch-recipe file (deprecated — recipes
@@ -119,6 +120,38 @@ func ReadActiveOverlay(agent string) (ActiveOverlay, bool, error) {
 		return ActiveOverlay{}, false, fmt.Errorf("parse active-harness overlay %q: %w", path, err)
 	}
 	return ov, true, nil
+}
+
+// EffectiveSurface is the overlay-first configured harness name for status,
+// assessment, and delivery. A present overlay Surface that names a registered
+// driver wins; a missing overlay, a torn/unreadable overlay, or an overlay
+// Surface that is not a registered driver is fail-SAFE and returns rosterSurface
+// so a live desk stays routable.
+func EffectiveSurface(agent, rosterSurface string) string {
+	if ov, ok, err := ReadActiveOverlay(agent); err == nil && ok && surface.Registered(ov.Surface) {
+		return ov.Surface
+	}
+	return rosterSurface
+}
+
+// NamedSurface is a desk name plus its roster-declared surface. Callers that
+// hold a roster convert locally; this package does not import roster.
+type NamedSurface struct {
+	Name          string
+	RosterSurface string
+}
+
+// EffectiveSurfaces maps each pair through EffectiveSurface. A nil slice
+// returns nil so command/HTTP nil-roster paths stay nil.
+func EffectiveSurfaces(agents []NamedSurface) map[string]string {
+	if agents == nil {
+		return nil
+	}
+	out := make(map[string]string, len(agents))
+	for _, a := range agents {
+		out[a.Name] = EffectiveSurface(a.Name, a.RosterSurface)
+	}
+	return out
 }
 
 // WriteActiveOverlay atomically writes an agent's active-harness overlay

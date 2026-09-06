@@ -18,6 +18,7 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // cmdStatus prints a one-line-per-desk view of the fleet's last-known state. It
@@ -76,7 +77,7 @@ func cmdStatus(args []string) error {
 		if fi, statErr := os.Stat(*snapshotPath); statErr == nil {
 			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
-		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent, dispositions)
+		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent, dispositions, statusSurfaces(cfg))
 		doc.Quality = harnessquality.LoadSummary(filepath.Dir(*rosterPath), now)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -124,8 +125,9 @@ type statusItem struct {
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
 // unit-testable with an in-memory snapshot; cmdStatus supplies generated_at
-// (the snapshot's mtime), the loaded snapshot, and pre-derived loop evidence.
-func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, dispositions map[string]statusSeatDisposition) statusDoc {
+// (the snapshot's mtime), the loaded snapshot, pre-derived loop evidence, and
+// overlay-first surfaces resolved by the command layer (statusSurfaces).
+func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence, dispositions map[string]statusSeatDisposition, surfaces map[string]string) statusDoc {
 	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	if generatedAt != "" {
 		doc.GeneratedAtScope = "detector_snapshot_only"
@@ -146,9 +148,13 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 			displayPosture = "unavailable"
 			queueState = utilization.QueueUnknown
 		}
+		surf := a.Surface
+		if s, ok := surfaces[a.Name]; ok {
+			surf = s
+		}
 		item := statusItem{
 			Name:        a.Name,
-			Surface:     effectiveSurface(a.Surface),
+			Surface:     effectiveSurface(surf),
 			State:       state,
 			LoopPosture: string(displayPosture),
 			QueueState:  queueState,
@@ -179,8 +185,27 @@ func summarizeStatusItems(items []statusItem) utilization.Summary {
 	return utilization.Build(agents)
 }
 
-// effectiveSurface resolves an agent's surface name for display: an empty roster
-// surface means the default driver, which the docs name "claude-code".
+// statusSurfaces resolves overlay-first configured surfaces for every roster
+// agent. The command layer (cmdStatus, notify) calls this so buildStatusJSON
+// stays pure.
+func statusSurfaces(cfg *roster.Config) map[string]string {
+	return workspace.EffectiveSurfaces(namedSurfaces(cfg))
+}
+
+func namedSurfaces(cfg *roster.Config) []workspace.NamedSurface {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]workspace.NamedSurface, len(cfg.Agents))
+	for i, a := range cfg.Agents {
+		out[i] = workspace.NamedSurface{Name: a.Name, RosterSurface: a.Surface}
+	}
+	return out
+}
+
+// effectiveSurface resolves an agent's surface name for display: empty means
+// the default driver, which the docs name "claude-code". Callers pass the
+// overlay-first configured surface, not the raw roster field.
 func effectiveSurface(s string) string {
 	if s == "" {
 		return "claude-code"
@@ -208,7 +233,7 @@ func writeStatusWithDispositions(out io.Writer, cfg *roster.Config, xo, snapshot
 		fmt.Fprintf(out, "flotilla status — no readable detector snapshot at %s\n", snapshotPath)
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
-	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent, dispositions).Utilization
+	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent, dispositions, nil).Utilization
 	fmt.Fprintf(out, "Fleet — %s\n", utilization.Line(utilSummary))
 	if read := utilization.WallRead(utilSummary); read != "" {
 		fmt.Fprintf(out, "Next — %s\n", read)

@@ -175,6 +175,9 @@ type BoardInputs struct {
 	LoopByAgent map[string]loopposture.Evidence
 	// LastActions is loaded only for currently-working seats by the HTTP layer.
 	LastActions map[string]AgentAction
+	// Surfaces is overlay-first configured surface per agent name, resolved by
+	// the HTTP layer. Missing keys fall back to roster Agent.surface.
+	Surfaces map[string]string
 }
 
 // BuildBoard assembles the fleet-board document. Pure: no I/O, no real time.
@@ -207,9 +210,13 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		evidence, evidenceOK := in.LoopByAgent[a.Name]
 		rawPosture := boardLoopPosture(a.Name, in, snapFresh)
 		displayPosture := loopposture.OperatorDisplay(rawPosture)
+		surf := a.Surface
+		if s, ok := in.Surfaces[a.Name]; ok {
+			surf = s
+		}
 		item := AgentItem{
 			Name:        a.Name,
-			Surface:     effectiveSurface(a.Surface),
+			Surface:     effectiveSurface(surf),
 			State:       deskStateLabel(in.Snap, a.Name),
 			LoopPosture: string(displayPosture),
 			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),

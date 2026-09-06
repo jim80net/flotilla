@@ -111,6 +111,60 @@ func TestReadActiveOverlayAbsentIsNone(t *testing.T) {
 	}
 }
 
+func TestEffectiveSurfaceOverlayBeatsRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{"slot":"fallback-0","surface":"codex"}`)
+	if got := EffectiveSurface("backend", "grok"); got != "codex" {
+		t.Fatalf("EffectiveSurface(overlay codex, roster grok) = %q, want codex", got)
+	}
+}
+
+func TestEffectiveSurfaceFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(no overlay) = %q, want roster grok", got)
+	}
+}
+
+func TestEffectiveSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{not json`)
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(torn overlay) = %q, want roster grok", got)
+	}
+}
+
+func TestEffectiveSurfaceUnregisteredOverlayFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{"slot":"fallback-0","surface":"not-a-driver"}`)
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(unregistered overlay) = %q, want roster grok", got)
+	}
+}
+
+func TestEffectiveSurfacesGenericFixturesOverlayFirst(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{"slot":"fallback-0","surface":"codex"}`)
+	writeOverlay(t, "xo", `{"surface":"not-a-driver"}`)
+	if got := EffectiveSurfaces(nil); got != nil {
+		t.Fatalf("EffectiveSurfaces(nil) = %v, want nil", got)
+	}
+	got := EffectiveSurfaces([]NamedSurface{
+		{Name: "xo", RosterSurface: "grok"},
+		{Name: "backend", RosterSurface: "grok"},
+		{Name: "frontend", RosterSurface: "grok"},
+	})
+	want := map[string]string{"xo": "grok", "backend": "codex", "frontend": "grok"}
+	if len(got) != len(want) {
+		t.Fatalf("EffectiveSurfaces = %v, want %v", got, want)
+	}
+	for name, surface := range want {
+		if got[name] != surface {
+			t.Errorf("EffectiveSurfaces[%q] = %q, want %q", name, got[name], surface)
+		}
+	}
+}
+
 func TestReadActiveOverlayPresent(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())
 	writeOverlay(t, "data", `{"slot":"fallback-0","surface":"grok","provider":"xai"}`)

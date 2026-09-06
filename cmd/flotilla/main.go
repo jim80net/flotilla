@@ -488,7 +488,7 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return fmt.Errorf("agent %q: read live command: %w", agentName, err)
 	}
-	drv, liveSurface, _, err := surface.ResolveLiveDriver(agent.Surface, pane, func(string) (string, error) { return liveCommand, nil })
+	drv, liveSurface, err := resolveSendLiveDriver(cfg, agentName, pane, liveCommand)
 	if err != nil {
 		return fmt.Errorf("agent %q: %w", agentName, err)
 	}

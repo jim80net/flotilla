@@ -106,6 +106,7 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 // present (generated_at, xo, agents[name,role,surface,state]) plus the freshness
 // + xo_liveness additions, for a fresh snapshot.
 func TestBuildBoard_Fresh(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	cfg := &roster.Config{Agents: []roster.Agent{
 		{Name: "xo"}, // empty surface ⇒ claude-code; the XO ⇒ role hub
 		{Name: "frontend", Surface: "aider"},
@@ -171,6 +172,28 @@ func TestBuildBoard_Fresh(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("board JSON missing %s\n%s", want, raw)
 		}
+	}
+}
+
+func TestBuildBoardOverlayBeatsRoster(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo", Surface: "grok"},
+		{Name: "backend", Surface: "grok"},
+		{Name: "frontend", Surface: "grok"},
+	}}
+	doc := BuildBoard(BoardInputs{
+		Cfg: cfg, XO: "xo", GeneratedAt: "2026-09-05T23:17:33Z",
+		Snap: watch.Snapshot{DeskStates: map[string]surface.State{
+			"xo": surface.StateIdle, "backend": surface.StateIdle, "frontend": surface.StateIdle,
+		}},
+		SnapOK: true, Threshold: time.Hour,
+		Surfaces: map[string]string{"backend": "codex"},
+	})
+	if doc.Agents[1].Name != "backend" || doc.Agents[1].Surface != "codex" {
+		t.Fatalf("backend board surface = %+v, want overlay codex", doc.Agents[1])
+	}
+	if doc.Agents[2].Surface != "grok" {
+		t.Fatalf("frontend board surface = %q, want roster grok", doc.Agents[2].Surface)
 	}
 }
 

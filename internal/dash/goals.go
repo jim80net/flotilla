@@ -26,6 +26,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // GoalScope is a node's altitude in the hierarchy — the column it renders in (fleet → project →
@@ -1464,14 +1465,19 @@ func agentStates(board BoardDoc) map[string]string {
 }
 
 func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
-	if cfg == nil {
+	raw := workspace.EffectiveSurfaces(namedRosterSurfaces(cfg))
+	if raw == nil {
 		return nil
 	}
-	m := make(map[string]string, len(cfg.Agents))
+	m := make(map[string]string, len(raw))
+	// Fold in roster order so case-insensitive name collisions are stable
+	// (last duplicate wins). Ranging raw would pick a winner by map iteration.
 	for _, a := range cfg.Agents {
-		if surf := strings.TrimSpace(a.Surface); surf != "" {
-			m[strings.ToLower(a.Name)] = surf
+		surf := strings.TrimSpace(raw[a.Name])
+		if surf == "" {
+			continue
 		}
+		m[strings.ToLower(a.Name)] = surf
 	}
 	return m
 }
