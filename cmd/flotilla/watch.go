@@ -2633,10 +2633,11 @@ func mirrorRelayToLedger(cfg *roster.Config, j watch.Job) {
 // to the portable roster — the overlay is the runtime source of truth for which harness
 // a desk runs.
 //
-// Reading the overlay is fail-SAFE: a missing overlay (the common, un-switched case) and
-// a torn/unreadable overlay BOTH fall through to the roster surface — a bad overlay must
-// never make a live desk unroutable. An unknown name falls back to "" so surface.Get
-// resolves the default rather than erroring on a non-roster name.
+// Reading the overlay is fail-SAFE: a missing overlay (the common, un-switched case),
+// a torn/unreadable overlay, and an overlay Surface that is not a registered driver
+// ALL fall through to the roster surface — a bad overlay must never make a live desk
+// unroutable. An unknown name falls back to "" so surface.Get resolves the default
+// rather than erroring on a non-roster name.
 func agentSurface(cfg *roster.Config, name string) string {
 	rosterSurface := ""
 	if a, err := cfg.Agent(name); err == nil {

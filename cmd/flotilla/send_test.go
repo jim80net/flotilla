@@ -30,8 +30,6 @@ func TestShouldMirror(t *testing.T) {
 	}
 }
 
-// --mirror and --no-mirror together is a clear error (caught right after flag parse,
-// before any roster load or tmux delivery).
 func TestResolveSendLiveDriverGenericNodeUsesOverlay(t *testing.T) {
 	root := t.TempDir()
 	writeAgentOverlay(t, root, "backend", `{"slot":"fallback-0","surface":"codex"}`)
@@ -45,6 +43,21 @@ func TestResolveSendLiveDriverGenericNodeUsesOverlay(t *testing.T) {
 	}
 }
 
+func TestResolveSendLiveDriverUnregisteredOverlayFallsBackToRoster(t *testing.T) {
+	root := t.TempDir()
+	writeAgentOverlay(t, root, "backend", `{"surface":"not-a-driver"}`)
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "backend", Surface: "grok"}}}
+	drv, live, err := resolveSendLiveDriver(cfg, "backend", "%42", "node")
+	if err != nil {
+		t.Fatalf("unregistered overlay must fail-safe to roster, not error: %v", err)
+	}
+	if drv.Name() != "grok" || live != "grok" {
+		t.Fatalf("send driver=%q live=%q, want roster grok (overlay not-a-driver is torn)", drv.Name(), live)
+	}
+}
+
+// --mirror and --no-mirror together is a clear error (caught right after flag parse,
+// before any roster load or tmux delivery).
 func TestCmdSendRejectsBothMirrorFlags(t *testing.T) {
 	err := cmdSend([]string{"--from", "x", "--mirror", "--no-mirror", "agent", "hi"})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {

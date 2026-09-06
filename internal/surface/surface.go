@@ -194,6 +194,16 @@ func Get(name string) (Driver, bool) {
 	return d, ok
 }
 
+// Registered reports whether name is a driver in the registry. Empty is not
+// registered — unlike Get, which maps empty to DefaultSurface.
+func Registered(name string) bool {
+	if name == "" {
+		return false
+	}
+	_, ok := registry[name]
+	return ok
+}
+
 // RegisteredDrivers returns a deterministic snapshot of every registered
 // harness driver. Callers cannot mutate the registry through the result.
 func RegisteredDrivers() []Driver {

@@ -134,6 +134,14 @@ func TestEffectiveSurfaceTornOverlayFallsBackToRoster(t *testing.T) {
 	}
 }
 
+func TestEffectiveSurfaceUnregisteredOverlayFallsBackToRoster(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "backend", `{"slot":"fallback-0","surface":"not-a-driver"}`)
+	if got := EffectiveSurface("backend", "grok"); got != "grok" {
+		t.Fatalf("EffectiveSurface(unregistered overlay) = %q, want roster grok", got)
+	}
+}
+
 func TestReadActiveOverlayPresent(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())
 	writeOverlay(t, "data", `{"slot":"fallback-0","surface":"grok","provider":"xai"}`)

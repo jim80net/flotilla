@@ -8,6 +8,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/accounts"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 // LaunchFileName is the legacy per-workspace launch-recipe file (deprecated — recipes
@@ -122,10 +123,12 @@ func ReadActiveOverlay(agent string) (ActiveOverlay, bool, error) {
 }
 
 // EffectiveSurface is the overlay-first configured harness name for status,
-// assessment, and delivery. A present overlay Surface wins; a missing or torn
-// overlay is fail-SAFE and returns rosterSurface so a live desk stays routable.
+// assessment, and delivery. A present overlay Surface that names a registered
+// driver wins; a missing overlay, a torn/unreadable overlay, or an overlay
+// Surface that is not a registered driver is fail-SAFE and returns rosterSurface
+// so a live desk stays routable.
 func EffectiveSurface(agent, rosterSurface string) string {
-	if ov, ok, err := ReadActiveOverlay(agent); err == nil && ok && ov.Surface != "" {
+	if ov, ok, err := ReadActiveOverlay(agent); err == nil && ok && surface.Registered(ov.Surface) {
 		return ov.Surface
 	}
 	return rosterSurface
