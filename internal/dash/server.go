@@ -369,12 +369,16 @@ func loadBoardLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.
 // loadAgentSurfaces resolves overlay-first configured surfaces in the HTTP
 // layer so BuildBoard stays pure (no overlay file I/O).
 func loadAgentSurfaces(cfg *roster.Config) map[string]string {
+	return workspace.EffectiveSurfaces(namedRosterSurfaces(cfg))
+}
+
+func namedRosterSurfaces(cfg *roster.Config) []workspace.NamedSurface {
 	if cfg == nil {
 		return nil
 	}
-	out := make(map[string]string, len(cfg.Agents))
-	for _, a := range cfg.Agents {
-		out[a.Name] = workspace.EffectiveSurface(a.Name, a.Surface)
+	out := make([]workspace.NamedSurface, len(cfg.Agents))
+	for i, a := range cfg.Agents {
+		out[i] = workspace.NamedSurface{Name: a.Name, RosterSurface: a.Surface}
 	}
 	return out
 }

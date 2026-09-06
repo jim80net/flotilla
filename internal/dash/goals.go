@@ -1465,13 +1465,14 @@ func agentStates(board BoardDoc) map[string]string {
 }
 
 func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
-	if cfg == nil {
+	raw := workspace.EffectiveSurfaces(namedRosterSurfaces(cfg))
+	if raw == nil {
 		return nil
 	}
-	m := make(map[string]string, len(cfg.Agents))
-	for _, a := range cfg.Agents {
-		if surf := strings.TrimSpace(workspace.EffectiveSurface(a.Name, a.Surface)); surf != "" {
-			m[strings.ToLower(a.Name)] = surf
+	m := make(map[string]string, len(raw))
+	for name, surf := range raw {
+		if surf = strings.TrimSpace(surf); surf != "" {
+			m[strings.ToLower(name)] = surf
 		}
 	}
 	return m

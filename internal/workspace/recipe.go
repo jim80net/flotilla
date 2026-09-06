@@ -134,6 +134,26 @@ func EffectiveSurface(agent, rosterSurface string) string {
 	return rosterSurface
 }
 
+// NamedSurface is a desk name plus its roster-declared surface. Callers that
+// hold a roster convert locally; this package does not import roster.
+type NamedSurface struct {
+	Name          string
+	RosterSurface string
+}
+
+// EffectiveSurfaces maps each pair through EffectiveSurface. A nil slice
+// returns nil so command/HTTP nil-roster paths stay nil.
+func EffectiveSurfaces(agents []NamedSurface) map[string]string {
+	if agents == nil {
+		return nil
+	}
+	out := make(map[string]string, len(agents))
+	for _, a := range agents {
+		out[a.Name] = EffectiveSurface(a.Name, a.RosterSurface)
+	}
+	return out
+}
+
 // WriteActiveOverlay atomically writes an agent's active-harness overlay
 // (temp-file + rename within the workspace dir, mirroring the recycle status record's
 // atomic-rename — a partial write must never be read as a torn overlay). It creates the
