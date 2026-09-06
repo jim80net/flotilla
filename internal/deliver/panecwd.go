@@ -19,6 +19,10 @@ func panePIDArgs(target string) []string {
 	return []string{"display-message", "-p", "-t", target, "#{pane_pid}"}
 }
 
+func paneStartCommandArgs(target string) []string {
+	return []string{"display-message", "-p", "-t", target, "#{pane_start_command}"}
+}
+
 // PaneCWD returns a pane's current working directory. It is a read (no per-pane lock needed) and
 // is bounded by commandTimeout. Used to key a harness session store (e.g. the grok store, which
 // indexes sessions by cwd) to the desk's pane.
@@ -46,4 +50,16 @@ func PanePID(target string) (int, error) {
 		return 0, fmt.Errorf("tmux pane_pid for %q: invalid value %q", target, strings.TrimSpace(string(out)))
 	}
 	return pid, nil
+}
+
+// PaneStartCommand returns tmux's recorded launch command for the pane. It is an
+// intent fallback when a live process environment cannot be observed.
+func PaneStartCommand(target string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", paneStartCommandArgs(target)...).Output()
+	if err != nil {
+		return "", fmt.Errorf("tmux pane_start_command for %q: %w", target, err)
+	}
+	return strings.TrimRight(string(out), "\n"), nil
 }

@@ -121,6 +121,10 @@ func sessionsByMtime(cwd string) ([]string, bool) {
 	if !ok {
 		return nil, false
 	}
+	return sessionsByMtimeRoot(root, cwd)
+}
+
+func sessionsByMtimeRoot(root, cwd string) ([]string, bool) {
 	dir := filepath.Join(root, encodeProjectDir(cwd))
 	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil || len(matches) == 0 {
@@ -296,7 +300,11 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	text, ok = latestTurnTextForCwd(cwd)
+	root, rootOK := projectsRootForPane(pane)
+	if !rootOK {
+		return "", false, nil
+	}
+	text, ok = latestTurnTextForCwdRoot(root, cwd)
 	return text, ok, nil
 }
 
@@ -312,7 +320,11 @@ func ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	text, found = replyAfterForCwd(cwd, operatorMsg)
+	root, rootOK := projectsRootForPane(pane)
+	if !rootOK {
+		return "", false, nil
+	}
+	text, found = replyAfterForCwdRoot(root, cwd, operatorMsg)
 	return text, found, nil
 }
 
@@ -320,7 +332,15 @@ func ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
 // latestTurnTextForCwd) and returns the text-bearing assistant turn following the LATEST user turn that
 // carries operatorMsg.
 func replyAfterForCwd(cwd, operatorMsg string) (string, bool) {
-	sessions, ok := sessionsByMtime(cwd)
+	root, ok := projectsRoot()
+	if !ok {
+		return "", false
+	}
+	return replyAfterForCwdRoot(root, cwd, operatorMsg)
+}
+
+func replyAfterForCwdRoot(root, cwd, operatorMsg string) (string, bool) {
+	sessions, ok := sessionsByMtimeRoot(root, cwd)
 	if !ok {
 		return "", false
 	}
@@ -417,7 +437,15 @@ func replyAfterUserMsg(jsonlPath, operatorMsg string) (text string, cwd string, 
 //     substantive). It does NOT fall through to an OLDER session in that case, because an older
 //     session's turn is stale and re-posting it would duplicate a turn already mirrored.
 func latestTurnTextForCwd(cwd string) (string, bool) {
-	sessions, ok := sessionsByMtime(cwd)
+	root, ok := projectsRoot()
+	if !ok {
+		return "", false
+	}
+	return latestTurnTextForCwdRoot(root, cwd)
+}
+
+func latestTurnTextForCwdRoot(root, cwd string) (string, bool) {
+	sessions, ok := sessionsByMtimeRoot(root, cwd)
 	if !ok {
 		return "", false
 	}
