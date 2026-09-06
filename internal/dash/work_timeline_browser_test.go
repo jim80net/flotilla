@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-// TestWorkTimelineRendered891 proves the shared Work Context timeline at the
-// phone and desktop contracts. Fixtures are generic and optional captures stay
-// in the caller-supplied private evidence directory.
-func TestWorkTimelineRendered891(t *testing.T) {
+// TestWorkTimelineRendered891AndMobileFactFlow906 proves the shared Work
+// Context timeline at the phone and desktop contracts. On phones, the timeline
+// and stream share one flowed scroll region so a stream boundary cannot bisect
+// a fact. Fixtures are generic and optional captures stay private.
+func TestWorkTimelineRendered891AndMobileFactFlow906(t *testing.T) {
 	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
 	if python == "" {
 		t.Skip("set FLOTILLA_PLAYWRIGHT_PYTHON to run rendered Chromium regression")
@@ -86,16 +87,33 @@ def timeline(route):
             "generated_at":"2026-07-28T11:00:00Z","partial":True,
             "total":8 if before else 28,"next_cursor":"" if before else "older"
         }
+    elif query.get("goal") == ["goal-short"]:
+        body = {
+            "subject": {"kind":"goal","id":"goal-short","title":"Short generic goal","state":"in-flight","source_id":"goal-short"},
+            "events":[event(1)],
+            "sources":[{"id":"goals","label":"Goals","status":"available","detail":"Goal identity available."}],
+            "generated_at":"2026-07-28T11:00:00Z","partial":False,"total":1
+        }
     elif query.get("issue") == ["44"]:
         body = {
             "subject":{"kind":"issue","id":"example/product#44","title":"Partial generic issue","state":"open","source_id":"example/product#44"},
-            "events":[event(2)],
+            "events":[event(i) for i in range(12)],
             "sources":[
                 {"id":"identity","label":"Work item","status":"available","detail":"Identity available."},
                 {"id":"github","label":"GitHub","status":"unavailable","detail":"Source request failed loudly."},
                 {"id":"dispatch","label":"Dispatch ledger","status":"partial","detail":"Retained exact matches only."}
             ],
-            "generated_at":"2026-07-28T11:00:00Z","partial":True,"total":1
+            "generated_at":"2026-07-28T11:00:00Z","partial":True,"total":12
+        }
+    elif query.get("issue") == ["46"]:
+        body = {
+            "subject":{"kind":"issue","id":"example/product#46","title":"Short generic issue","state":"open","source_id":"example/product#46"},
+            "events":[event(2)],
+            "sources":[
+                {"id":"identity","label":"Work item","status":"available","detail":"Identity available."},
+                {"id":"github","label":"GitHub","status":"available","detail":"Issue state available."}
+            ],
+            "generated_at":"2026-07-28T11:00:00Z","partial":False,"total":1
         }
     else:
         body = {
@@ -116,11 +134,18 @@ def prepare(page):
     page.route("**/api/goals", lambda route: route.fulfill(
         status=200, content_type="application/json", body=json.dumps({
           "found":True,
-          "goals":[{
-            "id":"goal-long","title":"Long generic goal","owner":"alpha",
-            "conversation_agent":"alpha","status_display":"in-flight",
-            "state":"in-flight","work_items":[]
-          }]
+          "goals":[
+            {
+              "id":"goal-long","title":"Long generic goal","owner":"alpha",
+              "conversation_agent":"alpha","status_display":"in-flight",
+              "state":"in-flight","work_items":[]
+            },
+            {
+              "id":"goal-short","title":"Short generic goal","owner":"alpha",
+              "conversation_agent":"alpha","status_display":"in-flight",
+              "state":"in-flight","work_items":[]
+            }
+          ]
         })))
     page.route("**/api/status", lambda route: route.fulfill(
         status=200, content_type="application/json",
@@ -134,15 +159,16 @@ def prepare(page):
         status=200, content_type="application/json",
         body=json.dumps({"number":44,"title":"Generic issue","state":"OPEN","comments":[]})))
 
-def open_goal(page):
+def open_goal(page, goal_id="goal-long"):
+    title = "Long generic goal" if goal_id == "goal-long" else "Short generic goal"
     page.evaluate("""() => {
       history.replaceState({view:'goals'}, '', '#goals');
       window.flotillaDash.showView('goals');
     }""")
-    page.evaluate("""() => window.flotillaWorkContext.open({
-      item:{goal:{id:'goal-long',title:'Long generic goal',owner:'alpha',status_display:'in-flight'}},
+    page.evaluate("""subject => window.flotillaWorkContext.open({
+      item:{goal:{id:subject.id,title:subject.title,owner:'alpha',status_display:'in-flight'}},
       posture:'in-flight',flotilla:'Example',desk:'alpha',seats:['alpha']
-    }, document.body)""")
+    }, document.body)""", {"id":goal_id, "title":title})
 
 def open_issue(page, number):
     page.evaluate("() => window.flotillaWorkContext.close()")
@@ -151,14 +177,54 @@ def open_issue(page, number):
       window.flotillaDash.showView('issues');
     }""")
     page.evaluate("""number => window.flotillaWorkContext.open({
-      item:{repo:'example/product',issue:{number:number,title:number===44?'Partial generic issue':'Empty generic issue',state:'OPEN'}},
+      item:{repo:'example/product',issue:{
+        number:number,
+        title:number===44?'Partial generic issue':(number===46?'Short generic issue':'Empty generic issue'),
+        state:'OPEN'
+      }},
       posture:'in-flight',flotilla:'Example',desk:'alpha',seats:['alpha']
     }, document.body)""", number)
+
+def assert_mobile_fact_flow(page, expected_count):
+    expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(expected_count)
+    expect(page.locator("#wc-close")).to_be_visible()
+    expect(page.locator("#wc-composer")).to_be_visible()
+    expect(page.locator("#wc-composer button[type=submit]")).to_be_visible()
+    geometry = page.evaluate("""() => {
+      const body = document.querySelector('#wc-body-scroll').getBoundingClientRect();
+      const list = document.querySelector('#wc-timeline-events');
+      const events = Array.from(list.querySelectorAll('.wc-event'));
+      const last = events[events.length - 1].getBoundingClientRect();
+      const stream = document.querySelector('.wc-stream-region').getBoundingClientRect();
+      const composer = document.querySelector('#wc-composer').getBoundingClientRect();
+      return {
+        body:{top:body.top,bottom:body.bottom,left:body.left,right:body.right},
+        last:{top:last.top,bottom:last.bottom},
+        stream:{top:stream.top},
+        composer:{top:composer.top,bottom:composer.bottom,left:composer.left,right:composer.right},
+        listOverflow:getComputedStyle(list).overflowY
+      };
+    }""")
+    assert geometry["listOverflow"] == "visible", geometry
+    assert geometry["last"]["bottom"] <= geometry["stream"]["top"] + 0.5, geometry
+    assert geometry["composer"]["left"] >= 0 and geometry["composer"]["right"] <= page.viewport_size["width"] + 0.5, geometry
+    assert geometry["composer"]["bottom"] <= page.viewport_size["height"] + 0.5, geometry
+
+    page.locator("#wc-timeline-events .wc-event").last.scroll_into_view_if_needed()
+    settled = page.evaluate("""() => {
+      const body = document.querySelector('#wc-body-scroll').getBoundingClientRect();
+      const last = document.querySelector('#wc-timeline-events .wc-event:last-child').getBoundingClientRect();
+      const composer = document.querySelector('#wc-composer').getBoundingClientRect();
+      return {body:{top:body.top,bottom:body.bottom},last:{top:last.top,bottom:last.bottom},composerTop:composer.top};
+    }""")
+    assert settled["last"]["top"] >= settled["body"]["top"] - 0.5, settled
+    assert settled["last"]["bottom"] <= min(settled["body"]["bottom"], settled["composerTop"]) + 0.5, settled
+    assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
     try:
-        for width, height in [(390, 844), (1440, 900)]:
+        for width, height in [(390, 844), (360, 800), (1440, 900)]:
             earlier_attempts["count"] = 0
             hung_attempts["count"] = 0
             page = browser.new_page(viewport={"width":width,"height":height})
@@ -191,13 +257,25 @@ with sync_playwright() as p:
             box = page.locator("#wc-timeline").bounding_box()
             assert box and box["x"] >= 0 and box["x"] + box["width"] <= width + 0.5
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+            if width <= 740:
+                assert_mobile_fact_flow(page, 28)
             if evidence_dir:
                 page.screenshot(path=os.path.join(evidence_dir, "work-timeline-long-%d.png" % width), full_page=False)
+
+            open_goal(page, "goal-short")
+            if width <= 740:
+                assert_mobile_fact_flow(page, 1)
 
             open_issue(page, 44)
             expect(page.locator(".wc-source-unavailable")).to_contain_text("GitHub")
             expect(page.locator("#wc-timeline-summary")).to_contain_text("partial coverage")
-            expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(1)
+            expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(12)
+            if width <= 740:
+                assert_mobile_fact_flow(page, 12)
+
+            open_issue(page, 46)
+            if width <= 740:
+                assert_mobile_fact_flow(page, 1)
 
             open_issue(page, 45)
             expect(page.locator("#wc-timeline-summary")).to_have_text("No recorded facts")
@@ -227,6 +305,7 @@ with sync_playwright() as p:
 	if evidenceDir != "" {
 		for _, name := range []string{
 			"work-timeline-long-390.png", "work-timeline-empty-390.png",
+			"work-timeline-long-360.png", "work-timeline-empty-360.png",
 			"work-timeline-long-1440.png", "work-timeline-empty-1440.png",
 		} {
 			path := filepath.Join(evidenceDir, name)
