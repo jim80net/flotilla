@@ -69,9 +69,10 @@ func NewRegistry(rosterDir string) *Registry {
 }
 
 // IsConsumed reports whether (nonce, payloadHash) was already settled.
-// Match rules (any):
-//   - non-empty nonce equals a registry entry's nonce (nonce is authoritative)
-//   - both nonce and hash match (hash collision safety when nonce empty on one side)
+// Match rules:
+//   - a non-empty nonce match settles unless both sides carry different payload hashes;
+//     that is a detected nonce collision and remains unsettled
+//   - a nonce match with matching or absent hash settles for legacy compatibility
 //   - nonce empty on query: hash-only match
 func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 	if r == nil || r.path == "" {
@@ -83,12 +84,7 @@ func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 		return false
 	}
 	for _, e := range r.Load() {
-		if nonce != "" && e.Nonce == nonce {
-			// Nonce match is decisive — same dispatch id must not reinject even if
-			// a later stamp changed incidental whitespace in the body hash.
-			return true
-		}
-		if nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash {
+		if consumedIdentityMatches(nonce, payloadHash, e) {
 			return true
 		}
 	}
@@ -140,14 +136,7 @@ func (r *Registry) SettlesInboundRow(nonce, payloadHash, recipient string) bool 
 		return false
 	}
 	for _, e := range r.Load() {
-		matched := false
-		switch {
-		case nonce != "" && e.Nonce == nonce:
-			matched = true
-		case nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash:
-			matched = true
-		}
-		if !matched {
+		if !consumedIdentityMatches(nonce, payloadHash, e) {
 			continue
 		}
 		if e.Reason == ReasonCoordinatorRecipient && e.Recipient != recipient {
@@ -156,6 +145,21 @@ func (r *Registry) SettlesInboundRow(nonce, payloadHash, recipient string) bool 
 		return true
 	}
 	return false
+}
+
+// consumedIdentityMatches is the single settlement predicate used by both
+// direct lookup and inbound supervision. A nonce remains authoritative when
+// either side lacks a payload hash for legacy compatibility; when both hashes
+// exist, disagreement is a detected collision and must never settle the row.
+func consumedIdentityMatches(nonce, payloadHash string, e ConsumedEntry) bool {
+	if nonce != "" && e.Nonce == nonce {
+		if payloadHash != "" && e.PayloadHash != "" && payloadHash != e.PayloadHash {
+			log.Printf("flotilla dispatch: NONCE COLLISION detected for %q: payload hashes differ; refusing to settle", nonce)
+			return false
+		}
+		return true
+	}
+	return nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash
 }
 
 // Consume records a settled dispatch. Idempotent: a second call with the same
@@ -183,6 +187,11 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		}
 		for _, p := range f.Entries {
 			if e.Nonce != "" && p.Nonce == e.Nonce {
+				// Full payload hashes disambiguate a nonce collision. Preserve both
+				// settlements so each distinct dispatch can be queried durably.
+				if e.PayloadHash != "" && p.PayloadHash != "" && e.PayloadHash != p.PayloadHash {
+					continue
+				}
 				// A send-time coordinator-recipient entry settles only its own hop
 				// (#707): per-edge settlements of the same nonce coexist, in either
 				// insertion order — the hop entry must not block the true

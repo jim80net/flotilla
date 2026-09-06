@@ -51,13 +51,13 @@ func NewID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// NewNonce returns a short durable dispatch identity.
+// NewNonce returns a full-width durable dispatch identity.
 func NewNonce() (string, error) {
 	id, err := NewID()
 	if err != nil {
 		return "", err
 	}
-	return "flotilla-dispatch-" + id[:8], nil
+	return "flotilla-dispatch-" + id, nil
 }
 
 // Track records a confirmed inbound dispatch for recipient.

@@ -77,6 +77,31 @@ func TestScanUndeliveredInbound_SkipsConsumed(t *testing.T) {
 	}
 }
 
+func TestScanUndeliveredInbound_NonceCollisionStaysSupervised(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("new payload sharing a legacy nonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "collision", Sender: "xo", Recipient: "desk", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC().Add(-30 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Consume(dir, ConsumedEntry{
+		Nonce: nonce, PayloadHash: PayloadHash("different payload"),
+		Reason: ReasonDurableAck, Sender: "xo", Recipient: "desk",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reports := ScanUndeliveredInbound(dir, time.Now().UTC(), 15*time.Minute)
+	if len(reports) != 1 || reports[0].ID != "collision" {
+		t.Fatalf("same nonce with different hash suppressed supervision: %+v", reports)
+	}
+}
+
 func TestLookupNonce_DispositionOrder(t *testing.T) {
 	dir := t.TempDir()
 	msg, nonce, err := inbound.AppendDispatchNonce("status line for disposition order test pad")
