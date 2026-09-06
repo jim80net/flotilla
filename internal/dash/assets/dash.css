@@ -3201,6 +3201,7 @@ html, body { overflow-x: clip; }
 .research-toc > summary::before { content: "▸"; color: var(--cyan); margin-right: -.25rem; }
 .research-toc[open] > summary::before { transform: rotate(90deg); }
 .research-toc-count { margin-left: auto; color: var(--ink-3); font: 500 .62rem var(--mono); letter-spacing: 0; text-transform: none; }
+.research-toc-dismiss { display: none; color: var(--cyan); font: 600 .62rem var(--mono); letter-spacing: 0; text-transform: none; }
 .research-toc ol { columns: 2; gap: 2rem; margin: 0; padding-left: 1.25rem; }
 .research-toc[open] ol { padding: 0 1rem .85rem 2.25rem; }
 .research-toc li { break-inside: avoid; margin: .25rem 0; color: var(--ink-3); font-size: .68rem; }
@@ -3292,7 +3293,11 @@ html, body { overflow-x: clip; }
     max-height: calc(100dvh - 1rem); margin: 0; overflow: hidden; border: 1px solid var(--cyan-dim);
     border-left-width: 3px; border-radius: var(--r-sm); background: var(--surface); box-shadow: var(--shadow);
   }
-  .research-toc[open] > summary { flex: 0 0 48px; padding-inline: .85rem; border-bottom: 1px solid var(--line); background: var(--abyss-2); }
+  .research-toc[open] > summary {
+    position: sticky; top: 0; z-index: 2; flex: 0 0 48px; width: 100%; box-sizing: border-box;
+    padding-inline: .85rem; border-bottom: 1px solid var(--line); background: var(--abyss-2);
+  }
+  .research-toc[open] .research-toc-dismiss { display: inline-flex; }
   .research-toc[open] ol {
     flex: 1 1 auto; min-height: 0; max-height: calc(100dvh - 4rem); box-sizing: border-box;
     margin: 0; padding: .45rem .7rem .8rem 1.9rem;
