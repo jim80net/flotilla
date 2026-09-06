@@ -72,13 +72,16 @@ python3 .claude/skills/flotilla-seven-c-walk/scripts/walk_run.py \
   --output-dir <roster-dir>/state/<xo>-walk-<YYYYMMDD>/assets
 ```
 
-Routes, actions, and state anchors live in `walk-manifest.v1.json`. The runner
-tries current routes before legacy fallbacks, records an absent optional state
-as `unavailable`, continues the remaining captures, and atomically finalizes
-`walk-run.json`. A missing required surface or a page error still makes the run
-non-zero, but only after the rest of the matrix and its evidence manifest have
-completed. Update the versioned manifest when product routes or state grammar
-move; do not copy selectors into an evening-specific script.
+Routes, stable surface anchors, and state anchors live in `walk-manifest.v2.json`.
+The common matrix covers Conversations, Goals, Issues, R&D Decide, R&D Learn,
+and Parade. The runner waits past transient loading chrome for a populated,
+partial-coverage, empty, or error state; a still-loading surface is recorded as
+`loading`, not misreported as unavailable. It continues the remaining captures
+and atomically finalizes `walk-run.json`. A missing required surface, missing
+current-state anchor, or page error still makes the run non-zero, but only after
+the rest of the matrix and its evidence manifest have completed. Update the
+versioned manifest when product routes or state grammar move; do not copy
+selectors into an evening-specific script.
 
 ## Grade grid (0–2 each; cite evidence)
 

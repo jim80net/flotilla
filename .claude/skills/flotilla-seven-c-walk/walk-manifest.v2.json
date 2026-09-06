@@ -1,0 +1,95 @@
+{
+  "schema": 2,
+  "viewport": {"width": 390, "height": 844},
+  "captures": [
+    {
+      "id": "conversations",
+      "required": true,
+      "attempts": [{
+        "route": "/",
+        "anchor": "#view-conversations:not(.hidden)",
+        "states": [
+          {"selector": "#conv-thread .thread-load-error", "state": "error"},
+          {"selector": "#conv-thread .thread-msg", "state": "populated"},
+          {"selector": "#conv-thread > .empty", "state": "empty", "exclude_text": "^Loading"},
+          {"selector": "#conv-thread > .empty", "state": "loading", "text": "^Loading"}
+        ]
+      }]
+    },
+    {
+      "id": "goals",
+      "required": true,
+      "attempts": [{
+        "route": "/",
+        "actions": ["#tab-goals"],
+        "anchor": "#view-goals:not(.hidden)",
+        "states": [
+          {"selector": "#view-goals.goals-data-unavailable", "state": "error"},
+          {"selector": "#goals-mobile-outline .goutline-row, #goals-mobile-outline .goutline-desk, #goals-nodes .gnode", "state": "populated"},
+          {"selector": "#goals-empty:not(.hidden)", "state": "empty"},
+          {"selector": "#view-goals:not(.hidden)", "state": "loading"}
+        ]
+      }]
+    },
+    {
+      "id": "issues",
+      "required": true,
+      "attempts": [{
+        "route": "/",
+        "actions": ["#tab-issues"],
+        "anchor": "#view-issues:not(.hidden)",
+        "states": [
+          {"selector": "#issues-list > .error", "state": "error"},
+          {"selector": "#issues-list .issue-scope-incomplete", "state": "partial"},
+          {"selector": "#issues-list .issue-row", "state": "populated"},
+          {"selector": "#issues-list > .issue-scope-note + .empty", "state": "empty"},
+          {"selector": "#issues-list > .empty", "state": "loading", "text": "^Loading"}
+        ]
+      }]
+    },
+    {
+      "id": "research-decide",
+      "required": true,
+      "attempts": [{
+        "route": "/research?focus=decisions",
+        "anchor": "#research-library",
+        "states": [
+          {"selector": "#research-status:not([hidden])", "state": "error", "text": "unavailable"},
+          {"selector": "#research-decisions:not([hidden]) .research-card", "state": "populated"},
+          {"selector": "#research-status:not([hidden])", "state": "empty", "text": "^No "},
+          {"selector": "#research-status:not([hidden])", "state": "loading", "text": "^Loading"}
+        ]
+      }]
+    },
+    {
+      "id": "research-learn",
+      "required": true,
+      "attempts": [{
+        "route": "/research?focus=learn",
+        "anchor": "#research-library",
+        "states": [
+          {"selector": "#research-status:not([hidden])", "state": "error", "text": "unavailable"},
+          {"selector": "#research-learn:not([hidden]) .research-card", "state": "populated"},
+          {"selector": "#research-status:not([hidden])", "state": "empty", "text": "^No "},
+          {"selector": "#research-status:not([hidden])", "state": "loading", "text": "^Loading"}
+        ]
+      }]
+    },
+    {
+      "id": "parade",
+      "required": true,
+      "attempts": [{
+        "route": "/parade",
+        "anchor": "body.parade-body",
+        "states": [
+          {"selector": "#pd-list > .error", "state": "error"},
+          {"selector": "#pd-deck:not([hidden]) .pd-empty-state", "state": "empty"},
+          {"selector": "#pd-list-view:not([hidden]) #pd-list > .empty", "state": "empty"},
+          {"selector": "#pd-deck:not([hidden]) #pd-slide:not(:empty)", "state": "populated"},
+          {"selector": "#pd-list-view:not([hidden]) .pd-listcard", "state": "populated"},
+          {"selector": "body.parade-body", "state": "loading"}
+        ]
+      }]
+    }
+  ]
+}
