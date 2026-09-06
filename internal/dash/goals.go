@@ -1470,10 +1470,14 @@ func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
 		return nil
 	}
 	m := make(map[string]string, len(raw))
-	for name, surf := range raw {
-		if surf = strings.TrimSpace(surf); surf != "" {
-			m[strings.ToLower(name)] = surf
+	// Fold in roster order so case-insensitive name collisions are stable
+	// (last duplicate wins). Ranging raw would pick a winner by map iteration.
+	for _, a := range cfg.Agents {
+		surf := strings.TrimSpace(raw[a.Name])
+		if surf == "" {
+			continue
 		}
+		m[strings.ToLower(a.Name)] = surf
 	}
 	return m
 }
