@@ -271,7 +271,7 @@ func FormatAdjutantTriage(r UndeliveredReport) string {
 		b.WriteString("4. Escalate to operator only if stuck after triage (second-layer age)\n")
 	default:
 		b.WriteString("1. Check recipient pane (busy mid-turn is normal; crashed/blocked is not)\n")
-		b.WriteString("2. Confirm outbox still holds the send; watch will deliver when idle\n")
+		b.WriteString("2. Confirm outbox still holds the send; delivery remains unconfirmed\n")
 		b.WriteString("3. If stuck/wedged: clear wedge or re-queue; do not silent-drop\n")
 		b.WriteString("4. Escalate to operator only if stuck after triage (second-layer age)\n")
 	}

@@ -84,8 +84,8 @@
       var id = res.queued_id ? " (id " + res.queued_id + ")" : "";
       return {
         outcome: outcome,
-        text: "Queued durably for " + (res.target || "the desk") + id + " — it will deliver when the desk can receive." + detail,
-        ok: true,
+        text: "Queued durably for " + (res.target || "the desk") + id + " — not delivered in this call." + detail,
+        ok: false,
       };
     }
     return { outcome: outcome, text: "NOT accepted: " + outcome + detail, ok: false };

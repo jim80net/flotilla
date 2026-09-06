@@ -216,9 +216,11 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg1, busy); err != nil {
-		t.Fatal(err)
-	}
+	captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg1, busy); err != nil {
+			t.Fatal(err)
+		}
+	})
 	msg2, _, err := inbound.AppendDispatchNonce(base)
 	if err != nil {
 		t.Fatal(err)
@@ -226,9 +228,11 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	if msg1 == msg2 {
 		t.Fatal("probe requires distinct stamps")
 	}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
-		t.Fatal(err)
-	}
+	out, _ := captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
+			t.Fatal(err)
+		}
+	})
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +244,10 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	if got[0].Message != msg1 {
 		t.Fatalf("surviving queued send keeps first stamp, got %q", got[0].Message)
 	}
+	want := fmt.Sprintf("send already queued as %s — cancel: flotilla cancel %s", got[0].ID, got[0].ID)
+	if !strings.Contains(out, want) || strings.Contains(out, "will deliver") {
+		t.Fatalf("dedupe report = %q, want %q without a delivery promise", out, want)
+	}
 }
 
 // Acceptance (#475): a bounced send lands in the sender's durable outbox instead of failing the turn.
@@ -250,9 +258,11 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	busy := errRetryableBusy{agent: "xo"}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", "deploy complete", busy); err != nil {
-		t.Fatalf("enqueueOrFailSend = %v, want success (queued)", err)
-	}
+	out, errOut := captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", "deploy complete", busy); err != nil {
+			t.Fatalf("enqueueOrFailSend = %v, want success (queued)", err)
+		}
+	})
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
 		t.Fatal(err)
@@ -263,6 +273,14 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 	}
 	if got[0].EnqueuedAt.IsZero() {
 		t.Fatal("enqueued_at must be set")
+	}
+	wantOut := fmt.Sprintf("queued to alpha outbox (id %s) — cancel: flotilla cancel %s", got[0].ID, got[0].ID)
+	wantErr := fmt.Sprintf("queued to durable outbox (id=%s); cancel: flotilla cancel %s", got[0].ID, got[0].ID)
+	if !strings.Contains(out, wantOut) || !strings.Contains(errOut, wantErr) {
+		t.Fatalf("fresh enqueue report stdout=%q stderr=%q, want durable id and cancel action", out, errOut)
+	}
+	if strings.Contains(out, "will deliver") || strings.Contains(errOut, "will deliver") {
+		t.Fatalf("fresh enqueue report retains delivery promise: stdout=%q stderr=%q", out, errOut)
 	}
 }
 

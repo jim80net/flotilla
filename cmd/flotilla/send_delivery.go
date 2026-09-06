@@ -245,11 +245,11 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped))
 	if deduped {
 		fmt.Fprintf(os.Stderr, "flotilla: %v — send already queued as %s; no duplicate added\n", deliveryErr, id)
-		fmt.Printf("send already queued as %s — will deliver when %s is idle\n", id, recipient)
+		fmt.Printf("send already queued as %s — cancel: flotilla cancel %s\n", id, id)
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); watch will deliver when %s is idle\n", deliveryErr, id, recipient)
-	fmt.Printf("queued to %s outbox (id %s) — will deliver when recipient is idle\n", sender, id)
+	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); cancel: flotilla cancel %s\n", deliveryErr, id, id)
+	fmt.Printf("queued to %s outbox (id %s) — cancel: flotilla cancel %s\n", sender, id, id)
 	return nil
 }
 
