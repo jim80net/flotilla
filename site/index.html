@@ -13,8 +13,8 @@
   flotilla up — the literal prompt is in the last section).
 
   GENERIC ONLY: this page describes the open-source product. No private
-  deployment details appear anywhere : example desks are generic (backend,
-  research, docs, infra), mirroring the public quickstart, NOT any host roster.
+  deployment details appear anywhere: example agent sessions are generic
+  (backend, research, docs, infra), mirroring the public quickstart.
 
   THEME IS FIXED (docs/design/README.md): this is copy + narrative-structure
   work, not a re-theme. The two components added for the narrative (.scene and
@@ -63,6 +63,7 @@
     </a>
     <nav class="nav-links" aria-label="page sections">
       <a href="#feel">the problem</a>
+      <a href="#docs">docs</a>
       <a href="#day">a day with it</a>
       <a href="#gives">what you get</a>
       <a href="#how">how</a>
@@ -89,7 +90,7 @@
                reader-modeling for #323 lives in the body sections + the demo caption;
                the operator-authored hero copy is preserved. -->
           <p class="hero-sub">
-            Bring the coding agents you already run into one coordinated fleet.
+            Bring the coding agents you already run into one coordinated team.
             One hub routes the work, keeps its context, and reports back.
           </p>
 
@@ -105,23 +106,28 @@
           </div>
         </div>
 
-        <figure class="generated-asset generated-asset--hero">
+        <figure class="product-proof product-proof--hero">
           <picture>
             <source
+              media="(max-width: 600px)"
               type="image/webp"
-              srcset="./assets/hero-atmosphere-800.webp 800w, ./assets/hero-atmosphere-1600.webp 1600w"
+              srcset="./assets/dashboard-product-proof-mobile-780.webp 780w"
+              sizes="calc(100vw - 48px)"
+            />
+            <source
+              type="image/webp"
+              srcset="./assets/dashboard-product-proof-720.webp 720w, ./assets/dashboard-product-proof-1440.webp 1440w"
               sizes="(max-width: 920px) calc(100vw - 48px), 44vw"
             />
             <img
-              src="./assets/hero-atmosphere-800.webp"
-              width="800"
-              height="598"
-              alt="Warm still life of blank cream papers, a green folder, and a brass clip on an ivory worktable"
+              src="./assets/dashboard-product-proof-720.webp"
+              width="720"
+              height="450"
+              alt="Flotilla dashboard showing a fleet map, active coding-agent sessions, coordination history, and a scoped work queue"
               fetchpriority="high"
               decoding="async"
             />
           </picture>
-          <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
         </figure>
       </div>
 
@@ -135,6 +141,41 @@
         <span class="hs-chip">Pi</span>
         <span class="hs-chip">aider</span>
       </div>
+    </section>
+
+    <!-- ─────────────────────── PUBLIC DOCS PATH ─────────────────────── -->
+    <section class="band docs-path" id="docs">
+      <div class="band-head">
+        <span class="kicker">docs for a cold start</span>
+        <h2>Understand it, run it, then find the command you need.</h2>
+        <p class="band-lede">
+          Start with the product, not its internals. The public docs take you from
+          the basic model to a working install and a task-organized reference.
+        </p>
+      </div>
+      <div class="docs-path-grid">
+        <a class="docs-path-card" href="./docs/understand.html">
+          <span>01 · understand</span>
+          <h3>What flotilla coordinates</h3>
+          <p>See what changes when one coordinator directs the coding agents you already run.</p>
+          <strong>Understand flotilla →</strong>
+        </a>
+        <a class="docs-path-card" href="./docs/quickstart.html">
+          <span>02 · get running</span>
+          <h3>Install and check a fleet</h3>
+          <p>Check the prerequisites, install the binary, name two agent sessions, and verify the setup.</p>
+          <strong>Run the quickstart →</strong>
+        </a>
+        <a class="docs-path-card" href="./docs/commands.html">
+          <span>03 · use it</span>
+          <h3>Commands by task</h3>
+          <p>Find the exact command for coordination, inspection, recovery, or lifecycle work.</p>
+          <strong>Find a command →</strong>
+        </a>
+      </div>
+      <p class="architecture-route">
+        Looking for component boundaries? <a href="./docs/architecture.html">See how it is built →</a>
+      </p>
     </section>
 
     <!-- ─────────────────────── THE PROBLEM ─────────────────────── -->
@@ -195,9 +236,9 @@
         <div class="moment">
           <div class="moment-when">11:40 · heads-down</div>
           <div>
-            <h3>Your desks work while you do your own thing</h3>
+            <h3>Your coding agents work while you do your own thing</h3>
             <p>
-              Desks continue approved work while <span class="you">you stay in your own editor.</span>
+              Agent sessions continue approved work while <span class="you">you stay in your own editor.</span>
             </p>
           </div>
         </div>
@@ -206,18 +247,18 @@
           <div>
             <h3>A result finds you, and you answer in a line</h3>
             <p>
-              A result reaches your phone. <span class="you">You answer in one line</span>,
-              and the next desk pulls the instruction from its durable buffer.
+              A result returns to your chat channel. <span class="you">You answer in one line</span>,
+              and the next coding-agent session receives the instruction.
             </p>
           </div>
         </div>
         <div class="moment">
           <div class="moment-when">4:30 · new work lands</div>
           <div>
-            <h3>A fresh desk that already knows your project</h3>
+            <h3>A replacement session receives the handoff</h3>
             <p>
-              <span class="you">You start a desk in minutes.</span> Its durable handoff
-              carries the project's conventions and recent decisions.
+              A durable handoff carries project context into the replacement session
+              before work resumes.
             </p>
           </div>
         </div>
@@ -228,30 +269,20 @@
     <section class="band" id="gives">
       <div class="band-head">
         <span class="kicker">03 — what you get</span>
-        <h2>Three ideas do the whole job.</h2>
+        <h2>Two parts do the whole job.</h2>
       </div>
-      <div class="cards three">
+      <div class="cards two">
         <article class="card">
           <div class="card-num">01</div>
-          <h3>Flotillas — your domains, run for you</h3>
+          <h3>Flotillas group work by domain</h3>
           <p>
-            Group work by domain. Each flotilla owns its desks and can start or retire
-            with the work instead of becoming another flat backlog.
+            A flotilla is a group of coding-agent sessions with one area of responsibility,
+            so work stays organized without becoming another flat backlog.
           </p>
         </article>
         <article class="card">
           <div class="card-num">02</div>
-          <h3>Memex — it remembers, and it learns</h3>
-          <p>
-            Each desk carries conventions, decisions, and prior attempts across
-            sessions through
-            <a href="https://github.com/jim80net/memex-core" target="_blank" rel="noopener">memex</a>,
-            rather than starting from zero.
-          </p>
-        </article>
-        <article class="card">
-          <div class="card-num">03</div>
-          <h3>A chief of staff — one point of contact</h3>
+          <h3>A chief of staff is your one point of contact</h3>
           <p>
             One coordinator routes intent, gathers replies, and tells you what
             happened in plain language.
@@ -270,25 +301,6 @@
           framework or project migration.
         </p>
       </div>
-
-      <figure class="generated-asset generated-asset--tools">
-        <picture>
-          <source
-            type="image/webp"
-            srcset="./assets/tools-atmosphere-800.webp 800w, ./assets/tools-atmosphere-1600.webp 1600w"
-            sizes="(max-width: 720px) calc(100vw - 48px), 46vw"
-          />
-          <img
-            src="./assets/tools-atmosphere-800.webp"
-            width="800"
-            height="598"
-            alt="Warm still life of a closed blank laptop, open blank notebook, pencil, and green glass paperweight"
-            loading="lazy"
-            decoding="async"
-          />
-        </picture>
-        <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
-      </figure>
 
       <div class="diff-strip">
         <div class="diff-col">
@@ -313,12 +325,12 @@
     <section class="band" id="how">
       <div class="band-head">
         <span class="kicker">05 — how it actually works</span>
-        <h2>One hub you talk to. Your desks around it. Everything on the record.</h2>
+        <h2>One hub you talk to. Your coding agents around it. Everything on the record.</h2>
       </div>
 
       <div class="how-grid">
         <!-- inline SVG hub-and-spoke diagram -->
-        <figure class="diagram" aria-label="one coordinator hub routes your messages to backend, research, docs, and infra desks; every message is also copied to a chat channel you can read back">
+        <figure class="diagram" aria-label="one coordinator routes your messages to backend, research, docs, and infrastructure coding-agent sessions; every message is also copied to a chat channel you can read back">
           <svg viewBox="0 0 460 360" role="img">
             <defs>
               <radialGradient id="hubglow" cx="50%" cy="50%" r="50%">
@@ -373,7 +385,7 @@
               <text class="bus-label" y="5" text-anchor="middle">your chat channel &middot; full record</text>
             </g>
           </svg>
-          <figcaption>One hub routes intent to owned desks; durable receipts bring the result back.</figcaption>
+          <figcaption>One hub routes intent to coding-agent sessions; durable receipts bring the result back.</figcaption>
         </figure>
 
         <ol class="how-steps">
@@ -388,15 +400,16 @@
             <span class="step-tag">it reaches your real sessions</span>
             <h3>Delivered, and confirmed</h3>
             <p>
-              Each desk pulls durable work before acting; acknowledgments and
-              supersession remain inspectable.
+              Each instruction goes to a named coding-agent session and receives a
+              durable dispatch record.
             </p>
           </li>
           <li>
             <span class="step-tag">state and receipts survive</span>
             <h3>Continue without losing the record</h3>
             <p>
-              Handoffs preserve context, and approval-sensitive work still stops for you.
+              Handoffs preserve context, and lifecycle commands refuse when they cannot
+              confirm a safe transition.
             </p>
           </li>
         </ol>
@@ -404,9 +417,9 @@
 
       <div class="proof-strip" aria-label="shipped product proof">
         <p><strong>Six registered drivers:</strong> Claude Code, Codex, Grok, OpenCode, Pi, and aider.</p>
-        <p>When auto-switch is enabled, eligible non-approval-sensitive desks currently running Claude Code can move to another configured harness in their declared fallback chain after a detected provider rate limit, carrying a durable handoff into the replacement session.</p>
+        <p>When auto-switch is enabled, eligible non-approval-sensitive sessions currently running Claude Code can move to another configured agent runtime in their declared fallback chain after a detected provider rate limit, carrying a durable handoff into the replacement session.</p>
         <p><strong>Five dashboard destinations:</strong> Conversations, Goals, Issues, Parade, and combined R&amp;D. Goals maps the fleet; Issues exposes its work; Parade and R&amp;D keep reports and decisions readable.</p>
-        <p><strong>Built for continuity:</strong> stable seat identities, goals-as-data, durable delivery receipts, operator interrupt, worktree lifecycle, installable doctrine, and a private/public boundary.</p>
+        <p><strong>Built for continuity:</strong> work keeps a stable session identity, a durable delivery record, and a recovery handoff. Public examples stay separate from private deployment details.</p>
       </div>
     </section>
 
@@ -444,8 +457,8 @@
               <span class="copy-label">copy</span>
             </button>
           </div>
-          <a class="btn btn-primary" href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">
-            Read the quickstart ↗
+          <a class="btn btn-primary" href="./docs/quickstart.html">
+            Read the quickstart →
           </a>
           <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
             See it on GitHub ↗
@@ -464,9 +477,9 @@
       </div>
       <nav class="footer-links">
         <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">GitHub</a>
+        <a href="./docs/">Docs</a>
         <a href="./parade/">Inaugural parade</a>
-        <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">Quickstart</a>
-        <a href="https://github.com/jim80net/memex-core" target="_blank" rel="noopener">memex</a>
+        <a href="./docs/quickstart.html">Quickstart</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
       </nav>
     </div>

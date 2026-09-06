@@ -26,15 +26,15 @@ python3 -m http.server 8000
 
 The seven-section order is fixed: `hero → feel → day → gives → yours → how →
 start`. At 390px the complete document must remain at or below 7,200px without
-horizontal overflow. Shipped claims stay deterministic HTML; generated imagery
-is atmosphere only.
+horizontal overflow. Shipped claims stay deterministic HTML. The hero uses a
+sanitized capture of the real product dashboard; decorative media is excluded.
 
-## Generated atmosphere assets
+## Product-proof assets
 
-The hero and `yours` transition use claim-free generated atmosphere. Each has
-800px and 1600px WebP variants in `assets/`, selected with `srcset`, plus a
-visible deterministic `AI-GENERATED ATMOSPHERE` disclosure. PNG masters remain
-in the source design package and are not public-page payloads.
+The hero uses responsive WebP captures in `assets/`. Its generic fixture data
+contains no private hosts, usernames, repositories, tokens, internal paths, or
+private deployment relationships. The `yours` section is factual type and comparison
+content only; it carries no decorative still life.
 
 ## Publishing (GitHub Pages) — operator's one step
 
@@ -51,8 +51,8 @@ source is enabled and the workflow is dispatched.
 ## Constraints honored
 
 - **Generic only.** No private deployment details, hostnames, real IDs, or
-  domain-specific terms appear anywhere. Example agents (`xo`, `backend`,
-  `frontend`, `data`, `infra`) are generic, matching the public quickstart.
+  private fleet names appear anywhere. Example agents (`backend`, `frontend`,
+  `data`, `infra`) are generic, matching the public quickstart.
 - **Truthful product proof.** The page names the six registered drivers, the
   exact bounded failover behavior, and five dashboard destinations. It does not
   present shipped capabilities as trial or roadmap work.
