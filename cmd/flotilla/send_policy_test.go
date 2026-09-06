@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,6 +33,112 @@ func loadSendPolicyRoster(t *testing.T) *roster.Config {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func loadStructuredAdjutantPolicyRoster(t *testing.T) *roster.Config {
+	t.Helper()
+	path := writeTemp(t, "adjutant-policy.json", `{
+  "xo_agent":"xo",
+  "agents":[
+    {"seat_id":"0102030405060708","name":"xo","coordinator":true},
+    {"seat_id":"1112131415161718","parent":"0102030405060708","name":"adjutant","adjutant_for":"xo"},
+    {"seat_id":"2122232425262728","parent":"1112131415161718","name":"desk"},
+    {"seat_id":"3132333435363738","parent":"0102030405060708","name":"foreign-xo","coordinator":true},
+    {"seat_id":"4142434445464748","parent":"3132333435363738","name":"foreign-desk"}
+  ]
+}`)
+	cfg, err := roster.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestAuthorizeSendStructuredAdjutantLane(t *testing.T) {
+	cfg := loadStructuredAdjutantPolicyRoster(t)
+	if got := cfg.Org().Nodes["adjutant"].Kind; got != "adjutant" {
+		t.Fatalf("compiled adjutant kind = %q", got)
+	}
+	tests := []struct {
+		name, from, to string
+		override       bool
+		allowed, audit bool
+	}{
+		{"adjutant to direct child", "adjutant", "desk", false, true, false},
+		{"child to adjutant", "desk", "adjutant", false, true, false},
+		{"adjutant to foreign desk blocked", "adjutant", "foreign-desk", false, false, false},
+		{"adjutant foreign override audited", "adjutant", "foreign-desk", true, true, true},
+		{"foreign desk to adjutant blocked", "foreign-desk", "adjutant", false, false, false},
+		{"foreign desk to adjutant override audited", "foreign-desk", "adjutant", true, true, true},
+		{"desk to foreign desk blocked", "desk", "foreign-desk", false, false, false},
+		{"coordinator to foreign desk unaffected", "xo", "foreign-desk", false, true, false},
+		{"coordinator to adjutant unaffected", "foreign-xo", "adjutant", false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := authorizeSend(cfg, tt.from, tt.to, tt.override)
+			if d.Allowed != tt.allowed || d.Audit != tt.audit {
+				t.Fatalf("decision = %+v, want allowed=%v audit=%v", d, tt.allowed, tt.audit)
+			}
+		})
+	}
+}
+
+func TestAuthorizeSendOrgFileAdjutantUsesSameLaneBoundary(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	rosterBody := `{
+  "xo_agent":"xo",
+  "agents":[{"name":"xo"},{"name":"adjutant"},{"name":"desk"},{"name":"foreign-xo"},{"name":"foreign-desk"}],
+  "channels":[
+    {"channel_id":"10","xo_agent":"xo","members":["adjutant","foreign-xo"],"role":"project"},
+    {"channel_id":"11","xo_agent":"adjutant","members":["desk"],"role":"project"},
+    {"channel_id":"12","xo_agent":"foreign-xo","members":["foreign-desk"],"role":"project"}
+  ]
+}`
+	orgBody := `version: 1
+root: xo
+nodes:
+  - id: xo
+    kind: coordinator
+  - id: adjutant
+    kind: adjutant
+    reports_to: xo
+  - id: desk
+    kind: desk
+    reports_to: adjutant
+  - id: foreign-xo
+    kind: coordinator
+    reports_to: xo
+  - id: foreign-desk
+    kind: desk
+    reports_to: foreign-xo
+`
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fleet-org.yaml"), []byte(orgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own := authorizeSend(cfg, "adjutant", "desk", false); !own.Allowed {
+		t.Fatalf("org-file adjutant own-lane decision = %+v", own)
+	}
+	if foreign := authorizeSend(cfg, "adjutant", "foreign-desk", false); foreign.Allowed {
+		t.Fatalf("org-file adjutant foreign decision = %+v, want blocked", foreign)
+	}
+	if reverse := authorizeSend(cfg, "foreign-desk", "adjutant", false); reverse.Allowed {
+		t.Fatalf("org-file foreign-to-adjutant decision = %+v, want blocked", reverse)
+	}
+	if override := authorizeSend(cfg, "adjutant", "foreign-desk", true); !override.Allowed || !override.Audit {
+		t.Fatalf("org-file adjutant override = %+v, want allowed+audit", override)
+	}
+	if reverseOverride := authorizeSend(cfg, "foreign-desk", "adjutant", true); !reverseOverride.Allowed || !reverseOverride.Audit {
+		t.Fatalf("org-file foreign-to-adjutant override = %+v, want allowed+audit", reverseOverride)
+	}
 }
 
 func TestAuthorizeSendDerivedRosterQuadrants(t *testing.T) {

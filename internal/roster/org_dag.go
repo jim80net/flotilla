@@ -76,6 +76,8 @@ func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
 			node := rosterDAG.Nodes[agent.Name]
 			if agent.Coordinator != nil && *agent.Coordinator {
 				node.Kind = org.KindCoordinator
+			} else if agent.adjutantTarget() != "" {
+				node.Kind = org.KindAdjutant
 			} else {
 				node.Kind = org.KindDesk
 			}
