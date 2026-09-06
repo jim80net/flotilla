@@ -85,11 +85,30 @@ func TestLandingToolsDesktopUsesTwoColumnRow(t *testing.T) {
 	if media == nil {
 		t.Fatal("landing CSS missing 721px desktop media query")
 	}
-	desktop := css[media[1]:]
-	if next := strings.Index(desktop, "@media"); next >= 0 {
-		desktop = desktop[:next]
+	end, depth := -1, 1
+	for i, r := range css[media[1]:] {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = media[1] + i
+			}
+		}
+		if end >= 0 {
+			break
+		}
 	}
+	if end < 0 {
+		t.Fatal("landing CSS has unclosed 721px desktop media query")
+	}
+	desktop := css[media[1]:end]
 	contracts := map[string][]string{
+		`#yours`: {
+			`display\s*:\s*grid\s*;`,
+			`grid-template-columns\s*:\s*minmax\(\s*0\s*,\s*1fr\s*\)\s+minmax\(\s*0\s*,\s*1fr\s*\)\s*;`,
+		},
 		`#yours\s+\.band-head`: {
 			`grid-column\s*:\s*1\s*;`,
 			`margin-bottom\s*:\s*0\s*;`,
