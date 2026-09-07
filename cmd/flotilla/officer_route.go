@@ -79,36 +79,38 @@ func captureDigest(body string) string {
 // crossDriverEmptyMainComposer is the automated watch-side proof. It does not
 // add a marker regex: it asks the existing registered drivers to inspect the
 // same pane. Any unsafe state report vetoes. A foreign driver may positively
-// report Idle + ComposerCleared; the selected driver may do so only for Grok,
-// whose prompt/footer structural proof does not depend on cursor visibility.
+// report Idle + ComposerCleared; the selected driver may do so for Grok or
+// Codex, whose prompt/footer structural proof does not depend on cursor
+// visibility. Matching-surface Codex Assess=errored is not a veto: the
+// idle-cleared composer decides (#1066), same posture as StateUnknown.
 func crossDriverEmptyMainComposer(selected surface.Driver, pane string) (bool, string) {
 	return crossDriverEmptyMainComposerWith(selected, pane, surface.RegisteredDrivers())
 }
 
 func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, candidates []surface.Driver) (bool, string) {
-	selectedGrokCleared := false
+	selectedCleared := false
 	independentClearedBy := ""
 	for _, candidate := range candidates {
 		state := candidate.Assess(pane)
-		if officerUnsafeState(state) {
+		if officerUnsafeForIdleProof(selected, state) {
 			return false, state.String() + "-veto:" + candidate.Name()
 		}
-		if state != surface.StateIdle {
+		if !officerComposerProofStateAllowed(selected, candidate, state) {
 			continue
 		}
 		probe, ok := candidate.(surface.ComposerStateProbe)
 		if ok && probe.ComposerState(pane) == surface.ComposerCleared {
 			if candidate.Name() == selected.Name() {
-				if selected.Name() == "grok" {
-					selectedGrokCleared = true
+				if selectedSurfaceAllowsOwnComposerProof(selected.Name()) {
+					selectedCleared = true
 				}
 				continue
 			}
 			independentClearedBy = candidate.Name()
 		}
 	}
-	if selectedGrokCleared {
-		return true, "selected:grok-idle-cleared"
+	if selectedCleared {
+		return true, "selected:" + selected.Name() + "-idle-cleared"
 	}
 	if independentClearedBy != "" {
 		return true, "independent-idle-cleared:" + independentClearedBy
@@ -116,8 +118,13 @@ func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, cand
 	return false, "no-independent-idle-cleared-driver"
 }
 
-func selectedGrokComposerProof(d surface.Driver, emptyProof string) bool {
-	return d.Name() == "grok" && emptyProof == "selected:grok-idle-cleared"
+func selectedSurfaceAllowsOwnComposerProof(name string) bool {
+	return name == "grok" || name == "codex"
+}
+
+func selectedMatchingSurfaceComposerProof(d surface.Driver, emptyProof string) bool {
+	name := d.Name()
+	return selectedSurfaceAllowsOwnComposerProof(name) && emptyProof == "selected:"+name+"-idle-cleared"
 }
 
 func officerUnsafeState(state surface.State) bool {
@@ -125,6 +132,38 @@ func officerUnsafeState(state surface.State) bool {
 	case surface.StateWorking, surface.StateAwaitingApproval, surface.StateAwaitingInput,
 		surface.StateWedge, surface.StateErrored, surface.StateShell:
 		return true
+	default:
+		return false
+	}
+}
+
+// officerUnsafeForIdleProof keeps Working / awaiting / shell / wedge as vetoes.
+// Matching-surface Codex StateErrored is the classifier gap officer-route exists
+// to route around (#1066); foreign drivers that share SessionUncooperative also
+// report errored on that pane and must not veto the selected Codex composer.
+func officerUnsafeForIdleProof(selected surface.Driver, state surface.State) bool {
+	if state == surface.StateErrored && selected.Name() == "codex" {
+		return false
+	}
+	return officerUnsafeState(state)
+}
+
+func officerComposerProofStateAllowed(selected, candidate surface.Driver, state surface.State) bool {
+	if state == surface.StateIdle {
+		return true
+	}
+	if candidate.Name() != selected.Name() || selected.Name() != "codex" {
+		return false
+	}
+	return state == surface.StateErrored || state == surface.StateUnknown
+}
+
+func officerSampleStateAllowed(d surface.Driver, state surface.State) bool {
+	switch state {
+	case surface.StateIdle, surface.StateUnknown:
+		return true
+	case surface.StateErrored:
+		return d.Name() == "codex"
 	default:
 		return false
 	}
@@ -176,12 +215,13 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 	}
 	for i, sample := range []officerIdleSample{first, second} {
 		// StateUnknown is the expert failure this independent proof exists to
-		// route around. It is neither positive-idle evidence nor a veto; the
-		// stable cursor/capture + independent empty-composer proof decides it.
-		if sample.state != surface.StateIdle && sample.state != surface.StateUnknown {
+		// route around. Matching-surface Codex StateErrored is the same class
+		// (#1066): neither positive-idle evidence nor a veto. The stable
+		// cursor/capture + empty-composer proof decides it.
+		if !officerSampleStateAllowed(d, sample.state) {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported %s", i+1, sample.state)
 		}
-		if sample.inMode || (!sample.visible && !selectedGrokComposerProof(d, sample.emptyProof)) {
+		if sample.inMode || (!sample.visible && !selectedMatchingSurfaceComposerProof(d, sample.emptyProof)) {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d has unsafe cursor state (visible=%t mode=%t)", i+1, sample.visible, sample.inMode)
 		}
 		if expectedCaptureSHA != "" && sample.captureSHA != expectedCaptureSHA {
@@ -201,12 +241,15 @@ func officerIdleProofDescription(proof officerIdleProof) string {
 	cursorProof := "visible-cursor"
 	if !proof.Visible {
 		cursorProof = "selected-grok-structural-composer-with-hidden-cursor"
+		if strings.HasPrefix(proof.EmptyProof, "selected:codex-") {
+			cursorProof = "selected-codex-structural-composer-with-hidden-cursor"
+		}
 	}
 	return "two idle/stable " + cursorProof + " samples + " + proof.EmptyProof
 }
 
 func officerComposerDispositionAllowed(d surface.Driver, proof officerIdleProof, disposition surface.ComposerDisposition) bool {
-	if selectedGrokComposerProof(d, proof.EmptyProof) {
+	if selectedMatchingSurfaceComposerProof(d, proof.EmptyProof) {
 		return disposition == surface.ComposerCleared
 	}
 	if disposition == surface.ComposerUndetermined {

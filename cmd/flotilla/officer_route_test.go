@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -456,5 +457,103 @@ func TestOfficerDetectorUnknownOverridesOnlyWithAuditedIndependentIdleProof(t *t
 	deps.audit = func(officerRouteAudit) error { return errors.New("disk full") }
 	if officerDetectorIdleOverride(drv, "desk", "%1", "grok", "grok", deps) {
 		t.Fatal("audit failure authorized detector override")
+	}
+}
+
+func TestOfficerRouteMatchingSurfaceCodexErroredIdleClearedDelivers(t *testing.T) {
+	const capture = "transcript\n› \n/ for commands\ngpt-5.6"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "frontend", "%12", "codex", "codex", "work", "", false, "ErrTransient", deps)
+	if err != nil || !submitted {
+		t.Fatalf("matching-surface Codex errored+cleared err=%v submitted=%t", err, submitted)
+	}
+	if len(audits) != 2 || audits[0].SelectedDriver != "codex" || audits[0].PreState != surface.StateErrored.String() || audits[0].ClassifierDisposition != surface.ComposerCleared.String() {
+		t.Fatalf("audit = %+v", audits)
+	}
+	if audits[0].Proof != "two idle/stable visible-cursor samples + selected:codex-idle-cleared" {
+		t.Fatalf("proof = %q", audits[0].Proof)
+	}
+}
+
+func TestOfficerRouteMatchingSurfaceCodexErroredWithoutClearedRefuses(t *testing.T) {
+	const capture = "dead-end banner\nno composer"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerUndetermined}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	if err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "backend", "%13", "codex", "codex", "work", "", false, "ErrTransient", deps); err == nil {
+		t.Fatal("Codex errored without cleared composer unexpectedly authorized")
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
+	}
+}
+
+func TestOfficerRouteGrokErroredStillRefuses(t *testing.T) {
+	const capture = "Provider stopped\n│ ❯ │"
+	drv := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "frontend", "%12", "grok", "grok", "work", "", false, "ErrTransient", deps)
+	if err == nil || !strings.Contains(err.Error(), "idle proof sample 1 reported errored") {
+		t.Fatalf("Grok errored err=%v, want idle proof sample 1 reported errored", err)
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
+	}
+}
+
+func TestCrossDriverSelectedCodexErroredClearedIgnoresForeignErroredAndWorkingVetoes(t *testing.T) {
+	selected := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	foreignErrored := &officerRouteDriver{name: "claude-code", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerUndetermined}
+	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected, foreignErrored}); !ok || detail != "selected:codex-idle-cleared" {
+		t.Fatalf("Codex errored+cleared vs foreign errored = ok=%t detail=%q", ok, detail)
+	}
+	working := &officerRouteDriver{name: "grok", states: []surface.State{surface.StateWorking}, disposition: surface.ComposerUndetermined}
+	if ok, detail := crossDriverEmptyMainComposerWith(selected, "%1", []surface.Driver{selected, working}); ok || detail != "working-veto:grok" {
+		t.Fatalf("foreign working veto = ok=%t detail=%q", ok, detail)
+	}
+}
+
+func TestOfficerRouteCodexHiddenCursorAllowsOwnClearedProof(t *testing.T) {
+	const capture = "transcript\n› \n/ for commands\ngpt-5.6"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.cursor = func(string) (int, int, bool, bool, error) { return 2, 1, false, false, nil }
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "frontend", "%12", "codex", "codex", "work", "", false, "ErrTransient", deps)
+	if err != nil || !submitted {
+		t.Fatalf("Codex hidden-cursor route err=%v submitted=%t", err, submitted)
+	}
+	if audits[0].Proof != "two idle/stable selected-codex-structural-composer-with-hidden-cursor samples + selected:codex-idle-cleared" {
+		t.Fatalf("hidden-cursor proof = %q", audits[0].Proof)
+	}
+}
+
+func TestOfficerComposerDispositionSelectedCodexProofRequiresCleared(t *testing.T) {
+	codex := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}}
+	proof := officerIdleProof{Visible: true, EmptyProof: "selected:codex-idle-cleared"}
+	if !officerComposerDispositionAllowed(codex, proof, surface.ComposerCleared) {
+		t.Fatal("selected Codex proof must allow Cleared")
+	}
+	if officerComposerDispositionAllowed(codex, proof, surface.ComposerUndetermined) {
+		t.Fatal("selected Codex proof must not treat Undetermined as a classifier gap")
 	}
 }
