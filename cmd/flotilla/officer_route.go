@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/codexstore"
+	"github.com/jim80net/flotilla/internal/codextrust"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -447,17 +448,9 @@ func officerCodexSessionLive(_ surface.Driver, pane string) (bool, string) {
 	return true, "pid-bound-codex-session"
 }
 
-// officerCodexHome is the Codex config root this process honors: CODEX_HOME
-// when nonempty (same rule as codextrust.ConfigPath / codex_trust.go), else
-// ~/.codex. Watch inherits the watch unit's environment, so a set CODEX_HOME
-// must be the liveness store or matching-surface idle never delivers.
+// officerCodexHome is the Codex config root this process honors. The lookup
+// lives in codextrust.Home so ConfigPath and officer-route liveness cannot
+// drift.
 func officerCodexHome() (string, error) {
-	if h := os.Getenv("CODEX_HOME"); h != "" {
-		return h, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".codex"), nil
+	return codextrust.Home()
 }
