@@ -188,6 +188,30 @@ func TestResolveRolloutForProcessEmptyMetaCWDFailsWithoutPaneCWD(t *testing.T) {
 	}
 }
 
+func TestProcessHasOpenRolloutBindsLivePaneAndFailsClosedWhenUnbound(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/frontend"
+	dir := filepath.Join(home, "sessions", "2026", "09", "07")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-09-07T10-00-00-seat.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"session_meta","payload":{"cwd":"`+cwd+`"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 700, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "700", "fd", "4")); err != nil {
+		t.Fatal(err)
+	}
+	if err := processHasOpenRollout(home, cwd, 700, proc); err != nil {
+		t.Fatalf("bound pane: %v", err)
+	}
+	if err := processHasOpenRollout(home, cwd, 701, proc); err == nil {
+		t.Fatal("missing pid must fail closed")
+	}
+}
+
 func TestResolveRolloutForProcessFailsClosed(t *testing.T) {
 	home := t.TempDir()
 	proc := t.TempDir()

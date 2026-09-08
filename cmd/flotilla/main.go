@@ -500,6 +500,7 @@ func cmdSend(args []string) error {
 		deps := officerRouteDeps{
 			capture: deliver.CapturePane, cursor: deliver.CursorSnapshot, sleep: time.Sleep, now: time.Now,
 			empty: func(surface.Driver, string) (bool, string) { return true, "officer-confirmed exact capture" },
+			live:  officerCodexSessionLive,
 			audit: func(record officerRouteAudit) error {
 				return appendOfficerRouteAudit(filepath.Join(filepath.Dir(resolvedRoster), "flotilla-officer-delivery-audit.jsonl"), record)
 			},

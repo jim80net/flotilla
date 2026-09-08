@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/codexstore"
+	"github.com/jim80net/flotilla/internal/codextrust"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -69,6 +71,10 @@ type officerRouteDeps struct {
 	audit   func(officerRouteAudit) error
 	submit  func(surface.Driver, string, string) error
 	empty   func(surface.Driver, string) (bool, string)
+	// live proves the selected session is still bound to a running process and
+	// its session store. Required before treating matching-surface Codex
+	// StateErrored as an idle-proof gap (#1066 / #1067 cubic P2).
+	live func(surface.Driver, string) (bool, string)
 }
 
 func captureDigest(body string) string {
@@ -79,36 +85,40 @@ func captureDigest(body string) string {
 // crossDriverEmptyMainComposer is the automated watch-side proof. It does not
 // add a marker regex: it asks the existing registered drivers to inspect the
 // same pane. Any unsafe state report vetoes. A foreign driver may positively
-// report Idle + ComposerCleared; the selected driver may do so only for Grok,
-// whose prompt/footer structural proof does not depend on cursor visibility.
+// report Idle + ComposerCleared; the selected driver may do so for Grok or
+// Codex, whose prompt/footer structural proof does not depend on cursor
+// visibility. Matching-surface Codex Assess=errored is not a composer veto:
+// SessionUncooperative is pane-global chrome. proveOfficerIdle still requires
+// a PID/session-store liveness probe before treating that errored sample as
+// an idle-proof gap (#1066 / #1067 cubic P2).
 func crossDriverEmptyMainComposer(selected surface.Driver, pane string) (bool, string) {
 	return crossDriverEmptyMainComposerWith(selected, pane, surface.RegisteredDrivers())
 }
 
 func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, candidates []surface.Driver) (bool, string) {
-	selectedGrokCleared := false
+	selectedCleared := false
 	independentClearedBy := ""
 	for _, candidate := range candidates {
 		state := candidate.Assess(pane)
-		if officerUnsafeState(state) {
+		if officerUnsafeForIdleProof(selected, state) {
 			return false, state.String() + "-veto:" + candidate.Name()
 		}
-		if state != surface.StateIdle {
+		if !officerComposerProofStateAllowed(selected, candidate, state) {
 			continue
 		}
 		probe, ok := candidate.(surface.ComposerStateProbe)
 		if ok && probe.ComposerState(pane) == surface.ComposerCleared {
 			if candidate.Name() == selected.Name() {
-				if selected.Name() == "grok" {
-					selectedGrokCleared = true
+				if selectedSurfaceAllowsOwnComposerProof(selected.Name()) {
+					selectedCleared = true
 				}
 				continue
 			}
 			independentClearedBy = candidate.Name()
 		}
 	}
-	if selectedGrokCleared {
-		return true, "selected:grok-idle-cleared"
+	if selectedCleared {
+		return true, "selected:" + selected.Name() + "-idle-cleared"
 	}
 	if independentClearedBy != "" {
 		return true, "independent-idle-cleared:" + independentClearedBy
@@ -116,8 +126,13 @@ func crossDriverEmptyMainComposerWith(selected surface.Driver, pane string, cand
 	return false, "no-independent-idle-cleared-driver"
 }
 
-func selectedGrokComposerProof(d surface.Driver, emptyProof string) bool {
-	return d.Name() == "grok" && emptyProof == "selected:grok-idle-cleared"
+func selectedSurfaceAllowsOwnComposerProof(name string) bool {
+	return name == "grok" || name == "codex"
+}
+
+func selectedMatchingSurfaceComposerProof(d surface.Driver, emptyProof string) bool {
+	name := d.Name()
+	return selectedSurfaceAllowsOwnComposerProof(name) && emptyProof == "selected:"+name+"-idle-cleared"
 }
 
 func officerUnsafeState(state surface.State) bool {
@@ -125,6 +140,38 @@ func officerUnsafeState(state surface.State) bool {
 	case surface.StateWorking, surface.StateAwaitingApproval, surface.StateAwaitingInput,
 		surface.StateWedge, surface.StateErrored, surface.StateShell:
 		return true
+	default:
+		return false
+	}
+}
+
+// officerUnsafeForIdleProof keeps Working / awaiting / shell / wedge as vetoes.
+// Matching-surface Codex StateErrored is not a composer-proof veto: the banner
+// is pane-global (foreign drivers share SessionUncooperative). A dead session
+// is refused later by the PID/session-store probe, not by driver name alone.
+func officerUnsafeForIdleProof(selected surface.Driver, state surface.State) bool {
+	if state == surface.StateErrored && selected.Name() == "codex" {
+		return false
+	}
+	return officerUnsafeState(state)
+}
+
+func officerComposerProofStateAllowed(selected, candidate surface.Driver, state surface.State) bool {
+	if state == surface.StateIdle {
+		return true
+	}
+	if candidate.Name() != selected.Name() || selected.Name() != "codex" {
+		return false
+	}
+	return state == surface.StateErrored || state == surface.StateUnknown
+}
+
+func officerSampleStateAllowed(d surface.Driver, state surface.State) bool {
+	switch state {
+	case surface.StateIdle, surface.StateUnknown:
+		return true
+	case surface.StateErrored:
+		return d.Name() == "codex"
 	default:
 		return false
 	}
@@ -176,12 +223,24 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 	}
 	for i, sample := range []officerIdleSample{first, second} {
 		// StateUnknown is the expert failure this independent proof exists to
-		// route around. It is neither positive-idle evidence nor a veto; the
-		// stable cursor/capture + independent empty-composer proof decides it.
-		if sample.state != surface.StateIdle && sample.state != surface.StateUnknown {
+		// route around. Matching-surface Codex StateErrored is the same class
+		// only after PID/session-store liveness succeeds (#1067 cubic P2).
+		if !officerSampleStateAllowed(d, sample.state) {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported %s", i+1, sample.state)
 		}
-		if sample.inMode || (!sample.visible && !selectedGrokComposerProof(d, sample.emptyProof)) {
+		if sample.state == surface.StateErrored {
+			// Each errored sample re-proves PID + open rollout. The
+			// officerIdleSettle window exists so a session that dies
+			// between samples refuses; do not hoist this to once-per-proof.
+			if deps.live == nil {
+				return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported errored without a session-liveness probe", i+1)
+			}
+			ok, detail := deps.live(d, pane)
+			if !ok {
+				return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported errored without a live session (%s)", i+1, detail)
+			}
+		}
+		if sample.inMode || (!sample.visible && !selectedMatchingSurfaceComposerProof(d, sample.emptyProof)) {
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d has unsafe cursor state (visible=%t mode=%t)", i+1, sample.visible, sample.inMode)
 		}
 		if expectedCaptureSHA != "" && sample.captureSHA != expectedCaptureSHA {
@@ -201,12 +260,15 @@ func officerIdleProofDescription(proof officerIdleProof) string {
 	cursorProof := "visible-cursor"
 	if !proof.Visible {
 		cursorProof = "selected-grok-structural-composer-with-hidden-cursor"
+		if strings.HasPrefix(proof.EmptyProof, "selected:codex-") {
+			cursorProof = "selected-codex-structural-composer-with-hidden-cursor"
+		}
 	}
 	return "two idle/stable " + cursorProof + " samples + " + proof.EmptyProof
 }
 
 func officerComposerDispositionAllowed(d surface.Driver, proof officerIdleProof, disposition surface.ComposerDisposition) bool {
-	if selectedGrokComposerProof(d, proof.EmptyProof) {
+	if selectedMatchingSurfaceComposerProof(d, proof.EmptyProof) {
 		return disposition == surface.ComposerCleared
 	}
 	if disposition == surface.ComposerUndetermined {
@@ -354,8 +416,41 @@ func watchOfficerRouteDeps(rosterDir string) officerRouteDeps {
 		sleep:   time.Sleep,
 		now:     time.Now,
 		empty:   crossDriverEmptyMainComposer,
+		live:    officerCodexSessionLive,
 		audit: func(record officerRouteAudit) error {
 			return appendOfficerRouteAudit(filepath.Join(rosterDir, "flotilla-officer-delivery-audit.jsonl"), record)
 		},
 	}
+}
+
+// officerCodexSessionLive is the #1067 cubic P2 gate: a matching-surface Codex
+// StateErrored sample is an idle-proof gap only when the pane PID is still
+// running and the Codex session store still holds an open rollout for that PID.
+func officerCodexSessionLive(_ surface.Driver, pane string) (bool, string) {
+	pid, err := deliver.PanePID(pane)
+	if err != nil {
+		return false, err.Error()
+	}
+	if !deliver.ProcessAlive(pid) {
+		return false, "pane pid not running"
+	}
+	cwd, err := deliver.PaneCWD(pane)
+	if err != nil {
+		return false, err.Error()
+	}
+	home, err := officerCodexHome()
+	if err != nil {
+		return false, err.Error()
+	}
+	if err := codexstore.ProcessHasOpenRollout(home, cwd, pid); err != nil {
+		return false, err.Error()
+	}
+	return true, "pid-bound-codex-session"
+}
+
+// officerCodexHome is the Codex config root this process honors. The lookup
+// lives in codextrust.Home so ConfigPath and officer-route liveness cannot
+// drift.
+func officerCodexHome() (string, error) {
+	return codextrust.Home()
 }

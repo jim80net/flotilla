@@ -35,17 +35,28 @@ const (
 	updateCheckKey = "check_for_update_on_startup"
 )
 
-// ConfigPath returns the codex user config path: $CODEX_HOME/config.toml when
-// CODEX_HOME is set (codex-cli honors it), else ~/.codex/config.toml.
-func ConfigPath() (string, error) {
+// Home returns the Codex config root this process honors: $CODEX_HOME when
+// nonempty (codex-cli honors it), else ~/.codex. ConfigPath and watch
+// officer-route liveness share this lookup so a set CODEX_HOME cannot
+// silently miss the live session store.
+func Home() (string, error) {
 	if h := os.Getenv("CODEX_HOME"); h != "" {
-		return filepath.Join(h, "config.toml"), nil
+		return h, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("codextrust: resolve home for ~/.codex: %w", err)
 	}
-	return filepath.Join(home, ".codex", "config.toml"), nil
+	return filepath.Join(home, ".codex"), nil
+}
+
+// ConfigPath returns the codex user config path: Home()/config.toml.
+func ConfigPath() (string, error) {
+	home, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "config.toml"), nil
 }
 
 // SuppressStartupUpdateCheck ensures Codex does not surface its interactive

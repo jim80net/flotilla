@@ -294,6 +294,24 @@ func TestSeedConcurrentNoDuplicateTable(t *testing.T) {
 	}
 }
 
+func TestHomeHonorsCodexHome(t *testing.T) {
+	t.Setenv("CODEX_HOME", "/custom/codex-home")
+	got, err := Home()
+	if err != nil || got != "/custom/codex-home" {
+		t.Fatalf("Home with CODEX_HOME = (%q, %v)", got, err)
+	}
+	t.Setenv("CODEX_HOME", "")
+	got, err = Home()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".codex")
+	if got != want {
+		t.Errorf("Home default = %q, want %q", got, want)
+	}
+}
+
 func TestConfigPathHonorsCodexHome(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/custom/codex-home")
 	got, err := ConfigPath()
