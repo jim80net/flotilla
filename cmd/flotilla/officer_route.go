@@ -228,6 +228,9 @@ func proveOfficerIdle(d surface.Driver, pane, expectedCaptureSHA string, cleanCo
 			return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported %s", i+1, sample.state)
 		}
 		if sample.state == surface.StateErrored {
+			// Each errored sample re-proves PID + open rollout. The
+			// officerIdleSettle window exists so a session that dies
+			// between samples refuses; do not hoist this to once-per-proof.
 			if deps.live == nil {
 				return officerIdleProof{}, fmt.Errorf("idle proof sample %d reported errored without a session-liveness probe", i+1)
 			}
@@ -434,12 +437,27 @@ func officerCodexSessionLive(_ surface.Driver, pane string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	home, err := os.UserHomeDir()
+	home, err := officerCodexHome()
 	if err != nil {
 		return false, err.Error()
 	}
-	if err := codexstore.ProcessHasOpenRollout(filepath.Join(home, ".codex"), cwd, pid); err != nil {
+	if err := codexstore.ProcessHasOpenRollout(home, cwd, pid); err != nil {
 		return false, err.Error()
 	}
 	return true, "pid-bound-codex-session"
+}
+
+// officerCodexHome is the Codex config root this process honors: CODEX_HOME
+// when nonempty (same rule as codextrust.ConfigPath / codex_trust.go), else
+// ~/.codex. Watch inherits the watch unit's environment, so a set CODEX_HOME
+// must be the liveness store or matching-surface idle never delivers.
+func officerCodexHome() (string, error) {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return h, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
 }

@@ -598,3 +598,53 @@ func TestOfficerComposerDispositionSelectedCodexProofRequiresCleared(t *testing.
 		t.Fatal("selected Codex proof must not treat Undetermined as a classifier gap")
 	}
 }
+
+func TestOfficerCodexHomeUsesCODEXHOMEWhenNonempty(t *testing.T) {
+	t.Setenv("CODEX_HOME", "/custom/codex-home")
+	got, err := officerCodexHome()
+	if err != nil || got != "/custom/codex-home" {
+		t.Fatalf("officerCodexHome = (%q, %v), want CODEX_HOME", got, err)
+	}
+}
+
+func TestOfficerCodexHomeDefaultsToDotCodexWhenCODEXHOMEEmpty(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := officerCodexHome()
+	want := filepath.Join(home, ".codex")
+	if err != nil || got != want {
+		t.Fatalf("officerCodexHome = (%q, %v), want %q", got, err, want)
+	}
+}
+
+func TestOfficerRouteMatchingSurfaceCodexErroredReprovesLiveEachSample(t *testing.T) {
+	const capture = "Provider stopped\n› \n/ for commands"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	calls := 0
+	deps.live = func(surface.Driver, string) (bool, string) {
+		calls++
+		if calls == 1 {
+			return true, "pid-bound-codex-session"
+		}
+		return false, "pane pid not running"
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "backend", "%13", "codex", "codex", "work", "", false, "ErrTransient", deps)
+	if err == nil || !strings.Contains(err.Error(), "idle proof sample 2 reported errored without a live session") {
+		t.Fatalf("second-sample death err=%v, want sample 2 live-session refusal", err)
+	}
+	if calls != 2 {
+		t.Fatalf("live calls=%d, want 2 (once per errored sample across the settle interval)", calls)
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
+	}
+}
