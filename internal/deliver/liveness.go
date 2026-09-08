@@ -66,3 +66,12 @@ func parseProcessArgv(raw []byte) []string {
 func IsShell(cmd string) bool {
 	return knownShells[cmd]
 }
+
+// ProcessAlive reports whether pid still exists in procfs. pid <= 0 is not alive.
+func ProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	return err == nil
+}

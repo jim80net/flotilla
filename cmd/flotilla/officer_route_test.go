@@ -56,6 +56,11 @@ func officerDeps(capture string, audits *[]officerRouteAudit, submitted *bool) o
 	}
 }
 
+func withLiveSession(deps officerRouteDeps, ok bool, detail string) officerRouteDeps {
+	deps.live = func(surface.Driver, string) (bool, string) { return ok, detail }
+	return deps
+}
+
 func TestOfficerRouteDeliversClassifierMissWithIndependentIdleProofAndAudit(t *testing.T) {
 	const capture = "generic transcript\n  │ ❯                         │\n  ╰──── model · approve ─────╯"
 	drv := &officerRouteDriver{states: []surface.State{surface.StateIdle, surface.StateIdle}, disposition: surface.ComposerUndetermined}
@@ -465,7 +470,7 @@ func TestOfficerRouteMatchingSurfaceCodexErroredIdleClearedDelivers(t *testing.T
 	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
 	var audits []officerRouteAudit
 	submitted := false
-	deps := officerDeps(capture, &audits, &submitted)
+	deps := withLiveSession(officerDeps(capture, &audits, &submitted), true, "pid-bound-codex-session")
 	deps.empty = func(d surface.Driver, pane string) (bool, string) {
 		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
 	}
@@ -533,7 +538,7 @@ func TestOfficerRouteCodexHiddenCursorAllowsOwnClearedProof(t *testing.T) {
 	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
 	var audits []officerRouteAudit
 	submitted := false
-	deps := officerDeps(capture, &audits, &submitted)
+	deps := withLiveSession(officerDeps(capture, &audits, &submitted), true, "pid-bound-codex-session")
 	deps.cursor = func(string) (int, int, bool, bool, error) { return 2, 1, false, false, nil }
 	deps.empty = func(d surface.Driver, pane string) (bool, string) {
 		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
@@ -544,6 +549,42 @@ func TestOfficerRouteCodexHiddenCursorAllowsOwnClearedProof(t *testing.T) {
 	}
 	if audits[0].Proof != "two idle/stable selected-codex-structural-composer-with-hidden-cursor samples + selected:codex-idle-cleared" {
 		t.Fatalf("hidden-cursor proof = %q", audits[0].Proof)
+	}
+}
+
+func TestOfficerRouteMatchingSurfaceCodexErroredClearedWithoutLiveProbeRefuses(t *testing.T) {
+	const capture = "Provider stopped\n› \n/ for commands"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := officerDeps(capture, &audits, &submitted)
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "backend", "%13", "codex", "codex", "work", "", false, "ErrTransient", deps)
+	if err == nil || !strings.Contains(err.Error(), "without a session-liveness probe") {
+		t.Fatalf("nil live probe err=%v, want session-liveness probe refusal", err)
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
+	}
+}
+
+func TestOfficerRouteMatchingSurfaceCodexErroredClearedDeadSessionRefuses(t *testing.T) {
+	const capture = "Provider stopped\n› \n/ for commands"
+	drv := &officerRouteDriver{name: "codex", states: []surface.State{surface.StateErrored}, disposition: surface.ComposerCleared}
+	var audits []officerRouteAudit
+	submitted := false
+	deps := withLiveSession(officerDeps(capture, &audits, &submitted), false, "pane pid not running")
+	deps.empty = func(d surface.Driver, pane string) (bool, string) {
+		return crossDriverEmptyMainComposerWith(d, pane, []surface.Driver{d})
+	}
+	err := deliverOfficerRoute(drv, "watch-daemon", "automated-independent-idle-proof", "watch-submit", "backend", "%13", "codex", "codex", "work", "", false, "ErrTransient", deps)
+	if err == nil || !strings.Contains(err.Error(), "without a live session (pane pid not running)") {
+		t.Fatalf("dead session err=%v, want live-session refusal", err)
+	}
+	if submitted || len(audits) != 0 {
+		t.Fatalf("submitted=%t audits=%d, want false/0", submitted, len(audits))
 	}
 }
 

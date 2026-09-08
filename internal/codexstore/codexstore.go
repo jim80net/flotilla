@@ -74,6 +74,22 @@ func LatestResultForProcess(codexHome, cwd string, panePID int) (string, error) 
 	return lastCompletedTurnFinal(path)
 }
 
+// ProcessHasOpenRollout reports whether the pane PID's process tree still holds
+// open a Codex rollout under codexHome. That is session-store liveness: the TUI
+// is bound to a live session file, not merely named "codex". A dead or unbound
+// process fails closed.
+func ProcessHasOpenRollout(codexHome, cwd string, panePID int) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
+	}
+	return processHasOpenRollout(codexHome, cwd, panePID, "/proc")
+}
+
+func processHasOpenRollout(codexHome, cwd string, panePID int, procRoot string) error {
+	_, err := rolloutPathsForProcess(codexHome, cwd, panePID, procRoot)
+	return err
+}
+
 // ReplyAfter returns the agent reply following the latest user entry carrying operatorMsg.
 func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, err error) {
 	path, err := resolveRolloutPath(codexHome, cwd)
